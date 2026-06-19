@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from fastapi.testclient import TestClient
 
 from specpilot_ai.api.main import app
@@ -59,6 +61,7 @@ def test_admin_page_exposes_review_console() -> None:
     assert response.status_code == 200
     assert "SpecPilot AI Admin" in response.text
     assert "소스 수집" in response.text
+    assert "URL 인입" in response.text
     assert "발송 큐" in response.text
     assert "알림 발송 채널" in response.text
     assert "발송 시도" in response.text
@@ -498,6 +501,7 @@ def test_alert_preview_endpoint_returns_three_targets() -> None:
 
 
 def test_source_collection_and_admin_review_flow() -> None:
+    source_slug = uuid4().hex[:8]
     status = client.get("/sources/status")
     assert status.status_code == 200
     assert len(status.json()) >= 4
@@ -515,10 +519,57 @@ def test_source_collection_and_admin_review_flow() -> None:
     assert payload["candidates"]
     assert payload["review_queue"]
 
+    ingested = client.post(
+        "/sources/ingest-url",
+        json={
+            "url": f"https://example.com/product/creator-pc-{source_slug}",
+            "category": "desktop_pc",
+            "kind": "price",
+            "expected_model": "Creator RTX 4070 PC",
+            "seller": "Example Store",
+            "html": """
+            <html>
+              <head>
+                <title>Creator RTX 4070 PC | Example Store</title>
+                <meta name="description" content="32GB RAM, 1TB SSD 구성의 영상 편집 PC">
+              </head>
+              <body>
+                <h1>Creator RTX 4070 PC</h1>
+                <p>최종 결제 금액 1,899,000원</p>
+                <p>QHD 144Hz 게임과 영상 편집 추천 구성</p>
+              </body>
+            </html>
+            """,
+        },
+    )
+    assert ingested.status_code == 200
+    ingested_payload = ingested.json()
+    assert ingested_payload["candidate"]["adapter_id"] == "operator_url_ingest"
+    assert ingested_payload["candidate"]["extracted_price_krw"] == 1_899_000
+    assert ingested_payload["candidate"]["needs_review"] is True
+    assert ingested_payload["review_item"]["status"] == "pending"
+    assert "HTML 스냅샷" in ingested_payload["extraction_notes"][0]
+
+    blocked_url = client.post(
+        "/sources/ingest-url",
+        json={
+            "url": "http://127.0.0.1/internal",
+            "category": "desktop_pc",
+            "kind": "price",
+            "expected_model": "blocked",
+            "html": "<html><title>blocked</title></html>",
+        },
+    )
+    assert blocked_url.status_code == 400
+
     reviews = client.get("/admin/reviews")
     assert reviews.status_code == 200
     review_items = reviews.json()
     assert review_items
+    assert any(
+        item["source"]["source_id"] == ingested_payload["candidate"]["source_id"]
+        for item in review_items
+    )
 
     decision = client.post(
         f"/admin/reviews/{review_items[0]['review_id']}/decision",

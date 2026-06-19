@@ -719,6 +719,16 @@ class SourceCollectionResponse(BaseModel):
     review_queue: list[SourceCandidate]
 
 
+class SourceUrlIngestRequest(BaseModel):
+    url: str = Field(min_length=8)
+    category: Category = Category.desktop_pc
+    kind: SourceKind = SourceKind.price
+    expected_model: str = ""
+    source_name: str = "operator_url"
+    seller: str | None = None
+    html: str = ""
+
+
 class ReviewQueueItem(BaseModel):
     review_id: str
     source: SourceCandidate
@@ -727,6 +737,13 @@ class ReviewQueueItem(BaseModel):
     created_at: str
     resolved_at: str | None = None
     reviewer: str | None = None
+
+
+class SourceUrlIngestResponse(BaseModel):
+    candidate: SourceCandidate
+    review_item: ReviewQueueItem | None = None
+    fetched_live: bool = False
+    extraction_notes: list[str] = Field(default_factory=list)
 
 
 class ReviewDecisionRequest(BaseModel):

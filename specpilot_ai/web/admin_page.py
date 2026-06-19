@@ -102,8 +102,11 @@ def admin_page_html() -> str:
         <h1>추천 근거를 공개 전에 검수합니다</h1>
         <p>가격, 리뷰, 벤치마크 어댑터 상태와 검수 대기 근거를 확인하고 승인/반려할 수 있습니다.</p>
         <input id="source-query" value="영상 편집과 게임용 데스크톱 200만원 QHD 144Hz" />
+        <input id="source-url" value="https://example.com/product/specpilot" />
+        <input id="source-model" value="RTX 4070 영상 편집 PC" />
         <div class="actions">
           <button class="primary" id="collect">소스 수집</button>
+          <button class="secondary" id="ingest-url">URL 인입</button>
           <button class="secondary" id="refresh">새로고침</button>
         </div>
       </div>
@@ -383,6 +386,20 @@ def admin_page_html() -> str:
           query: document.querySelector('#source-query').value,
           category: 'desktop_pc',
           limit: 16
+        })
+      });
+      await loadDashboard();
+    });
+    document.querySelector('#ingest-url').addEventListener('click', async () => {
+      await fetch('/sources/ingest-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: document.querySelector('#source-url').value,
+          category: 'desktop_pc',
+          kind: 'price',
+          expected_model: document.querySelector('#source-model').value,
+          source_name: 'admin_console'
         })
       });
       await loadDashboard();

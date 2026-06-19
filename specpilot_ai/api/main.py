@@ -40,6 +40,8 @@ from specpilot_ai.core.models import (
     SourceAdapterStatus,
     SourceCollectionRequest,
     SourceCollectionResponse,
+    SourceUrlIngestRequest,
+    SourceUrlIngestResponse,
     TraceEvent,
     TraceRunSummary,
     TraceSpanRecord,
@@ -51,6 +53,7 @@ from specpilot_ai.graph.product_graph import pc_purchase_graph_schema
 from specpilot_ai.services.intake import diagnose_intake
 from specpilot_ai.services.trust import build_trust_policy
 from specpilot_ai.sources.collector import SourceCollector
+from specpilot_ai.sources.url_ingestion import ingest_source_url
 from specpilot_ai.storage.sqlite_store import SpecPilotStore
 from specpilot_ai.web.admin_page import admin_page_html
 from specpilot_ai.web.launch_page import launch_page_html
@@ -515,6 +518,17 @@ def collect_sources(request: SourceCollectionRequest) -> SourceCollectionRespons
     response = _collector().collect(request)
     review_items = _collector().build_review_items(response.review_queue)
     _store().add_review_items(review_items)
+    return response
+
+
+@app.post("/sources/ingest-url", response_model=SourceUrlIngestResponse)
+def ingest_url_source(request: SourceUrlIngestRequest) -> SourceUrlIngestResponse:
+    try:
+        response = ingest_source_url(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if response.review_item is not None:
+        _store().add_review_items([response.review_item])
     return response
 
 
