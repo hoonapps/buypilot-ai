@@ -261,6 +261,19 @@ class ProductCriteriaMatch(BaseModel):
     items: list[CriterionMatchItem] = Field(default_factory=list)
 
 
+class PurchaseStressTest(BaseModel):
+    scenario: str
+    label: str
+    assumption: str
+    status: CheckStatus
+    budget_krw: int | None = None
+    selected_product_id: str | None = None
+    selected_model_name: str | None = None
+    price_gap_krw: int = 0
+    impact: str
+    recommendation: str
+
+
 class PurchaseExecutionPlan(BaseModel):
     product_id: str | None = None
     model_name: str | None = None
@@ -292,6 +305,7 @@ class PurchaseReport(BaseModel):
     purchase_decision: PurchaseDecision | None = None
     scenario_options: list[ScenarioOption] = Field(default_factory=list)
     criteria_matches: list[ProductCriteriaMatch] = Field(default_factory=list)
+    stress_tests: list[PurchaseStressTest] = Field(default_factory=list)
     execution_plan: PurchaseExecutionPlan | None = None
     final_pick_id: str | None = None
 

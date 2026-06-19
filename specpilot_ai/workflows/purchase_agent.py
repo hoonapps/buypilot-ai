@@ -25,6 +25,7 @@ from specpilot_ai.core.models import (
     PurchaseDecision,
     PurchaseExecutionPlan,
     PurchaseReport,
+    PurchaseStressTest,
     Recommendation,
     ReviewInsight,
     ScenarioOption,
@@ -424,6 +425,12 @@ def report_writer(state: PurchaseState) -> PurchaseState:
     )
     scenario_options = _scenario_options(ranked[:5], products, prices, reviews)
     criteria_matches = _criteria_matches(ranked[:5], products, state["criteria"])
+    stress_tests = _stress_tests(
+        recommendations,
+        comparison_table,
+        state["criteria"],
+        criteria_matches,
+    )
     execution_plan = _execution_plan(
         recommendations,
         purchase_decision,
@@ -458,6 +465,7 @@ def report_writer(state: PurchaseState) -> PurchaseState:
         purchase_decision=purchase_decision,
         scenario_options=scenario_options,
         criteria_matches=criteria_matches,
+        stress_tests=stress_tests,
         execution_plan=execution_plan,
         final_pick_id=recommendations[0].product.id if recommendations else None,
     )
@@ -834,6 +842,146 @@ def _criteria_matches(
             )
         )
     return matches
+
+
+def _stress_tests(
+    recommendations: list[Recommendation],
+    comparison_table: list[ComparisonRow],
+    criteria: PurchaseCriteria,
+    criteria_matches: list[ProductCriteriaMatch],
+) -> list[PurchaseStressTest]:
+    if not recommendations:
+        return [
+            PurchaseStressTest(
+                scenario="candidate_shortage",
+                label="후보 부족",
+                assumption="비교 가능한 후보가 충분하지 않은 상태",
+                status=CheckStatus.blocker,
+                impact="예산이나 조건을 바꿔도 신뢰할 수 있는 선택지를 확정할 수 없습니다.",
+                recommendation="예산, 용도, 필수 조건을 구체화하고 후보 수집을 다시 실행하세요.",
+            )
+        ]
+
+    top = recommendations[0]
+    top_match = next(
+        (match for match in criteria_matches if match.product_id == top.product.id),
+        None,
+    )
+    base_budget = criteria.budget_krw or top.price.effective_price_krw
+    reduced_budget = int(base_budget * 0.9)
+    expanded_budget = int(base_budget * 1.1)
+    ranked_rows = sorted(
+        comparison_table,
+        key=lambda row: (row.rank is None, row.rank or 99, row.effective_price_krw),
+    )
+
+    def best_under(budget: int) -> ComparisonRow | None:
+        affordable = [row for row in ranked_rows if row.effective_price_krw <= budget]
+        return affordable[0] if affordable else None
+
+    def premium_under(budget: int) -> ComparisonRow:
+        premium = [
+            row
+            for row in ranked_rows
+            if row.effective_price_krw <= budget
+            and row.effective_price_krw >= top.price.effective_price_krw
+        ]
+        if not premium:
+            return ranked_rows[0]
+        return sorted(premium, key=lambda row: (row.rank or 99, -row.effective_price_krw))[0]
+
+    reduced_pick = best_under(reduced_budget)
+    if reduced_pick is None:
+        reduced = PurchaseStressTest(
+            scenario="budget_minus_10",
+            label="예산 10% 절감",
+            assumption=f"실사용 예산을 {reduced_budget:,}원으로 낮춘 경우",
+            status=CheckStatus.blocker,
+            budget_krw=reduced_budget,
+            price_gap_krw=top.price.effective_price_krw - reduced_budget,
+            impact="TOP 5 후보 중 절감 예산 안에서 바로 결제 가능한 선택지가 없습니다.",
+            recommendation=(
+                "예산을 회복하거나 RAM/SSD/그래픽카드 체급 중 하나를 낮춰 "
+                "다시 비교하세요."
+            ),
+        )
+    else:
+        changed = reduced_pick.product_id != top.product.id
+        reduced = PurchaseStressTest(
+            scenario="budget_minus_10",
+            label="예산 10% 절감",
+            assumption=f"실사용 예산을 {reduced_budget:,}원으로 낮춘 경우",
+            status=CheckStatus.warning if changed else CheckStatus.ok,
+            budget_krw=reduced_budget,
+            selected_product_id=reduced_pick.product_id,
+            selected_model_name=reduced_pick.model_name,
+            price_gap_krw=max(0, reduced_pick.effective_price_krw - reduced_budget),
+            impact=(
+                f"1순위 대신 {reduced_pick.model_name}로 변경해야 예산을 맞출 수 있습니다."
+                if changed
+                else "1순위 후보가 절감 예산 안에서도 유지됩니다."
+            ),
+            recommendation=(
+                "절감 모드에서는 성능 여유나 업그레이드 폭이 줄어드는지 다시 확인하세요."
+                if changed
+                else "가격이 유지된다면 절감 예산에서도 결제를 진행할 수 있습니다."
+            ),
+        )
+
+    expanded_pick = premium_under(expanded_budget)
+    expanded = PurchaseStressTest(
+        scenario="budget_plus_10",
+        label="예산 10% 여유",
+        assumption=f"실사용 예산을 {expanded_budget:,}원까지 늘릴 수 있는 경우",
+        status=CheckStatus.ok,
+        budget_krw=expanded_budget,
+        selected_product_id=expanded_pick.product_id,
+        selected_model_name=expanded_pick.model_name,
+        price_gap_krw=max(0, expanded_pick.effective_price_krw - expanded_budget),
+        impact=(
+            f"{expanded_pick.model_name}까지 검토 범위에 들어옵니다."
+            if expanded_pick.product_id != top.product.id
+            else "추가 예산을 넣어도 현재 1순위의 균형 점수가 가장 좋습니다."
+        ),
+        recommendation=(
+            "예산을 늘릴 때는 체감 성능 상승이 소음, 발열, 전력 리스크보다 큰지 확인하세요."
+        ),
+    )
+
+    if top_match is None:
+        strict_status = CheckStatus.warning
+        strict_impact = "입력 조건 매트릭스가 없어 엄격 조건 적용 결과를 확정하기 어렵습니다."
+        strict_recommendation = "필수 조건과 제외 조건을 추가한 뒤 다시 분석하세요."
+    elif top_match.blocker_count:
+        strict_status = CheckStatus.blocker
+        strict_impact = f"차단 조건 {top_match.blocker_count}개 때문에 1순위 결제를 멈춰야 합니다."
+        strict_recommendation = "차단 항목을 해소하거나 다른 후보로 전환하세요."
+    elif top_match.warning_count:
+        strict_status = CheckStatus.warning
+        strict_impact = (
+            f"확인 필요 조건 {top_match.warning_count}개가 남아 "
+            "판매자 확인이 필요합니다."
+        )
+        strict_recommendation = "판매자 확인 질문으로 옵션명과 구성표를 받아 조건을 확정하세요."
+    else:
+        strict_status = CheckStatus.ok
+        strict_impact = "입력한 필수 조건과 제외 조건을 엄격하게 적용해도 1순위가 유지됩니다."
+        strict_recommendation = "가격과 재고만 마지막으로 확인하면 결제 판단이 가능합니다."
+
+    strict_conditions = PurchaseStressTest(
+        scenario="strict_conditions",
+        label="조건 강화",
+        assumption="필수 조건과 제외 조건을 보수적으로 모두 적용한 경우",
+        status=strict_status,
+        budget_krw=base_budget,
+        selected_product_id=top.product.id,
+        selected_model_name=top.product.model_name,
+        price_gap_krw=max(0, top.price.effective_price_krw - base_budget),
+        impact=strict_impact,
+        recommendation=strict_recommendation,
+    )
+
+    return [reduced, expanded, strict_conditions]
 
 
 def _execution_plan(

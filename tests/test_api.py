@@ -17,6 +17,7 @@ def test_launch_page_exposes_product_ui() -> None:
     assert "공유 링크 생성" in response.text
     assert "구매 판정" in response.text
     assert "대안 시나리오" in response.text
+    assert "예산/조건 스트레스 테스트" in response.text
     assert "조건 충족 매트릭스" in response.text
     assert "구매 실행 패키지" in response.text
     assert "판매자 확인 질문" in response.text
@@ -95,6 +96,8 @@ def test_analyze_endpoint_returns_trace_and_alerts() -> None:
     assert len(payload["report"]["scenario_options"]) == 3
     assert len(payload["report"]["criteria_matches"]) == 5
     assert payload["report"]["criteria_matches"][0]["coverage_score"] > 0
+    assert len(payload["report"]["stress_tests"]) == 3
+    assert payload["report"]["stress_tests"][0]["impact"]
     assert payload["report"]["execution_plan"]["checkout_steps"]
     assert payload["report"]["execution_plan"]["seller_questions"]
     assert payload["report"]["top_recommendations"][0]["price"]["effective_price_krw"] > 0
@@ -178,6 +181,7 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     assert "후보 비교표" in public_page.text
     assert "결제 전 체크리스트" in public_page.text
     assert "대안 시나리오" in public_page.text
+    assert "예산/조건 스트레스 테스트" in public_page.text
     assert "조건 충족 매트릭스" in public_page.text
     assert "구매 실행 패키지" in public_page.text
     assert "판매자 확인 질문" in public_page.text

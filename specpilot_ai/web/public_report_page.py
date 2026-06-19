@@ -33,6 +33,18 @@ def public_report_html(report: PublicReport) -> str:
         """
         for item in purchase.scenario_options
     )
+    stress_cards = "\n".join(
+        f"""
+        <article class="card">
+          <span class="rank">{escape(item.label)}</span>
+          <h3>{escape(item.selected_model_name or item.status)}</h3>
+          <p>{escape(item.assumption)}</p>
+          <p><strong>{escape(item.status)}</strong> · {escape(item.impact)}</p>
+          <p>{escape(item.recommendation)}</p>
+        </article>
+        """
+        for item in purchase.stress_tests
+    )
     rows = "\n".join(
         f"""
         <tr>
@@ -199,6 +211,10 @@ def public_report_html(report: PublicReport) -> str:
     <section class="section">
       <h2>대안 시나리오</h2>
       <div class="grid cards">{scenario_cards}</div>
+    </section>
+    <section class="section">
+      <h2>예산/조건 스트레스 테스트</h2>
+      <div class="grid cards">{stress_cards}</div>
     </section>
     <section class="two section">
       <div class="panel">

@@ -294,6 +294,15 @@ def launch_page_html() -> str:
           <td>${item.summary}</td>
         </tr>
       `).join('');
+      const stressCards = (report.stress_tests || []).map((item) => `
+        <article class="card">
+          <div class="rank">${item.label}</div>
+          <h3>${item.selected_model_name || item.status}</h3>
+          <p>${item.assumption}</p>
+          <p><strong>${item.status}</strong> · ${item.impact}</p>
+          <p>${item.recommendation}</p>
+        </article>
+      `).join('');
       const alerts = report.price_alerts.map((alert) => `
         <li>${alert.product_id}: 목표가 ${won(alert.target_price_krw)} / ${alert.recheck_interval_days}일마다 재확인</li>
       `).join('');
@@ -340,6 +349,10 @@ def launch_page_html() -> str:
         <section class="section">
           <h3>대안 시나리오</h3>
           <div class="grid cards">${scenarioCards}</div>
+        </section>
+        <section class="section">
+          <h3>예산/조건 스트레스 테스트</h3>
+          <div class="grid cards">${stressCards}</div>
         </section>
         <section class="sections">
           <div class="card">

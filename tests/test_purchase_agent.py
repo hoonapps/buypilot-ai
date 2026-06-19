@@ -48,6 +48,14 @@ def test_desktop_pc_analysis_returns_top_three_and_compatibility_notes() -> None
         item.criterion == "32GB RAM"
         for item in response.report.criteria_matches[0].items
     )
+    assert len(response.report.stress_tests) == 3
+    assert {item.scenario for item in response.report.stress_tests} == {
+        "budget_minus_10",
+        "budget_plus_10",
+        "strict_conditions",
+    }
+    assert all(item.impact for item in response.report.stress_tests)
+    assert all(item.recommendation for item in response.report.stress_tests)
     assert response.report.execution_plan is not None
     assert response.report.execution_plan.product_id == response.report.final_pick_id
     assert response.report.execution_plan.checkout_steps
