@@ -1,6 +1,7 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
+from specpilot_ai.api.auth import workspace_context
 from specpilot_ai.core.config import get_settings
 from specpilot_ai.core.models import (
     AdminReviewDashboard,
@@ -23,6 +24,7 @@ from specpilot_ai.core.models import (
     SourceCollectionRequest,
     SourceCollectionResponse,
     TraceEvent,
+    WorkspaceContext,
 )
 from specpilot_ai.graph.neo4j_client import Neo4jRepository
 from specpilot_ai.graph.product_graph import pc_purchase_graph_schema
@@ -38,7 +40,8 @@ app = FastAPI(
     description="AI PC and laptop purchase decision agent with LangGraph and LangChain.",
 )
 
-_TRACE_CACHE: dict[str, AnalyzeResponse] = {}
+_TRACE_CACHE: dict[tuple[str, str], AnalyzeResponse] = {}
+WORKSPACE_DEPENDENCY = Depends(workspace_context)
 
 
 def _store() -> SpecPilotStore:
@@ -175,84 +178,129 @@ def graph_schema() -> dict[str, object]:
 
 
 @app.post("/analyze", response_model=AnalyzeResponse)
-def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
+def analyze(
+    request: AnalyzeRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> AnalyzeResponse:
     response = run_analysis(request)
-    _TRACE_CACHE[response.graph_trace_id] = response
-    _store().save_analysis(response)
+    _TRACE_CACHE[(workspace.workspace_id, response.graph_trace_id)] = response
+    _store().save_analysis_for_workspace(workspace.workspace_id, response)
     return response
 
 
 @app.post("/alerts/preview", response_model=list[PriceAlertPlan])
-def price_alert_preview(request: AnalyzeRequest) -> list[PriceAlertPlan]:
+def price_alert_preview(
+    request: AnalyzeRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[PriceAlertPlan]:
     response = run_analysis(request)
-    _TRACE_CACHE[response.graph_trace_id] = response
-    _store().save_analysis(response)
+    _TRACE_CACHE[(workspace.workspace_id, response.graph_trace_id)] = response
+    _store().save_analysis_for_workspace(workspace.workspace_id, response)
     return response.report.price_alerts
 
 
 @app.get("/traces/{trace_id}", response_model=list[TraceEvent])
-def trace_events(trace_id: str) -> list[TraceEvent]:
-    response = _TRACE_CACHE.get(trace_id)
+def trace_events(
+    trace_id: str,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[TraceEvent]:
+    response = _TRACE_CACHE.get((workspace.workspace_id, trace_id))
     if response is None:
-        response = _store().get_analysis(trace_id)
+        response = _store().get_analysis_for_workspace(workspace.workspace_id, trace_id)
     if response is None:
         raise HTTPException(status_code=404, detail="trace_id를 찾을 수 없습니다.")
     return response.trace_events
 
 
 @app.post("/reports/save", response_model=SavedReportSummary)
-def save_report(request: SaveReportRequest) -> SavedReportSummary:
-    response = _TRACE_CACHE.get(request.trace_id) or _store().get_analysis(request.trace_id)
+def save_report(
+    request: SaveReportRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> SavedReportSummary:
+    response = _TRACE_CACHE.get(
+        (workspace.workspace_id, request.trace_id)
+    ) or _store().get_analysis_for_workspace(
+        workspace.workspace_id,
+        request.trace_id,
+    )
     if response is None:
         raise HTTPException(status_code=404, detail="저장할 분석 결과를 찾을 수 없습니다.")
     title = request.title or _default_report_title(response)
-    return _store().save_report(
+    owner_label = request.owner_label if request.owner_label != "guest" else workspace.owner_label
+    return _store().save_report_for_workspace(
+        workspace.workspace_id,
         response,
         title=title,
-        owner_label=request.owner_label,
+        owner_label=owner_label,
         notes=request.notes,
     )
 
 
 @app.get("/reports", response_model=list[SavedReportSummary])
-def list_reports(limit: int = 20) -> list[SavedReportSummary]:
-    return _store().list_reports(limit=limit)
+def list_reports(
+    limit: int = 20,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[SavedReportSummary]:
+    return _store().list_reports_for_workspace(workspace.workspace_id, limit=limit)
 
 
 @app.get("/reports/{report_id}", response_model=SavedReportDetail)
-def get_report(report_id: str) -> SavedReportDetail:
-    report = _store().get_report(report_id)
+def get_report(
+    report_id: str,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> SavedReportDetail:
+    report = _store().get_report_for_workspace(workspace.workspace_id, report_id)
     if report is None:
         raise HTTPException(status_code=404, detail="저장 리포트를 찾을 수 없습니다.")
     return report
 
 
 @app.post("/alerts/subscribe", response_model=AlertSubscription)
-def subscribe_alert(request: AlertSubscriptionRequest) -> AlertSubscription:
-    response = _TRACE_CACHE.get(request.trace_id) or _store().get_analysis(request.trace_id)
+def subscribe_alert(
+    request: AlertSubscriptionRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> AlertSubscription:
+    response = _TRACE_CACHE.get(
+        (workspace.workspace_id, request.trace_id)
+    ) or _store().get_analysis_for_workspace(
+        workspace.workspace_id,
+        request.trace_id,
+    )
     if response is None:
         raise HTTPException(status_code=404, detail="알림을 연결할 분석 결과를 찾을 수 없습니다.")
+    owner_label = request.owner_label if request.owner_label != "guest" else workspace.owner_label
     try:
-        return _store().create_alert_subscription(
+        return _store().create_alert_subscription_for_workspace(
+            workspace.workspace_id,
             response,
             product_id=request.product_id,
             target_price_krw=request.target_price_krw,
             channels=request.channels,
             contact=request.contact,
-            owner_label=request.owner_label,
+            owner_label=owner_label,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/alerts/subscriptions", response_model=list[AlertSubscription])
-def list_alert_subscriptions(limit: int = 50) -> list[AlertSubscription]:
-    return _store().list_alert_subscriptions(limit=limit)
+def list_alert_subscriptions(
+    limit: int = 50,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[AlertSubscription]:
+    return _store().list_alert_subscriptions_for_workspace(workspace.workspace_id, limit=limit)
 
 
 @app.get("/ops/metrics", response_model=OperationsMetrics)
-def operations_metrics() -> OperationsMetrics:
-    return _store().metrics()
+def operations_metrics(
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> OperationsMetrics:
+    return _store().metrics_for_workspace(workspace.workspace_id)
+
+
+@app.get("/me", response_model=WorkspaceContext)
+def me(workspace: WorkspaceContext = WORKSPACE_DEPENDENCY) -> WorkspaceContext:
+    return workspace
 
 
 @app.get("/sources/status", response_model=list[SourceAdapterStatus])

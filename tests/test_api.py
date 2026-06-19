@@ -3,6 +3,8 @@ from fastapi.testclient import TestClient
 from specpilot_ai.api.main import app
 
 client = TestClient(app)
+WORKSPACE_A = {"X-SpecPilot-Key": "pytest-workspace-a"}
+WORKSPACE_B = {"X-SpecPilot-Key": "pytest-workspace-b"}
 
 
 def test_launch_page_exposes_product_ui() -> None:
@@ -23,6 +25,17 @@ def test_health_and_ready_endpoints_expose_operations_state() -> None:
     assert health.json()["source_adapters"] >= 4
     assert ready.json()["ready"] is True
     assert ready.json()["source_adapters_ready"] is True
+
+
+def test_workspace_context_uses_api_key_scope() -> None:
+    demo = client.get("/me")
+    workspace = client.get("/me", headers=WORKSPACE_A)
+
+    assert demo.status_code == 200
+    assert workspace.status_code == 200
+    assert demo.json()["workspace_id"] == "demo"
+    assert workspace.json()["workspace_id"].startswith("workspace_")
+    assert workspace.json()["workspace_id"] != demo.json()["workspace_id"]
 
 
 def test_admin_page_exposes_review_console() -> None:
@@ -62,6 +75,7 @@ def test_analyze_endpoint_returns_trace_and_alerts() -> None:
 def test_report_save_alert_subscription_and_metrics_flow() -> None:
     analysis = client.post(
         "/analyze",
+        headers=WORKSPACE_A,
         json={
             "query": "영상 편집과 게임용 데스크톱 200만원 안에서 맞춰줘",
             "category": "desktop_pc",
@@ -75,6 +89,7 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
 
     saved = client.post(
         "/reports/save",
+        headers=WORKSPACE_A,
         json={
             "trace_id": trace_id,
             "title": "테스트 구매 리포트",
@@ -85,17 +100,25 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     assert saved.status_code == 200
     saved_payload = saved.json()
     assert saved_payload["trace_id"] == trace_id
+    assert saved_payload["workspace_id"].startswith("workspace_")
 
-    reports = client.get("/reports")
+    reports = client.get("/reports", headers=WORKSPACE_A)
     assert reports.status_code == 200
     assert any(item["report_id"] == saved_payload["report_id"] for item in reports.json())
 
-    detail = client.get(f"/reports/{saved_payload['report_id']}")
+    isolated_reports = client.get("/reports", headers=WORKSPACE_B)
+    assert all(item["report_id"] != saved_payload["report_id"] for item in isolated_reports.json())
+
+    detail = client.get(f"/reports/{saved_payload['report_id']}", headers=WORKSPACE_A)
     assert detail.status_code == 200
     assert detail.json()["response"]["graph_trace_id"] == trace_id
 
+    blocked_detail = client.get(f"/reports/{saved_payload['report_id']}", headers=WORKSPACE_B)
+    assert blocked_detail.status_code == 404
+
     subscribed = client.post(
         "/alerts/subscribe",
+        headers=WORKSPACE_A,
         json={
             "trace_id": trace_id,
             "product_id": first_alert["product_id"],
@@ -107,8 +130,12 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     )
     assert subscribed.status_code == 200
     assert subscribed.json()["status"] == "active"
+    assert subscribed.json()["workspace_id"] == saved_payload["workspace_id"]
 
-    metrics = client.get("/ops/metrics")
+    blocked_trace = client.get(f"/traces/{trace_id}", headers=WORKSPACE_B)
+    assert blocked_trace.status_code == 404
+
+    metrics = client.get("/ops/metrics", headers=WORKSPACE_A)
     assert metrics.status_code == 200
     payload = metrics.json()
     assert payload["analysis_runs"] >= 1
