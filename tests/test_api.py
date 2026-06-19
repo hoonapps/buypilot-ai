@@ -46,6 +46,7 @@ def test_admin_page_exposes_review_console() -> None:
     assert "SpecPilot AI Admin" in response.text
     assert "소스 수집" in response.text
     assert "발송 큐" in response.text
+    assert "품질/비용 감사" in response.text
 
 
 def test_trust_policy_endpoint_exposes_cache_and_fairness_rules() -> None:

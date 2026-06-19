@@ -57,6 +57,10 @@ def admin_page_html() -> str:
     .warn { border-left-color: var(--gold); }
     .review-list { display: grid; gap: 12px; }
     .review-item { border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: #fff; }
+    .quality-list { display: grid; gap: 10px; }
+    .quality-item { border-left: 4px solid var(--teal); }
+    .quality-item.warn { border-left-color: var(--gold); }
+    .quality-item.danger { border-left-color: var(--red); }
     .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     button {
       min-height: 36px;
@@ -118,14 +122,24 @@ def admin_page_html() -> str:
         <div class="review-list" id="reviews"></div>
       </div>
     </section>
+    <section class="panel" style="margin-top:14px">
+      <h2>품질/비용 감사</h2>
+      <p>분석별 품질 점수, 예상 비용, 공개 전 차단 사유를 확인합니다.</p>
+      <div class="quality-list" id="quality"></div>
+    </section>
   </main>
   <script>
     async function loadDashboard() {
-      const response = await fetch('/admin/dashboard');
+      const [response, qualityResponse] = await Promise.all([
+        fetch('/admin/dashboard'),
+        fetch('/ops/quality')
+      ]);
       const data = await response.json();
+      const quality = await qualityResponse.json();
       renderMetrics(data.metrics);
       renderSources(data.adapter_statuses);
       renderReviews(data.pending_reviews);
+      renderQuality(quality);
     }
 
     function renderMetrics(metrics) {
@@ -135,6 +149,8 @@ def admin_page_html() -> str:
         ['알림', metrics.alert_subscriptions],
         ['발송 큐', metrics.alert_events],
         ['트리거', metrics.triggered_alerts],
+        ['품질', metrics.average_quality_score],
+        ['예상비용', Math.round(metrics.estimated_cost_krw) + '원'],
         ['전환 준비율', Math.round(metrics.conversion_ready_rate * 100) + '%']
       ].map(([label, value]) => `<div class="card"><span class="kicker">${label}</span><div class="metric">${value}</div></div>`).join('');
     }
@@ -167,6 +183,28 @@ def admin_page_html() -> str:
           </div>
         </article>
       `).join('');
+    }
+
+    function renderQuality(quality) {
+      const root = document.querySelector('#quality');
+      if (!quality.recent_audits.length) {
+        root.innerHTML = '<p>아직 품질 감사 데이터가 없습니다.</p>';
+        return;
+      }
+      root.innerHTML = quality.recent_audits.map((audit) => {
+        const tone = audit.launch_blockers.length ? 'danger' : audit.warning_count ? 'warn' : '';
+        const blockers = audit.launch_blockers.length
+          ? audit.launch_blockers.map((item) => `<li>${item}</li>`).join('')
+          : '<li>공개 차단 사유 없음</li>';
+        return `
+          <article class="review-item quality-item ${tone}">
+            <span class="kicker">${audit.trace_id}</span>
+            <h3>품질 ${audit.quality_score}점 · 예상 비용 ${Math.round(audit.estimated_cost_krw)}원</h3>
+            <p>소스 호출 ${audit.estimated_source_calls}회 / 토큰 ${audit.estimated_llm_tokens} / 경고 ${audit.warning_count} / 검수 필요 출처 ${audit.review_required_sources}</p>
+            <ul>${blockers}</ul>
+          </article>
+        `;
+      }).join('');
     }
 
     async function decide(reviewId, status) {
