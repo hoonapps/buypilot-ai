@@ -79,6 +79,7 @@ def test_admin_page_exposes_review_console() -> None:
     assert "수신자 그룹 저장" in response.text
     assert "완료 리포트 발송" in response.text
     assert "열람/클릭 이벤트" in response.text
+    assert "tracking_pixel_path" in response.text
     assert "품질/비용 감사" in response.text
     assert "품질 회귀 모니터" in response.text
     assert "사용자 피드백" in response.text
@@ -438,6 +439,10 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
         for delivery in templated_payload["deliveries"]
         if delivery["status"] == "sent"
     )
+    assert sent_delivery["tracking_token"].startswith("trk_")
+    assert sent_delivery["tracking_pixel_path"].endswith(".png")
+    assert sent_delivery["tracking_click_path"].startswith("/t/c/")
+    assert "tracking_pixel=" in sent_delivery["provider_message"]
 
     opened = client.post(
         f"/reports/completion-deliveries/{sent_delivery['delivery_id']}/engagement",
@@ -456,6 +461,29 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     assert clicked.status_code == 200
     assert clicked.json()["event_type"] == "click"
 
+    pixel = client.get(
+        sent_delivery["tracking_pixel_path"],
+        headers={"User-Agent": "pytest-pixel"},
+    )
+    assert pixel.status_code == 200
+    assert pixel.headers["content-type"] == "image/png"
+    assert pixel.headers["cache-control"] == "no-store, max-age=0"
+
+    redirect = client.get(
+        f"{sent_delivery['tracking_click_path']}?to=/r/share_test",
+        follow_redirects=False,
+        headers={"User-Agent": "pytest-click"},
+    )
+    assert redirect.status_code == 302
+    assert redirect.headers["location"] == "/r/share_test"
+
+    unsafe_redirect = client.get(
+        f"{sent_delivery['tracking_click_path']}?to=https://evil.example",
+        follow_redirects=False,
+    )
+    assert unsafe_redirect.status_code == 302
+    assert unsafe_redirect.headers["location"] == "/"
+
     completion_engagement = client.get("/reports/completion-engagement", headers=WORKSPACE_A)
     assert completion_engagement.status_code == 200
     assert {item["event_type"] for item in completion_engagement.json()} >= {"open", "click"}
@@ -471,15 +499,15 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
         for delivery in batch_item["deliveries"]
         if delivery["delivery_id"] == sent_delivery["delivery_id"]
     )
-    assert sent_delivery_after_engagement["open_count"] == 1
-    assert sent_delivery_after_engagement["click_count"] == 1
-    assert sent_delivery_after_engagement["engagement_count"] == 2
+    assert sent_delivery_after_engagement["open_count"] == 2
+    assert sent_delivery_after_engagement["click_count"] == 3
+    assert sent_delivery_after_engagement["engagement_count"] == 5
 
     metrics_after_completion = client.get("/ops/metrics", headers=WORKSPACE_A).json()
     assert metrics_after_completion["completion_report_batches"] >= 2
     assert metrics_after_completion["completion_report_deliveries"] >= 3
-    assert metrics_after_completion["completion_delivery_opens"] >= 1
-    assert metrics_after_completion["completion_delivery_clicks"] >= 1
+    assert metrics_after_completion["completion_delivery_opens"] >= 2
+    assert metrics_after_completion["completion_delivery_clicks"] >= 3
 
     isolated_completion_batch = client.post(
         "/reports/completion-batches",
@@ -524,6 +552,10 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
         json={"event_type": "open"},
     )
     assert blocked_engagement.status_code == 404
+
+    missing_pixel = client.get("/t/o/trk_missing.png")
+    assert missing_pixel.status_code == 200
+    assert missing_pixel.headers["content-type"] == "image/png"
 
     revoked_share = client.delete(
         f"/reports/{saved_payload['report_id']}/share",

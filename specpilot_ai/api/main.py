@@ -1,9 +1,9 @@
 from datetime import UTC, datetime, timedelta
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 
 from specpilot_ai.api.auth import workspace_context
 from specpilot_ai.core.config import get_settings
@@ -105,8 +105,14 @@ app = FastAPI(
     description="AI PC and laptop purchase decision agent with LangGraph and LangChain.",
 )
 
-_TRACE_CACHE: dict[tuple[str, str], AnalyzeResponse] = {}
 WORKSPACE_DEPENDENCY = Depends(workspace_context)
+_TRACE_CACHE: dict[tuple[str, str], AnalyzeResponse] = {}
+_TRACKING_PIXEL_PNG = (
+    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+    b"\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+    b"\x00\x00\x00\rIDATx\x9cc\x00\x01\x00\x00\x05\x00\x01"
+    b"\r\n-\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+)
 
 
 def _store() -> SpecPilotStore:
@@ -436,6 +442,38 @@ def list_completion_delivery_engagement(
         workspace.workspace_id,
         limit=limit,
     )
+
+
+@app.get("/t/o/{tracking_token}.png")
+def completion_tracking_pixel(tracking_token: str, request: Request) -> Response:
+    _store().record_completion_delivery_engagement_by_tracking_token(
+        tracking_token,
+        "open",
+        _tracking_metadata(request, "pixel"),
+    )
+    return Response(
+        content=_TRACKING_PIXEL_PNG,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
+
+
+@app.get("/t/c/{tracking_token}")
+def completion_tracking_click(
+    tracking_token: str,
+    request: Request,
+    to: str = "/",
+) -> RedirectResponse:
+    destination = _safe_tracking_redirect_path(to)
+    _store().record_completion_delivery_engagement_by_tracking_token(
+        tracking_token,
+        "click",
+        _tracking_metadata(request, "redirect", destination=destination),
+    )
+    return RedirectResponse(destination, status_code=302)
 
 
 @app.get("/reports/{report_id}", response_model=SavedReportDetail)
@@ -1228,3 +1266,32 @@ def _default_report_title(response: AnalyzeResponse) -> str:
     if top is None:
         return f"{response.criteria.category.value} 구매 분석"
     return f"{top.product.model_name} 중심 구매 리포트"
+
+
+def _tracking_metadata(
+    request: Request,
+    surface: str,
+    destination: str | None = None,
+) -> dict[str, str]:
+    metadata = {
+        "surface": surface,
+        "user_agent": _limited_header(request.headers.get("user-agent")),
+    }
+    if destination is not None:
+        metadata["destination"] = destination
+    return metadata
+
+
+def _limited_header(value: str | None, limit: int = 180) -> str:
+    if not value:
+        return ""
+    return value[:limit]
+
+
+def _safe_tracking_redirect_path(target: str | None) -> str:
+    if not target:
+        return "/"
+    normalized = unquote(target).strip()
+    if normalized.startswith("/") and not normalized.startswith("//"):
+        return normalized
+    return "/"

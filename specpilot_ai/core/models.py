@@ -824,6 +824,9 @@ class CompletionReportDelivery(BaseModel):
     open_count: int = 0
     click_count: int = 0
     last_engaged_at: str | None = None
+    tracking_token: str = ""
+    tracking_pixel_path: str = ""
+    tracking_click_path: str = ""
     created_at: str
 
 

@@ -511,25 +511,33 @@ class SpecPilotStore:
                         dry_run=request.dry_run,
                         now=now,
                     )
-                deliveries.append(
-                    CompletionReportDelivery(
-                        delivery_id=f"delivery_{uuid4().hex[:12]}",
-                        batch_id=batch_id,
-                        report_id=report.report_id,
-                        workspace_id=workspace_id,
-                        channel=channel,
-                        target_masked=_mask_target(target),
-                        template_id=template["template_id"] if template else None,
-                        recipient_group_id=group["group_id"] if group else None,
-                        subject=_render_completion_text(subject, report),
-                        status=status,
-                        provider_message=provider_message,
-                        retry_count=retry_count,
-                        next_retry_at=next_retry_at,
-                        sent_at=now if status == "sent" else None,
-                        created_at=now,
-                    )
+                delivery = CompletionReportDelivery(
+                    delivery_id=f"delivery_{uuid4().hex[:12]}",
+                    batch_id=batch_id,
+                    report_id=report.report_id,
+                    workspace_id=workspace_id,
+                    channel=channel,
+                    target_masked=_mask_target(target),
+                    template_id=template["template_id"] if template else None,
+                    recipient_group_id=group["group_id"] if group else None,
+                    subject=_render_completion_text(subject, report),
+                    status=status,
+                    provider_message=provider_message,
+                    retry_count=retry_count,
+                    next_retry_at=next_retry_at,
+                    sent_at=now if status == "sent" else None,
+                    tracking_token=f"trk_{uuid4().hex[:24]}",
+                    created_at=now,
                 )
+                delivery.tracking_pixel_path = f"/t/o/{delivery.tracking_token}.png"
+                delivery.tracking_click_path = f"/t/c/{delivery.tracking_token}"
+                if delivery.status == "sent":
+                    delivery.provider_message = (
+                        f"{delivery.provider_message} "
+                        f"tracking_pixel={delivery.tracking_pixel_path} "
+                        f"tracking_click={delivery.tracking_click_path}"
+                    )
+                deliveries.append(delivery)
         sent_count = sum(1 for delivery in deliveries if delivery.status == "sent")
         failed_count = sum(1 for delivery in deliveries if delivery.status == "failed")
         batch_status = _completion_batch_status(
@@ -587,9 +595,9 @@ class SpecPilotStore:
                             delivery_id, batch_id, report_id, workspace_id, channel,
                             target_masked, template_id, recipient_group_id, subject,
                             status, provider_message, retry_count, next_retry_at,
-                            sent_at, created_at
+                            sent_at, tracking_token, created_at
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             delivery.delivery_id,
@@ -606,6 +614,7 @@ class SpecPilotStore:
                             delivery.retry_count,
                             delivery.next_retry_at,
                             delivery.sent_at,
+                            delivery.tracking_token,
                             delivery.created_at,
                         ),
                     )
@@ -678,6 +687,58 @@ class SpecPilotStore:
                 event_type=event_type,
                 target_masked=delivery["target_masked"],
                 metadata=request.metadata,
+                created_at=now,
+            )
+            conn.execute(
+                """
+                INSERT INTO completion_delivery_engagement (
+                    event_id, delivery_id, batch_id, report_id, workspace_id,
+                    event_type, target_masked, metadata_json, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event.event_id,
+                    event.delivery_id,
+                    event.batch_id,
+                    event.report_id,
+                    event.workspace_id,
+                    event.event_type,
+                    event.target_masked,
+                    json.dumps(event.metadata, ensure_ascii=False),
+                    event.created_at,
+                ),
+            )
+        return event
+
+    def record_completion_delivery_engagement_by_tracking_token(
+        self,
+        tracking_token: str,
+        event_type: str,
+        metadata: dict | None = None,
+    ) -> CompletionDeliveryEngagement | None:
+        now = _now()
+        normalized_event_type = _completion_engagement_type(event_type)
+        with self._connect() as conn:
+            delivery = conn.execute(
+                """
+                SELECT *
+                FROM completion_report_deliveries
+                WHERE tracking_token = ?
+                """,
+                (tracking_token,),
+            ).fetchone()
+            if delivery is None or delivery["status"] != "sent":
+                return None
+            event = CompletionDeliveryEngagement(
+                event_id=f"engage_{uuid4().hex[:12]}",
+                delivery_id=delivery["delivery_id"],
+                batch_id=delivery["batch_id"],
+                report_id=delivery["report_id"],
+                workspace_id=delivery["workspace_id"],
+                event_type=normalized_event_type,
+                target_masked=delivery["target_masked"],
+                metadata=metadata or {},
                 created_at=now,
             )
             conn.execute(
@@ -3007,6 +3068,7 @@ class SpecPilotStore:
                     retry_count INTEGER NOT NULL DEFAULT 0,
                     next_retry_at TEXT,
                     sent_at TEXT,
+                    tracking_token TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(batch_id) REFERENCES completion_report_batches(batch_id),
                     FOREIGN KEY(report_id) REFERENCES saved_reports(report_id)
@@ -3212,6 +3274,18 @@ class SpecPilotStore:
                 "completion_report_deliveries",
                 "subject",
                 "TEXT NOT NULL DEFAULT ''",
+            )
+            _ensure_column(
+                conn,
+                "completion_report_deliveries",
+                "tracking_token",
+                "TEXT NOT NULL DEFAULT ''",
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_completion_delivery_tracking_token
+                    ON completion_report_deliveries(tracking_token);
+                """
             )
             _ensure_column(
                 conn,
@@ -3713,6 +3787,7 @@ def _completion_batch_from_row(row: sqlite3.Row) -> CompletionReportBatch:
 
 def _completion_delivery_from_row(row: sqlite3.Row) -> CompletionReportDelivery:
     data = dict(row)
+    tracking_token = data.get("tracking_token") or ""
     return CompletionReportDelivery(
         delivery_id=data["delivery_id"],
         batch_id=data["batch_id"],
@@ -3732,6 +3807,11 @@ def _completion_delivery_from_row(row: sqlite3.Row) -> CompletionReportDelivery:
         open_count=int(data.get("open_count") or 0),
         click_count=int(data.get("click_count") or 0),
         last_engaged_at=data.get("last_engaged_at"),
+        tracking_token=tracking_token,
+        tracking_pixel_path=(
+            f"/t/o/{tracking_token}.png" if tracking_token else ""
+        ),
+        tracking_click_path=f"/t/c/{tracking_token}" if tracking_token else "",
         created_at=data["created_at"],
     )
 

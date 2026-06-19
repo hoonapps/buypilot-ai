@@ -744,7 +744,7 @@ def admin_page_html() -> str:
         const tone = item.status === 'failed' ? 'danger' : item.status === 'partial' ? 'warn' : '';
         const deliveries = item.deliveries.length
           ? item.deliveries.map((delivery) => `
-            <li>${delivery.report_id} · ${delivery.channel} · ${delivery.status} · ${delivery.target_masked} · 열람 ${delivery.open_count || 0} / 클릭 ${delivery.click_count || 0}</li>
+            <li>${delivery.report_id} · ${delivery.channel} · ${delivery.status} · ${delivery.target_masked} · 열람 ${delivery.open_count || 0} / 클릭 ${delivery.click_count || 0}<br />pixel ${delivery.tracking_pixel_path || '없음'} / click ${delivery.tracking_click_path || '없음'}</li>
           `).join('')
           : '<li>개별 발송 기록 없음</li>';
         return `
