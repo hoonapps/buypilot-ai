@@ -16,8 +16,12 @@ from specpilot_ai.core.models import (
     AlertSubscription,
     AnalysisQualityAudit,
     AnalyzeResponse,
+    BetaBacklogAction,
+    BetaBacklogActionRequest,
     BetaBacklogItem,
+    BetaBacklogStatus,
     BetaCohort,
+    BetaCohortReport,
     BetaCohortRequest,
     BetaLead,
     BetaLeadRequest,
@@ -1048,6 +1052,24 @@ class SpecPilotStore:
             ).fetchall()
         return [self._hydrate_beta_cohort(_beta_cohort_from_row(row)) for row in rows]
 
+    def get_beta_cohort_for_workspace(
+        self,
+        workspace_id: str,
+        cohort_id: str,
+    ) -> BetaCohort | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM beta_cohorts
+                WHERE workspace_id = ? AND cohort_id = ?
+                """,
+                (workspace_id, cohort_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return self._hydrate_beta_cohort(_beta_cohort_from_row(row))
+
     def beta_backlog_for_workspace(
         self,
         workspace_id: str,
@@ -1138,7 +1160,130 @@ class SpecPilotStore:
                         created_at=row["created_at"],
                     )
                 )
-        return items[:limit]
+        return self._apply_beta_backlog_actions(workspace_id, items[:limit])
+
+    def update_beta_backlog_action_for_workspace(
+        self,
+        workspace_id: str,
+        backlog_id: str,
+        request: BetaBacklogActionRequest,
+    ) -> BetaBacklogAction | None:
+        known_ids = {
+            item.backlog_id
+            for item in self.beta_backlog_for_workspace(workspace_id, limit=200)
+        }
+        if backlog_id not in known_ids:
+            return None
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO beta_backlog_actions (
+                    backlog_id, workspace_id, status, assignee, note, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(workspace_id, backlog_id) DO UPDATE SET
+                    status = excluded.status,
+                    assignee = excluded.assignee,
+                    note = excluded.note,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    backlog_id,
+                    workspace_id,
+                    request.status.value,
+                    request.assignee,
+                    request.note,
+                    now,
+                ),
+            )
+        return BetaBacklogAction(
+            backlog_id=backlog_id,
+            workspace_id=workspace_id,
+            status=request.status,
+            assignee=request.assignee,
+            note=request.note,
+            updated_at=now,
+        )
+
+    def beta_cohort_report_for_workspace(
+        self,
+        workspace_id: str,
+        cohort_id: str,
+    ) -> BetaCohortReport | None:
+        cohort = self.get_beta_cohort_for_workspace(workspace_id, cohort_id)
+        if cohort is None:
+            return None
+        backlog = [
+            item
+            for item in self.beta_backlog_for_workspace(workspace_id, limit=100)
+            if item.status not in {BetaBacklogStatus.done, BetaBacklogStatus.dismissed}
+        ][:10]
+        generated_at = _now()
+        purchase_rate = round(cohort.purchase_intent_rate * 100)
+        summary = (
+            f"{cohort.name}은 리드 {cohort.lead_count}/{cohort.target_size}명, "
+            f"피드백 {cohort.feedback_count}건, 구매 의향 {purchase_rate}%를 기록했습니다."
+        )
+        recommendations = _cohort_report_recommendations(cohort, backlog)
+        markdown = _render_beta_cohort_markdown(
+            cohort=cohort,
+            generated_at=generated_at,
+            summary=summary,
+            recommendations=recommendations,
+            backlog=backlog,
+        )
+        return BetaCohortReport(
+            cohort=cohort,
+            generated_at=generated_at,
+            summary=summary,
+            metric_cards={
+                "lead_count": cohort.lead_count,
+                "target_size": cohort.target_size,
+                "feedback_count": cohort.feedback_count,
+                "average_satisfaction": cohort.average_satisfaction,
+                "purchase_intent_rate": cohort.purchase_intent_rate,
+                "readiness_score": cohort.readiness_score,
+            },
+            recommendations=recommendations,
+            backlog=backlog,
+            markdown=markdown,
+        )
+
+    def _apply_beta_backlog_actions(
+        self,
+        workspace_id: str,
+        items: list[BetaBacklogItem],
+    ) -> list[BetaBacklogItem]:
+        if not items:
+            return items
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM beta_backlog_actions
+                WHERE workspace_id = ?
+                """,
+                (workspace_id,),
+            ).fetchall()
+        actions = {row["backlog_id"]: _beta_backlog_action_from_row(row) for row in rows}
+        merged: list[BetaBacklogItem] = []
+        for item in items:
+            action = actions.get(item.backlog_id)
+            if action is None:
+                merged.append(item)
+                continue
+            merged.append(
+                item.model_copy(
+                    update={
+                        "status": action.status,
+                        "assignee": action.assignee,
+                        "action_note": action.note,
+                        "action_updated_at": action.updated_at,
+                    }
+                )
+            )
+        return merged
 
     def _hydrate_beta_cohort(self, cohort: BetaCohort) -> BetaCohort:
         keywords = cohort.keywords or [cohort.name, cohort.scenario, cohort.target_persona]
@@ -2026,6 +2171,16 @@ class SpecPilotStore:
                     updated_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS beta_backlog_actions (
+                    backlog_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    status TEXT NOT NULL,
+                    assignee TEXT NOT NULL DEFAULT '',
+                    note TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(workspace_id, backlog_id)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_saved_reports_trace
                     ON saved_reports(trace_id);
                 CREATE INDEX IF NOT EXISTS idx_alerts_trace
@@ -2060,6 +2215,8 @@ class SpecPilotStore:
                     ON beta_leads(workspace_id);
                 CREATE INDEX IF NOT EXISTS idx_beta_cohorts_workspace
                     ON beta_cohorts(workspace_id, active);
+                CREATE INDEX IF NOT EXISTS idx_beta_backlog_actions_workspace
+                    ON beta_backlog_actions(workspace_id, status);
                 """
             )
             _ensure_column(conn, "analysis_runs", "workspace_id", "TEXT NOT NULL DEFAULT 'demo'")
@@ -2415,6 +2572,18 @@ def _beta_cohort_from_row(row: sqlite3.Row) -> BetaCohort:
     )
 
 
+def _beta_backlog_action_from_row(row: sqlite3.Row) -> BetaBacklogAction:
+    data = dict(row)
+    return BetaBacklogAction(
+        backlog_id=data["backlog_id"],
+        workspace_id=data["workspace_id"],
+        status=BetaBacklogStatus(data["status"]),
+        assignee=data["assignee"],
+        note=data["note"],
+        updated_at=data["updated_at"],
+    )
+
+
 def _review_item_from_row(row: sqlite3.Row) -> ReviewQueueItem:
     data = dict(row)
     return ReviewQueueItem(
@@ -2512,6 +2681,83 @@ def _cohort_keywords(request: BetaCohortRequest) -> list[str]:
 
 def _like_pattern(value: str) -> str:
     return f"%{value}%"
+
+
+def _cohort_report_recommendations(
+    cohort: BetaCohort,
+    backlog: list[BetaBacklogItem],
+) -> list[str]:
+    recommendations: list[str] = []
+    if cohort.lead_count < cohort.target_size:
+        remaining = cohort.target_size - cohort.lead_count
+        recommendations.append(f"목표 cohort까지 베타 리드 {remaining}명을 추가 모집하세요.")
+    if cohort.feedback_count < 5:
+        recommendations.append(
+            "피드백 표본이 작으므로 실제 구매 직전 사용자 인터뷰를 우선 확보하세요."
+        )
+    if cohort.purchase_intent_rate < 0.4:
+        recommendations.append(
+            "구매 의향이 낮아 가격 근거, 호환성 설명, 대안 시나리오를 보강하세요."
+        )
+    if backlog:
+        blockers = sum(1 for item in backlog if item.severity == CheckStatus.blocker)
+        if blockers:
+            recommendations.append(f"출시 전 blocker 백로그 {blockers}건을 먼저 닫으세요.")
+        else:
+            recommendations.append("warning 백로그를 처리해 공개 리포트 신뢰도를 높이세요.")
+    if not recommendations:
+        recommendations.append("현재 cohort는 공개 베타 확대 기준을 충족합니다.")
+    return recommendations
+
+
+def _render_beta_cohort_markdown(
+    *,
+    cohort: BetaCohort,
+    generated_at: str,
+    summary: str,
+    recommendations: list[str],
+    backlog: list[BetaBacklogItem],
+) -> str:
+    lines = [
+        f"# {cohort.name} 베타 cohort 리포트",
+        "",
+        f"- 생성 시각: {generated_at}",
+        f"- 워크스페이스: {cohort.workspace_id}",
+        f"- 시나리오: {cohort.scenario}",
+        f"- 카테고리: {cohort.category.value}",
+        f"- 대상 persona: {cohort.target_persona}",
+        "",
+        "## 요약",
+        "",
+        summary,
+        "",
+        "## 핵심 지표",
+        "",
+        f"- 리드: {cohort.lead_count}/{cohort.target_size}명",
+        f"- 피드백: {cohort.feedback_count}건",
+        f"- 평균 만족도: {cohort.average_satisfaction}",
+        f"- 구매 의향: {round(cohort.purchase_intent_rate * 100)}%",
+        f"- cohort 준비도: {round(cohort.readiness_score)}점",
+        "",
+        "## 다음 액션",
+        "",
+    ]
+    lines.extend(f"- {item}" for item in recommendations)
+    lines.extend(["", "## 열린 개선 백로그", ""])
+    if not backlog:
+        lines.append("- 현재 열린 백로그가 없습니다.")
+    else:
+        for item in backlog:
+            owner = f" / 담당: {item.assignee}" if item.assignee else ""
+            lines.append(
+                f"- [{item.status.value}] {item.title} "
+                f"({item.source_type}, {item.severity.value}{owner})"
+            )
+            lines.append(f"  - 근거: {item.evidence}")
+            lines.append(f"  - 조치: {item.suggested_action}")
+            if item.action_note:
+                lines.append(f"  - 운영 메모: {item.action_note}")
+    return "\n".join(lines) + "\n"
 
 
 def _readiness_check(

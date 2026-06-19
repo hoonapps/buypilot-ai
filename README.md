@@ -54,6 +54,8 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 베타 출시 준비도 대시보드: 분석, 공유, 알림, 피드백, 리드, 품질 차단 사유를 launch readiness 점수로 집계
 - 베타 cohort 운영: 구매 시나리오별 리드, 피드백, 만족도, 구매 의향 집계
 - 자동 개선 백로그: readiness 경고, 낮은 만족도, 품질 차단 사유를 개선 항목으로 변환
+- cohort 리포트 export: JSON/Markdown으로 베타 운영 리포트 출력
+- 개선 백로그 운영 상태 관리: 담당자, 진행 상태, 운영 메모를 워크스페이스별로 저장
 - 운영 지표 API
 - 분석 품질 감사와 예상 비용 대시보드
 - 가격/리뷰/벤치마크/공식 스토어 소스 어댑터 계약
@@ -389,6 +391,29 @@ curl http://127.0.0.1:8000/beta/backlog \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
+개선 백로그를 운영 상태로 전환하고 cohort 리포트를 export합니다.
+
+```bash
+curl -X PATCH http://127.0.0.1:8000/beta/backlog/backlog_readiness_lead \
+  -H "Content-Type: application/json" \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY" \
+  -d '{
+    "status": "in_progress",
+    "assignee": "ops",
+    "note": "크리에이터 베타 리드 모집 캠페인 진행"
+  }'
+```
+
+```bash
+curl http://127.0.0.1:8000/beta/cohorts/{cohort_id}/report \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
+```bash
+curl http://127.0.0.1:8000/beta/cohorts/{cohort_id}/report.md \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
 운영 지표:
 
 ```bash
@@ -664,6 +689,7 @@ make docker-build
 - `/alerts/channels`, `/alerts/dispatch`, `/alerts/deliveries`가 발송 채널 설정, 큐 발송, 발송 시도 기록을 워크스페이스별로 처리하는지
 - `/ops/traces`, `/ops/traces/{trace_id}/spans`가 저장 trace와 단계별 span을 워크스페이스별로 반환하는지
 - `/feedback`, `/beta/leads`, `/beta/readiness`, `/beta/cohorts`, `/beta/backlog`가 만족도, 베타 리드, 출시 준비도, cohort, 개선 백로그를 워크스페이스별로 격리하는지
+- `/beta/backlog/{backlog_id}`, `/beta/cohorts/{cohort_id}/report`, `/beta/cohorts/{cohort_id}/report.md`가 백로그 운영 상태와 cohort export를 워크스페이스별로 처리하는지
 - `/ops/quality`가 품질 감사와 예상 비용을 워크스페이스별로 반환하는지
 - `/sources/status`, `/sources/collect`, `/sources/ingest-url`, `/sources/monitors`, `/sources/schedule`, `/sources/refresh`, `/sources/refresh-due`, `/sources/refresh-runs`, `/sources/providers`, `/sources/providers/check`, `/admin/reviews`, `/admin/dashboard`가 동작하는지
 - `/policy/trust`가 캐시, 제휴 고지, 공정성 정책을 반환하는지
@@ -708,10 +734,11 @@ GitHub Actions는 `main` push와 PR에서 다음을 실행합니다.
 - 추천 만족도와 구매 의향은 모델 개선 신호로 쓰되 추천 순위에는 즉시 반영하지 않습니다.
 - 베타 출시 준비도는 분석 실행, 공유 리포트 조회, 알림 연결, 피드백, 리드, 품질 차단 사유를 함께 보며 단일 지표만으로 공개 확대를 결정하지 않습니다.
 - 베타 cohort는 시나리오와 persona 기준으로 리드와 피드백을 묶고, 자동 개선 백로그는 readiness/피드백/품질 차단 신호에서 생성합니다.
+- cohort 리포트는 JSON/Markdown으로 export하고, 개선 백로그의 운영 상태와 담당자 메모는 워크스페이스별로 격리합니다.
 
 ## 다음 제품화 과제
 
 - 가격 비교/오픈마켓/공식 스토어의 공식 provider 계약과 외부 cron/Cloud Scheduler 배포 연결
 - 실제 이메일/SMS/웹훅 provider credential 연결과 운영 rate limit 적용
 - LangSmith 또는 OpenTelemetry 외부 export 연동
-- 실제 구매 시나리오별 cohort 리포트 export와 운영자 액션 상태 관리
+- 운영자 액션 SLA, 완료 리포트 자동 요약, provider별 비용/품질 회귀 모니터링

@@ -179,7 +179,7 @@ def admin_page_html() -> str:
     <section class="grid top-grid" style="margin-top:14px">
       <div class="panel">
         <h2>베타 cohort</h2>
-        <p>구매 시나리오별 리드, 피드백, 구매 의향을 묶어 실제 테스트군을 운영합니다.</p>
+        <p>구매 시나리오별 리드, 피드백, 구매 의향을 묶고 cohort 리포트 export를 운영합니다.</p>
         <div class="actions">
           <button class="secondary" id="save-beta-cohort">기본 cohort 생성</button>
         </div>
@@ -187,7 +187,7 @@ def admin_page_html() -> str:
       </div>
       <div class="panel">
         <h2>개선 백로그</h2>
-        <p>출시 준비도, 낮은 만족도, 품질 차단 사유에서 자동 생성된 개선 항목입니다.</p>
+        <p>출시 준비도, 낮은 만족도, 품질 차단 사유에서 자동 생성된 개선 항목과 운영 상태입니다.</p>
         <div class="review-list" id="beta-backlog"></div>
       </div>
     </section>
@@ -509,6 +509,7 @@ def admin_page_html() -> str:
           <h3>${item.name} · 준비도 ${Math.round(item.readiness_score)}점</h3>
           <p>${item.scenario}</p>
           <p>리드 ${item.lead_count}/${item.target_size}명 / 피드백 ${item.feedback_count}건 / 만족도 ${item.average_satisfaction} / 구매 의향 ${Math.round(item.purchase_intent_rate * 100)}%</p>
+          <p><a href="/beta/cohorts/${item.cohort_id}/report" target="_blank">JSON 리포트</a> · <a href="/beta/cohorts/${item.cohort_id}/report.md" target="_blank">Markdown export</a></p>
         </article>
       `).join('');
     }
@@ -523,13 +524,32 @@ def admin_page_html() -> str:
         const tone = item.severity === 'blocker' ? 'danger' : item.severity === 'warning' ? 'warn' : '';
         return `
           <article class="review-item quality-item ${tone}">
-            <span class="kicker">${item.source_type} · ${item.severity}</span>
+            <span class="kicker">${item.source_type} · ${item.severity} · ${item.status}</span>
             <h3>${item.title}</h3>
             <p>${item.evidence}</p>
             <p>${item.suggested_action}</p>
+            <p>담당: ${item.assignee || '미지정'} / 메모: ${item.action_note || '없음'}</p>
+            <div class="actions">
+              <button class="secondary" data-backlog-action="${item.backlog_id}" data-status="in_progress">진행 중</button>
+              <button class="primary" data-backlog-action="${item.backlog_id}" data-status="done">완료</button>
+            </div>
           </article>
         `;
       }).join('');
+      root.querySelectorAll('[data-backlog-action]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          await fetch(`/beta/backlog/${button.dataset.backlogAction}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              status: button.dataset.status,
+              assignee: 'ops',
+              note: button.dataset.status === 'done' ? '관리자 콘솔에서 완료 처리' : '관리자 콘솔에서 진행 시작'
+            })
+          });
+          await loadDashboard();
+        });
+      });
     }
 
     function renderChannels(items, events) {

@@ -77,6 +77,8 @@ def test_admin_page_exposes_review_console() -> None:
     assert "베타 출시 준비도" in response.text
     assert "베타 cohort" in response.text
     assert "개선 백로그" in response.text
+    assert "cohort 리포트 export" in response.text
+    assert "운영 상태" in response.text
 
 
 def test_trust_policy_endpoint_exposes_cache_and_fairness_rules() -> None:
@@ -546,6 +548,62 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     assert backlog_items
     assert any(item["source_type"] == "readiness" for item in backlog_items)
     assert all(item["workspace_id"] == readiness_payload["workspace_id"] for item in backlog_items)
+
+    backlog_id = backlog_items[0]["backlog_id"]
+    action = client.patch(
+        f"/beta/backlog/{backlog_id}",
+        headers=WORKSPACE_A,
+        json={
+            "status": "in_progress",
+            "assignee": "pm",
+            "note": "pytest에서 운영 액션 상태 검증",
+        },
+    )
+    assert action.status_code == 200
+    action_payload = action.json()
+    assert action_payload["status"] == "in_progress"
+    assert action_payload["assignee"] == "pm"
+
+    updated_backlog = client.get("/beta/backlog", headers=WORKSPACE_A).json()
+    tracked_item = next(item for item in updated_backlog if item["backlog_id"] == backlog_id)
+    assert tracked_item["status"] == "in_progress"
+    assert tracked_item["assignee"] == "pm"
+    assert tracked_item["action_note"] == "pytest에서 운영 액션 상태 검증"
+
+    isolated_action = client.patch(
+        f"/beta/backlog/{backlog_id}",
+        headers=WORKSPACE_B,
+        json={"status": "done", "assignee": "other-workspace"},
+    )
+    assert isolated_action.status_code == 200
+    unchanged_backlog = client.get("/beta/backlog", headers=WORKSPACE_A).json()
+    unchanged_item = next(item for item in unchanged_backlog if item["backlog_id"] == backlog_id)
+    assert unchanged_item["status"] == "in_progress"
+    assert unchanged_item["assignee"] == "pm"
+
+    cohort_report = client.get(
+        f"/beta/cohorts/{cohort_payload['cohort_id']}/report",
+        headers=WORKSPACE_A,
+    )
+    assert cohort_report.status_code == 200
+    report_payload = cohort_report.json()
+    assert report_payload["cohort"]["cohort_id"] == cohort_payload["cohort_id"]
+    assert report_payload["metric_cards"]["lead_count"] >= 1
+    assert report_payload["recommendations"]
+    assert "베타 cohort 리포트" in report_payload["markdown"]
+
+    markdown_report = client.get(
+        f"/beta/cohorts/{cohort_payload['cohort_id']}/report.md",
+        headers=WORKSPACE_A,
+    )
+    assert markdown_report.status_code == 200
+    assert "## 핵심 지표" in markdown_report.text
+
+    isolated_report = client.get(
+        f"/beta/cohorts/{cohort_payload['cohort_id']}/report",
+        headers=WORKSPACE_B,
+    )
+    assert isolated_report.status_code == 404
 
 
 def test_alert_preview_endpoint_returns_three_targets() -> None:

@@ -41,6 +41,13 @@ class ReviewStatus(StrEnum):
     rejected = "rejected"
 
 
+class BetaBacklogStatus(StrEnum):
+    open = "open"
+    in_progress = "in_progress"
+    done = "done"
+    dismissed = "dismissed"
+
+
 class ProviderReviewStatus(StrEnum):
     pending = "pending"
     approved = "approved"
@@ -554,7 +561,36 @@ class BetaBacklogItem(BaseModel):
     title: str
     evidence: str
     suggested_action: str
+    status: BetaBacklogStatus = BetaBacklogStatus.open
+    assignee: str = ""
+    action_note: str = ""
+    action_updated_at: str | None = None
     created_at: str
+
+
+class BetaBacklogActionRequest(BaseModel):
+    status: BetaBacklogStatus = BetaBacklogStatus.in_progress
+    assignee: str = ""
+    note: str = ""
+
+
+class BetaBacklogAction(BaseModel):
+    backlog_id: str
+    workspace_id: str = "demo"
+    status: BetaBacklogStatus
+    assignee: str = ""
+    note: str = ""
+    updated_at: str
+
+
+class BetaCohortReport(BaseModel):
+    cohort: BetaCohort
+    generated_at: str
+    summary: str
+    metric_cards: dict[str, int | float | str] = Field(default_factory=dict)
+    recommendations: list[str] = Field(default_factory=list)
+    backlog: list[BetaBacklogItem] = Field(default_factory=list)
+    markdown: str
 
 
 class SaveReportRequest(BaseModel):

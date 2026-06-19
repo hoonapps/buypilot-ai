@@ -3,7 +3,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from specpilot_ai.api.auth import workspace_context
 from specpilot_ai.core.config import get_settings
@@ -21,8 +21,11 @@ from specpilot_ai.core.models import (
     AlertSubscriptionRequest,
     AnalyzeRequest,
     AnalyzeResponse,
+    BetaBacklogAction,
+    BetaBacklogActionRequest,
     BetaBacklogItem,
     BetaCohort,
+    BetaCohortReport,
     BetaCohortRequest,
     BetaLead,
     BetaLeadRequest,
@@ -556,12 +559,50 @@ def list_beta_cohorts(
     )
 
 
+@app.get("/beta/cohorts/{cohort_id}/report", response_model=BetaCohortReport)
+def beta_cohort_report(
+    cohort_id: str,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> BetaCohortReport:
+    report = _store().beta_cohort_report_for_workspace(workspace.workspace_id, cohort_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="베타 cohort를 찾을 수 없습니다.")
+    return report
+
+
+@app.get("/beta/cohorts/{cohort_id}/report.md", response_class=PlainTextResponse)
+def beta_cohort_markdown_report(
+    cohort_id: str,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> str:
+    report = _store().beta_cohort_report_for_workspace(workspace.workspace_id, cohort_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="베타 cohort를 찾을 수 없습니다.")
+    return report.markdown
+
+
 @app.get("/beta/backlog", response_model=list[BetaBacklogItem])
 def beta_backlog(
     limit: int = 50,
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> list[BetaBacklogItem]:
     return _store().beta_backlog_for_workspace(workspace.workspace_id, limit=limit)
+
+
+@app.patch("/beta/backlog/{backlog_id}", response_model=BetaBacklogAction)
+def update_beta_backlog_action(
+    backlog_id: str,
+    request: BetaBacklogActionRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> BetaBacklogAction:
+    action = _store().update_beta_backlog_action_for_workspace(
+        workspace.workspace_id,
+        backlog_id,
+        request,
+    )
+    if action is None:
+        raise HTTPException(status_code=404, detail="개선 백로그 항목을 찾을 수 없습니다.")
+    return action
 
 
 @app.get("/sources/status", response_model=list[SourceAdapterStatus])
