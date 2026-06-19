@@ -207,6 +207,11 @@ def admin_page_html() -> str:
     </section>
     <section class="grid top-grid" style="margin-top:14px">
       <div class="panel">
+        <h2>결제 전 검수</h2>
+        <p>저장 리포트에서 실제 결제 직전 가격, 옵션, 판매자 답변, 리스크 승인 상태를 검수합니다.</p>
+        <div class="review-list" id="checkout-reviews"></div>
+      </div>
+      <div class="panel">
         <h2>완료 리포트 배치</h2>
         <p>저장된 구매 리포트를 템플릿과 수신자 그룹 기준으로 운영 outbox에 발송합니다.</p>
         <input id="completion-target" value="ops@example.com" />
@@ -267,7 +272,8 @@ def admin_page_html() -> str:
         completionTemplateResponse,
         completionGroupResponse,
         completionEngagementResponse,
-        completionProviderEventResponse
+        completionProviderEventResponse,
+        checkoutReviewResponse
       ] = await Promise.all([
         fetch('/admin/dashboard'),
         fetch('/ops/quality'),
@@ -291,7 +297,8 @@ def admin_page_html() -> str:
         fetch('/reports/completion-templates'),
         fetch('/reports/completion-recipient-groups'),
         fetch('/reports/completion-engagement'),
-        fetch('/reports/completion-provider-events')
+        fetch('/reports/completion-provider-events'),
+        fetch('/checkout-reviews')
       ]);
       const data = await response.json();
       const quality = await qualityResponse.json();
@@ -316,6 +323,7 @@ def admin_page_html() -> str:
       const completionGroups = await completionGroupResponse.json();
       const completionEngagement = await completionEngagementResponse.json();
       const completionProviderEvents = await completionProviderEventResponse.json();
+      const checkoutReviews = await checkoutReviewResponse.json();
       latestCompletionTemplates = completionTemplates;
       latestCompletionGroups = completionGroups;
       renderMetrics(data.metrics);
@@ -340,6 +348,7 @@ def admin_page_html() -> str:
       renderCompletionBatches(completionBatches);
       renderCompletionEngagement(completionEngagement);
       renderCompletionProviderEvents(completionProviderEvents);
+      renderCheckoutReviews(checkoutReviews);
       renderTraces(traces);
       renderObservabilityExports(observabilityExports);
     }
@@ -363,6 +372,9 @@ def admin_page_html() -> str:
         ['완료 반송', metrics.completion_delivery_bounces],
         ['완료 신고', metrics.completion_delivery_complaints],
         ['완료 제외', metrics.completion_delivery_suppressions],
+        ['결제 검수', metrics.checkout_reviews],
+        ['결제 보류', metrics.checkout_blocked_reviews],
+        ['결제 가능', metrics.checkout_ready_reviews],
         ['URL 모니터', metrics.source_monitors],
         ['소스 refresh', metrics.source_refresh_runs],
         ['refresh 실패', metrics.source_refresh_failures],
@@ -761,6 +773,32 @@ def admin_page_html() -> str:
             <h3>선택 ${item.selected_count}건 · 성공 ${item.sent_count}건 · 실패 ${item.failed_count}건</h3>
             <p>${item.note || '메모 없음'}</p>
             <ul>${deliveries}</ul>
+          </article>
+        `;
+      }).join('');
+    }
+
+    function renderCheckoutReviews(items) {
+      const root = document.querySelector('#checkout-reviews');
+      if (!items.length) {
+        root.innerHTML = '<p>아직 결제 전 검수 기록이 없습니다.</p>';
+        return;
+      }
+      root.innerHTML = items.map((item) => {
+        const tone = item.checkout_blocked ? 'danger' : item.readiness_status === 'warning' ? 'warn' : '';
+        const checks = item.items.map((check) => `
+          <li>${check.label} · ${check.status} · ${check.evidence}</li>
+        `).join('');
+        const missing = item.missing_acknowledgements.length
+          ? `<p>미승인 리스크: ${item.missing_acknowledgements.join(' / ')}</p>`
+          : '<p>미승인 리스크 없음</p>';
+        return `
+          <article class="review-item quality-item ${tone}">
+            <span class="kicker">${item.readiness_status} · ${new Date(item.created_at).toLocaleString()}</span>
+            <h3>${item.model_name || item.product_id || '선택 후보'} · ${Math.round(item.readiness_score)}점</h3>
+            <p>${item.final_recommendation}</p>
+            ${missing}
+            <ul>${checks}</ul>
           </article>
         `;
       }).join('');

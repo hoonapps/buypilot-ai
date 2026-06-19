@@ -81,6 +81,8 @@ def test_admin_page_exposes_review_console() -> None:
     assert "열람/클릭 이벤트" in response.text
     assert "tracking_pixel_path" in response.text
     assert "provider webhook 이벤트" in response.text
+    assert "결제 전 검수" in response.text
+    assert "checkout-reviews" in response.text
     assert "품질/비용 감사" in response.text
     assert "품질 회귀 모니터" in response.text
     assert "사용자 피드백" in response.text
@@ -258,6 +260,74 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     blocked_detail = client.get(f"/reports/{saved_payload['report_id']}", headers=WORKSPACE_B)
     assert blocked_detail.status_code == 404
 
+    top_recommendation = analysis["report"]["top_recommendations"][0]
+    checkout_review = client.post(
+        f"/reports/{saved_payload['report_id']}/checkout-review",
+        headers=WORKSPACE_A,
+        json={
+            "product_id": top_recommendation["product"]["id"],
+            "confirmed_price_krw": top_recommendation["price"]["effective_price_krw"],
+            "seller_answers": {},
+            "notes": "pytest 결제 직전 검수",
+        },
+    )
+    assert checkout_review.status_code == 200
+    checkout_payload = checkout_review.json()
+    assert checkout_payload["report_id"] == saved_payload["report_id"]
+    assert checkout_payload["trace_id"] == trace_id
+    assert checkout_payload["workspace_id"] == saved_payload["workspace_id"]
+    assert checkout_payload["product_id"] == top_recommendation["product"]["id"]
+    assert checkout_payload["items"]
+    assert checkout_payload["checkout_blocked"] is True
+    assert checkout_payload["missing_acknowledgements"]
+
+    acknowledged_checkout = client.post(
+        f"/reports/{saved_payload['report_id']}/checkout-review",
+        headers=WORKSPACE_A,
+        json={
+            "product_id": top_recommendation["product"]["id"],
+            "confirmed_price_krw": top_recommendation["price"]["effective_price_krw"],
+            "acknowledged_risks": checkout_payload["missing_acknowledgements"],
+            "seller_answers": {
+                question: "판매자 확인 완료"
+                for question in checkout_payload["seller_questions"]
+            },
+            "notes": "pytest 리스크 승인 후 검수",
+        },
+    )
+    assert acknowledged_checkout.status_code == 200
+    acknowledged_payload = acknowledged_checkout.json()
+    assert acknowledged_payload["checkout_blocked"] is False
+    assert acknowledged_payload["missing_acknowledgements"] == []
+    assert acknowledged_payload["readiness_score"] >= checkout_payload["readiness_score"]
+
+    checkout_reviews = client.get(
+        f"/reports/{saved_payload['report_id']}/checkout-reviews",
+        headers=WORKSPACE_A,
+    )
+    assert checkout_reviews.status_code == 200
+    assert len(checkout_reviews.json()) >= 2
+
+    all_checkout_reviews = client.get("/checkout-reviews", headers=WORKSPACE_A)
+    assert any(
+        item["review_id"] == acknowledged_payload["review_id"]
+        for item in all_checkout_reviews.json()
+    )
+
+    isolated_checkout = client.post(
+        f"/reports/{saved_payload['report_id']}/checkout-review",
+        headers=WORKSPACE_B,
+        json={"product_id": top_recommendation["product"]["id"]},
+    )
+    assert isolated_checkout.status_code == 404
+
+    invalid_checkout = client.post(
+        f"/reports/{saved_payload['report_id']}/checkout-review",
+        headers=WORKSPACE_A,
+        json={"product_id": "unknown_product"},
+    )
+    assert invalid_checkout.status_code == 404
+
     share = client.post(
         f"/reports/{saved_payload['report_id']}/share",
         headers=WORKSPACE_A,
@@ -304,6 +374,8 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     metrics_after_share = client.get("/ops/metrics", headers=WORKSPACE_A).json()
     assert metrics_after_share["shared_reports"] >= 1
     assert metrics_after_share["public_share_views"] >= 2
+    assert metrics_after_share["checkout_reviews"] >= 2
+    assert metrics_after_share["checkout_blocked_reviews"] >= 1
 
     completion_dry_run = client.post(
         "/reports/completion-batches",

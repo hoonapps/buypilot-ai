@@ -32,6 +32,8 @@ from specpilot_ai.core.models import (
     BetaLeadRequest,
     BetaReadinessDashboard,
     Category,
+    CheckoutReview,
+    CheckoutReviewRequest,
     CompletionDeliveryEngagement,
     CompletionDeliveryEngagementRequest,
     CompletionDeliveryProviderEvent,
@@ -523,6 +525,55 @@ def get_report(
     if report is None:
         raise HTTPException(status_code=404, detail="저장 리포트를 찾을 수 없습니다.")
     return report
+
+
+@app.post("/reports/{report_id}/checkout-review", response_model=CheckoutReview)
+def create_checkout_review(
+    report_id: str,
+    request: CheckoutReviewRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> CheckoutReview:
+    review = _store().create_checkout_review_for_workspace(
+        workspace.workspace_id,
+        report_id,
+        request,
+    )
+    if review is None:
+        raise HTTPException(
+            status_code=404,
+            detail="checkout review를 만들 리포트를 찾을 수 없습니다.",
+        )
+    return review
+
+
+@app.get("/reports/{report_id}/checkout-reviews", response_model=list[CheckoutReview])
+def list_report_checkout_reviews(
+    report_id: str,
+    limit: int = 50,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[CheckoutReview]:
+    report = _store().get_report_for_workspace(workspace.workspace_id, report_id)
+    if report is None:
+        raise HTTPException(
+            status_code=404,
+            detail="checkout review를 조회할 리포트를 찾을 수 없습니다.",
+        )
+    return _store().list_checkout_reviews_for_workspace(
+        workspace.workspace_id,
+        report_id=report_id,
+        limit=limit,
+    )
+
+
+@app.get("/checkout-reviews", response_model=list[CheckoutReview])
+def list_checkout_reviews(
+    limit: int = 50,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[CheckoutReview]:
+    return _store().list_checkout_reviews_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
 
 
 @app.post("/reports/{report_id}/share", response_model=ReportShare)

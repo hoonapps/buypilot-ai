@@ -42,6 +42,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 예산/조건 스트레스 테스트: 예산 10% 절감, 예산 10% 여유, 조건 강화 시 선택 변화 분석
 - 구매 타이밍 윈도우: 후보별 적정가 밴드, 목표가, 변동 리스크, 결제 트리거
 - 구매 실행 패키지: 결제 전 실행 단계, 판매자 확인 질문, 공유 검토 문구
+- 결제 전 검수: 저장 리포트 기준 최종 결제 금액, 옵션/사양, 판매자 답변, 리스크 승인 상태를 기록하고 결제 가능/보류 판정
 - 출처 신뢰도, 캐시 만료 기준, 제휴 고지 정책
 - Agent trace 조회와 SQLite span 저장
 - Observability export outbox: trace span과 품질 감사 payload를 OpenTelemetry/LangSmith 연동 전 큐로 저장하고 dispatch/retry 상태 추적
@@ -241,6 +242,39 @@ http://127.0.0.1:8000/r/share_xxxxxxxxxxxxxxxxxxxx
 
 ```bash
 curl -X DELETE http://127.0.0.1:8000/reports/report_xxxxxxxxxxxx/share \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
+결제 전 검수 생성:
+
+```bash
+curl -X POST http://127.0.0.1:8000/reports/report_xxxxxxxxxxxx/checkout-review \
+  -H "Content-Type: application/json" \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY" \
+  -d '{
+    "product_id": "desktop_creator_4070",
+    "confirmed_price_krw": 1980000,
+    "acknowledged_risks": [
+      "가격 변동 가능성이 있어 결제 직전 재확인이 필요합니다."
+    ],
+    "seller_answers": {
+      "주문 옵션명이 리포트의 CPU/GPU/RAM/SSD와 같은가요?": "동일 옵션 확인 완료"
+    },
+    "notes": "최종 주문 화면 캡처 보관 완료"
+  }'
+```
+
+결제 전 검수 이력 조회:
+
+```bash
+curl http://127.0.0.1:8000/reports/report_xxxxxxxxxxxx/checkout-reviews \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
+워크스페이스 전체 결제 검수 이력:
+
+```bash
+curl http://127.0.0.1:8000/checkout-reviews \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 

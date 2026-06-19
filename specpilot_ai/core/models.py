@@ -718,6 +718,42 @@ class SavedReportDetail(SavedReportSummary):
     notes: str = ""
 
 
+class CheckoutReviewRequest(BaseModel):
+    product_id: str | None = None
+    confirmed_price_krw: int | None = Field(default=None, ge=0)
+    acknowledged_risks: list[str] = Field(default_factory=list)
+    seller_answers: dict[str, str] = Field(default_factory=dict)
+    notes: str = ""
+
+
+class CheckoutReviewItem(BaseModel):
+    item_id: str
+    label: str
+    status: CheckStatus
+    evidence: str
+    required: bool = True
+
+
+class CheckoutReview(BaseModel):
+    review_id: str
+    report_id: str
+    trace_id: str
+    workspace_id: str = "demo"
+    product_id: str | None = None
+    model_name: str | None = None
+    confirmed_price_krw: int | None = None
+    readiness_status: CheckStatus
+    readiness_score: float = Field(ge=0, le=100)
+    checkout_blocked: bool = False
+    missing_acknowledgements: list[str] = Field(default_factory=list)
+    seller_questions: list[str] = Field(default_factory=list)
+    seller_answers: dict[str, str] = Field(default_factory=dict)
+    items: list[CheckoutReviewItem] = Field(default_factory=list)
+    final_recommendation: str
+    notes: str = ""
+    created_at: str
+
+
 class CompletionReportBatchRequest(BaseModel):
     report_ids: list[str] = Field(default_factory=list)
     channel: str = "email"
@@ -1027,6 +1063,9 @@ class OperationsMetrics(BaseModel):
     completion_delivery_bounces: int = 0
     completion_delivery_complaints: int = 0
     completion_delivery_suppressions: int = 0
+    checkout_reviews: int = 0
+    checkout_blocked_reviews: int = 0
+    checkout_ready_reviews: int = 0
     source_monitors: int = 0
     source_refresh_runs: int = 0
     source_refresh_failures: int = 0

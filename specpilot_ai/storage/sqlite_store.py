@@ -29,6 +29,9 @@ from specpilot_ai.core.models import (
     BetaReadinessCheck,
     BetaReadinessDashboard,
     Category,
+    CheckoutReview,
+    CheckoutReviewItem,
+    CheckoutReviewRequest,
     CheckStatus,
     CompletionDeliveryEngagement,
     CompletionDeliveryEngagementRequest,
@@ -914,6 +917,80 @@ class SpecPilotStore:
             updated_at=data["updated_at"],
             response=response,
         )
+
+    def create_checkout_review_for_workspace(
+        self,
+        workspace_id: str,
+        report_id: str,
+        request: CheckoutReviewRequest,
+    ) -> CheckoutReview | None:
+        report = self.get_report_for_workspace(workspace_id, report_id)
+        if report is None:
+            return None
+        review = _build_checkout_review(report, request)
+        if review is None:
+            return None
+        now = review.created_at
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO checkout_reviews (
+                    review_id, report_id, trace_id, workspace_id, product_id, model_name,
+                    confirmed_price_krw, readiness_status, readiness_score,
+                    checkout_blocked, missing_acknowledgements_json, seller_questions_json,
+                    seller_answers_json, items_json, final_recommendation, notes, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    review.review_id,
+                    review.report_id,
+                    review.trace_id,
+                    review.workspace_id,
+                    review.product_id,
+                    review.model_name,
+                    review.confirmed_price_krw,
+                    review.readiness_status.value,
+                    review.readiness_score,
+                    int(review.checkout_blocked),
+                    json.dumps(review.missing_acknowledgements, ensure_ascii=False),
+                    json.dumps(review.seller_questions, ensure_ascii=False),
+                    json.dumps(review.seller_answers, ensure_ascii=False),
+                    json.dumps(
+                        [item.model_dump(mode="json") for item in review.items],
+                        ensure_ascii=False,
+                    ),
+                    review.final_recommendation,
+                    review.notes,
+                    now,
+                ),
+            )
+        return review
+
+    def list_checkout_reviews_for_workspace(
+        self,
+        workspace_id: str,
+        report_id: str | None = None,
+        limit: int = 50,
+    ) -> list[CheckoutReview]:
+        if report_id:
+            where = "workspace_id = ? AND report_id = ?"
+            params: tuple[object, ...] = (workspace_id, report_id, limit)
+        else:
+            where = "workspace_id = ?"
+            params = (workspace_id, limit)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT *
+                FROM checkout_reviews
+                WHERE {where}
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [_checkout_review_from_row(row) for row in rows]
 
     def share_report_for_workspace(
         self,
@@ -2796,6 +2873,26 @@ class SpecPilotStore:
                 """,
                 params,
             ).fetchone()[0]
+            checkout_reviews = conn.execute(
+                f"SELECT COUNT(*) FROM checkout_reviews{where}",
+                params,
+            ).fetchone()[0]
+            checkout_blocked_reviews = conn.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM checkout_reviews{where}
+                {' AND ' if where else ' WHERE '}checkout_blocked = 1
+                """,
+                params,
+            ).fetchone()[0]
+            checkout_ready_reviews = conn.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM checkout_reviews{where}
+                {' AND ' if where else ' WHERE '}readiness_status = 'ok'
+                """,
+                params,
+            ).fetchone()[0]
             triggered_alerts = conn.execute(
                 f"""
                 SELECT COUNT(*)
@@ -2858,6 +2955,9 @@ class SpecPilotStore:
             completion_delivery_bounces=completion_delivery_bounces,
             completion_delivery_complaints=completion_delivery_complaints,
             completion_delivery_suppressions=completion_delivery_suppressions,
+            checkout_reviews=checkout_reviews,
+            checkout_blocked_reviews=checkout_blocked_reviews,
+            checkout_ready_reviews=checkout_ready_reviews,
             source_monitors=source_monitors,
             source_refresh_runs=source_refresh_runs,
             source_refresh_failures=source_refresh_failures,
@@ -2998,6 +3098,28 @@ class SpecPilotStore:
                     share_views INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
+                    FOREIGN KEY(trace_id) REFERENCES analysis_runs(trace_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS checkout_reviews (
+                    review_id TEXT PRIMARY KEY,
+                    report_id TEXT NOT NULL,
+                    trace_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    product_id TEXT,
+                    model_name TEXT,
+                    confirmed_price_krw INTEGER,
+                    readiness_status TEXT NOT NULL,
+                    readiness_score REAL NOT NULL DEFAULT 0,
+                    checkout_blocked INTEGER NOT NULL DEFAULT 0,
+                    missing_acknowledgements_json TEXT NOT NULL DEFAULT '[]',
+                    seller_questions_json TEXT NOT NULL DEFAULT '[]',
+                    seller_answers_json TEXT NOT NULL DEFAULT '{}',
+                    items_json TEXT NOT NULL DEFAULT '[]',
+                    final_recommendation TEXT NOT NULL DEFAULT '',
+                    notes TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(report_id) REFERENCES saved_reports(report_id),
                     FOREIGN KEY(trace_id) REFERENCES analysis_runs(trace_id)
                 );
 
@@ -3313,6 +3435,10 @@ class SpecPilotStore:
 
                 CREATE INDEX IF NOT EXISTS idx_saved_reports_trace
                     ON saved_reports(trace_id);
+                CREATE INDEX IF NOT EXISTS idx_checkout_reviews_workspace
+                    ON checkout_reviews(workspace_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_checkout_reviews_report
+                    ON checkout_reviews(report_id, created_at);
                 CREATE INDEX IF NOT EXISTS idx_alerts_trace
                     ON alert_subscriptions(trace_id);
                 CREATE INDEX IF NOT EXISTS idx_source_review_status
@@ -3870,6 +3996,294 @@ def _saved_report_summary_from_row(row: sqlite3.Row) -> SavedReportSummary:
         created_at=data["created_at"],
         updated_at=data["updated_at"],
     )
+
+
+def _checkout_review_from_row(row: sqlite3.Row) -> CheckoutReview:
+    data = dict(row)
+    return CheckoutReview(
+        review_id=data["review_id"],
+        report_id=data["report_id"],
+        trace_id=data["trace_id"],
+        workspace_id=data["workspace_id"],
+        product_id=data["product_id"],
+        model_name=data["model_name"],
+        confirmed_price_krw=data["confirmed_price_krw"],
+        readiness_status=CheckStatus(data["readiness_status"]),
+        readiness_score=data["readiness_score"],
+        checkout_blocked=bool(data["checkout_blocked"]),
+        missing_acknowledgements=json.loads(data["missing_acknowledgements_json"]),
+        seller_questions=json.loads(data["seller_questions_json"]),
+        seller_answers=json.loads(data["seller_answers_json"]),
+        items=[
+            CheckoutReviewItem.model_validate(item)
+            for item in json.loads(data["items_json"])
+        ],
+        final_recommendation=data["final_recommendation"],
+        notes=data["notes"],
+        created_at=data["created_at"],
+    )
+
+
+def _build_checkout_review(
+    report: SavedReportDetail,
+    request: CheckoutReviewRequest,
+) -> CheckoutReview | None:
+    purchase = report.response.report
+    product_id = request.product_id or purchase.final_pick_id
+    recommendation = next(
+        (
+            item
+            for item in purchase.top_recommendations
+            if item.product.id == product_id
+        ),
+        None,
+    )
+    if recommendation is None:
+        return None
+    product_id = recommendation.product.id
+    model_name = recommendation.product.model_name
+    current_price = recommendation.price.effective_price_krw
+
+    option_audit = next(
+        (item for item in purchase.option_audits if item.product_id == product_id),
+        None,
+    )
+    deal_window = next(
+        (item for item in purchase.deal_windows if item.product_id == product_id),
+        None,
+    )
+    risk_candidates = [
+        *(purchase.purchase_decision.risk_flags if purchase.purchase_decision else []),
+        *(option_audit.purchase_blockers if option_audit else []),
+        *(option_audit.mismatch_risks if option_audit else []),
+    ]
+    if deal_window and deal_window.status != CheckStatus.ok:
+        risk_candidates.append(deal_window.wait_reason)
+    required_acknowledgements = _dedupe_nonempty(risk_candidates)
+    acknowledged = set(_dedupe_nonempty(request.acknowledged_risks))
+    missing_acknowledgements = [
+        item for item in required_acknowledgements if item not in acknowledged
+    ]
+
+    seller_questions = (
+        purchase.execution_plan.seller_questions
+        if purchase.execution_plan
+        else []
+    )
+    answered_questions = {
+        question
+        for question, answer in request.seller_answers.items()
+        if question.strip() and answer.strip()
+    }
+    missing_seller_questions = [
+        question for question in seller_questions if question not in answered_questions
+    ]
+
+    items = [
+        _checkout_price_item(
+            request.confirmed_price_krw,
+            current_price,
+            report.response.criteria.budget_krw,
+        ),
+        _checkout_option_item(option_audit),
+        _checkout_seller_item(seller_questions, missing_seller_questions),
+        _checkout_source_item(purchase.source_trust),
+        _checkout_ack_item(missing_acknowledgements),
+    ]
+    blocker_count = sum(item.status == CheckStatus.blocker for item in items)
+    warning_count = sum(item.status == CheckStatus.warning for item in items)
+    readiness_score = max(
+        0,
+        100 - blocker_count * 32 - warning_count * 12 - len(missing_acknowledgements) * 8,
+    )
+    if blocker_count:
+        readiness_status = CheckStatus.blocker
+        final_recommendation = (
+            "결제를 보류하세요. 누락된 리스크 승인 또는 필수 검수 항목이 있습니다."
+        )
+    elif warning_count:
+        readiness_status = CheckStatus.warning
+        final_recommendation = (
+            "결제 전 판매자 답변과 가격을 한 번 더 확인하면 진행 가능합니다."
+        )
+    else:
+        readiness_status = CheckStatus.ok
+        final_recommendation = (
+            "결제 진행 가능 상태입니다. 최종 주문 화면의 금액과 옵션명을 보존하세요."
+        )
+
+    return CheckoutReview(
+        review_id=f"checkout_{uuid4().hex[:12]}",
+        report_id=report.report_id,
+        trace_id=report.trace_id,
+        workspace_id=report.workspace_id,
+        product_id=product_id,
+        model_name=model_name,
+        confirmed_price_krw=request.confirmed_price_krw,
+        readiness_status=readiness_status,
+        readiness_score=round(float(readiness_score), 1),
+        checkout_blocked=readiness_status == CheckStatus.blocker,
+        missing_acknowledgements=missing_acknowledgements,
+        seller_questions=seller_questions,
+        seller_answers={
+            question: answer
+            for question, answer in request.seller_answers.items()
+            if question.strip() and answer.strip()
+        },
+        items=items,
+        final_recommendation=final_recommendation,
+        notes=request.notes,
+        created_at=_now(),
+    )
+
+
+def _checkout_price_item(
+    confirmed_price: int | None,
+    current_price: int,
+    budget: int | None,
+) -> CheckoutReviewItem:
+    if confirmed_price is None:
+        return CheckoutReviewItem(
+            item_id="price_confirmation",
+            label="최종 결제 금액 확인",
+            status=CheckStatus.warning,
+            evidence="최종 주문 화면의 배송비, 조립비, 카드 할인 반영 금액이 입력되지 않았습니다.",
+        )
+    tolerance = max(50_000, int(current_price * 0.03)) if current_price else 50_000
+    if budget is not None and confirmed_price > budget:
+        return CheckoutReviewItem(
+            item_id="price_confirmation",
+            label="최종 결제 금액 확인",
+            status=CheckStatus.blocker,
+            evidence=f"확인 금액 {confirmed_price:,}원이 예산 {budget:,}원을 초과합니다.",
+        )
+    if current_price and confirmed_price > current_price + tolerance:
+        return CheckoutReviewItem(
+            item_id="price_confirmation",
+            label="최종 결제 금액 확인",
+            status=CheckStatus.warning,
+            evidence=(
+                f"확인 금액 {confirmed_price:,}원이 리포트 실구매가 "
+                f"{current_price:,}원보다 높습니다."
+            ),
+        )
+    return CheckoutReviewItem(
+        item_id="price_confirmation",
+        label="최종 결제 금액 확인",
+        status=CheckStatus.ok,
+        evidence=f"확인 금액 {confirmed_price:,}원이 리포트 가격 범위와 맞습니다.",
+    )
+
+
+def _checkout_option_item(audit) -> CheckoutReviewItem:
+    if audit is None:
+        return CheckoutReviewItem(
+            item_id="option_audit",
+            label="옵션/사양 검수",
+            status=CheckStatus.warning,
+            evidence="선택 후보의 옵션 검수표를 찾지 못했습니다.",
+        )
+    if audit.purchase_blockers:
+        return CheckoutReviewItem(
+            item_id="option_audit",
+            label="옵션/사양 검수",
+            status=CheckStatus.blocker,
+            evidence=" / ".join(audit.purchase_blockers),
+        )
+    warning_items = [
+        item for item in audit.critical_items if item.status != CheckStatus.ok
+    ]
+    if warning_items or audit.mismatch_risks:
+        return CheckoutReviewItem(
+            item_id="option_audit",
+            label="옵션/사양 검수",
+            status=CheckStatus.warning,
+            evidence=(
+                " / ".join(audit.mismatch_risks[:2])
+                or f"{len(warning_items)}개 사양 확인이 필요합니다."
+            ),
+        )
+    return CheckoutReviewItem(
+        item_id="option_audit",
+        label="옵션/사양 검수",
+        status=CheckStatus.ok,
+        evidence=audit.summary,
+    )
+
+
+def _checkout_seller_item(
+    seller_questions: list[str],
+    missing_questions: list[str],
+) -> CheckoutReviewItem:
+    if not seller_questions:
+        return CheckoutReviewItem(
+            item_id="seller_questions",
+            label="판매자 확인 질문",
+            status=CheckStatus.ok,
+            evidence="추가 판매자 질문이 필요하지 않습니다.",
+            required=False,
+        )
+    if missing_questions:
+        return CheckoutReviewItem(
+            item_id="seller_questions",
+            label="판매자 확인 질문",
+            status=CheckStatus.warning,
+            evidence=f"{len(missing_questions)}개 질문의 답변이 아직 없습니다.",
+        )
+    return CheckoutReviewItem(
+        item_id="seller_questions",
+        label="판매자 확인 질문",
+        status=CheckStatus.ok,
+        evidence="필수 판매자 확인 질문에 대한 답변이 기록되었습니다.",
+    )
+
+
+def _checkout_source_item(source_trust: list) -> CheckoutReviewItem:
+    review_required = [
+        source for source in source_trust if source.requires_human_review
+    ]
+    if review_required:
+        names = ", ".join(source.source_name for source in review_required[:3])
+        return CheckoutReviewItem(
+            item_id="source_trust",
+            label="출처 신뢰도",
+            status=CheckStatus.warning,
+            evidence=f"검수 필요 출처가 있습니다: {names}",
+        )
+    return CheckoutReviewItem(
+        item_id="source_trust",
+        label="출처 신뢰도",
+        status=CheckStatus.ok,
+        evidence="가격, 리뷰, 벤치마크 출처가 정책 기준을 통과했습니다.",
+    )
+
+
+def _checkout_ack_item(missing_acknowledgements: list[str]) -> CheckoutReviewItem:
+    if missing_acknowledgements:
+        return CheckoutReviewItem(
+            item_id="risk_acknowledgement",
+            label="리스크 승인",
+            status=CheckStatus.blocker,
+            evidence=f"{len(missing_acknowledgements)}개 리스크를 아직 승인하지 않았습니다.",
+        )
+    return CheckoutReviewItem(
+        item_id="risk_acknowledgement",
+        label="리스크 승인",
+        status=CheckStatus.ok,
+        evidence="구매 전 리스크 승인 항목이 모두 처리되었습니다.",
+    )
+
+
+def _dedupe_nonempty(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result = []
+    for item in items:
+        normalized = item.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
 
 
 def _completion_template_from_row(row: sqlite3.Row) -> CompletionReportTemplate:
