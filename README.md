@@ -32,12 +32,14 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 리뷰/벤치마크 근거 연결
 - TOP 3 추천과 제외 후보 2개
 - 비교표, 가격 알림 목표가, 구매 전 체크리스트
+- 출처 신뢰도, 캐시 만료 기준, 제휴 고지 정책
 - Agent trace 조회
 - SQLite 기반 분석 결과 저장
 - 저장 리포트 조회와 가격 알림 구독
 - 운영 지표 API
 - 가격/리뷰/벤치마크/공식 스토어 소스 어댑터 계약
 - 관리자 검수 콘솔(`/admin`)
+- 공개 신뢰 정책 API(`/policy/trust`)
 - Neo4j 그래프 스키마 미리보기
 - 데모 모드 기본 지원
 
@@ -140,6 +142,14 @@ curl -X POST http://127.0.0.1:8000/alerts/preview \
 ```bash
 curl http://127.0.0.1:8000/traces/trace_xxxxxxxxxxxx \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
+### 출처 신뢰 정책
+
+가격, 리뷰, 벤치마크 출처의 캐시 기준과 제휴 고지 원칙을 확인합니다.
+
+```bash
+curl http://127.0.0.1:8000/policy/trust
 ```
 
 ### 리포트 저장
@@ -250,6 +260,8 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `report.benchmark_evidence`: 성능 근거
 - `report.price_alerts`: 목표가와 재조회 주기
 - `report.source_health`: 출처 상태 요약
+- `report.source_trust`: 출처별 신뢰 등급, 신뢰도, 캐시 TTL, 검수 필요 여부
+- `report.trust_policy`: 가격 캐시, 제휴 고지, 공정성, 리뷰 표현 정책
 - `trace_events`: Agent 단계별 실행 로그
 
 ## 로컬 저장소
@@ -322,6 +334,7 @@ make docker-build
 - `/analyze`, `/alerts/preview`, `/traces/{trace_id}`가 동작하는지
 - `/reports/save`, `/reports/{report_id}`, `/alerts/subscribe`, `/ops/metrics`가 동작하는지
 - `/sources/status`, `/sources/collect`, `/admin/reviews`, `/admin/dashboard`가 동작하는지
+- `/policy/trust`가 캐시, 제휴 고지, 공정성 정책을 반환하는지
 - `/health`, `/ready` 운영 엔드포인트가 동작하는지
 
 ## CI
@@ -336,15 +349,16 @@ GitHub Actions는 `main` push와 PR에서 다음을 실행합니다.
 ## 운영 원칙
 
 - 가격은 수집 시각과 출처를 함께 보여줍니다.
+- 가격 소스는 캐시 TTL과 만료 시 재확인 정책을 함께 보여줍니다.
 - 리뷰는 확정 판단이 아니라 리스크 신호로 표현합니다.
 - 출처 없는 스펙이나 가격은 추천 근거로 사용하지 않습니다.
 - 특정 판매처 편향을 줄이기 위해 가격, 호환성, 리뷰, 안정성 점수를 분리합니다.
 - 제휴 링크를 붙일 경우 추천 기준과 제휴 고지를 분리해서 노출해야 합니다.
+- 신뢰도 0.8 미만 또는 리스크 플래그가 있는 근거는 관리자 검수 큐에 넣습니다.
 
 ## 다음 제품화 과제
 
 - 실제 가격 비교/오픈마켓/공식 스토어 어댑터의 네트워크 커넥터 연결
-- 사용자 계정과 저장 견적 권한 모델
 - 실제 가격 알림 발송 채널 연동
 - LangSmith 또는 OpenTelemetry trace 저장
 - 관리자용 분석 비용 대시보드
