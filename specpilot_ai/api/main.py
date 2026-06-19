@@ -60,7 +60,7 @@ def admin_page() -> str:
 
 
 @app.get("/health")
-def health() -> dict[str, str | bool]:
+def health() -> dict[str, object]:
     settings = get_settings()
     repo = Neo4jRepository(settings)
     try:
@@ -69,9 +69,29 @@ def health() -> dict[str, str | bool]:
         repo.close()
     return {
         "status": "ok",
+        "app_env": settings.app_env,
+        "app_version": settings.app_version,
         "demo_mode": settings.demo_mode,
         "neo4j_ready": neo4j_ready,
         "storage_ready": True,
+        "storage_path": settings.storage_path,
+        "source_adapters": len(_collector().statuses()),
+    }
+
+
+@app.get("/ready")
+def ready() -> dict[str, object]:
+    settings = get_settings()
+    store = _store()
+    metrics = store.metrics()
+    adapter_statuses = _collector().statuses()
+    return {
+        "ready": True,
+        "app_env": settings.app_env,
+        "storage_ready": True,
+        "source_adapters_ready": all(adapter.enabled for adapter in adapter_statuses),
+        "analysis_runs": metrics.analysis_runs,
+        "pending_reviews": len(_store().list_review_items(limit=100)),
     }
 
 

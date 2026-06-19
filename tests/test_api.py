@@ -13,6 +13,18 @@ def test_launch_page_exposes_product_ui() -> None:
     assert "분석 실행" in response.text
 
 
+def test_health_and_ready_endpoints_expose_operations_state() -> None:
+    health = client.get("/health")
+    ready = client.get("/ready")
+
+    assert health.status_code == 200
+    assert ready.status_code == 200
+    assert health.json()["storage_ready"] is True
+    assert health.json()["source_adapters"] >= 4
+    assert ready.json()["ready"] is True
+    assert ready.json()["source_adapters_ready"] is True
+
+
 def test_admin_page_exposes_review_console() -> None:
     response = client.get("/admin")
 
