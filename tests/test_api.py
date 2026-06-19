@@ -85,6 +85,8 @@ def test_admin_page_exposes_review_console() -> None:
     assert "checkout-reviews" in response.text
     assert "구매 결과" in response.text
     assert "purchase-outcomes" in response.text
+    assert "학습 인사이트" in response.text
+    assert "learning-insights" in response.text
     assert "품질/비용 감사" in response.text
     assert "품질 회귀 모니터" in response.text
     assert "사용자 피드백" in response.text
@@ -471,6 +473,32 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     assert (
         metrics_after_share["purchase_outcome_value_krw"]
         >= outcome_payload["final_paid_price_krw"]
+    )
+
+    learning = client.get("/ops/learning-insights", headers=WORKSPACE_A)
+    assert learning.status_code == 200
+    learning_payload = learning.json()
+    assert learning_payload["workspace_id"] == saved_payload["workspace_id"]
+    assert learning_payload["insight_count"] >= 1
+    assert learning_payload["summary"]
+    assert learning_payload["top_actions"]
+    top_insight = next(
+        item
+        for item in learning_payload["insights"]
+        if item["product_id"] == top_recommendation["product"]["id"]
+    )
+    assert top_insight["outcome_count"] >= 2
+    assert top_insight["purchase_count"] >= 1
+    assert top_insight["delayed_count"] >= 1
+    assert top_insight["checkout_review_count"] >= 2
+    assert top_insight["conversion_rate"] > 0
+    assert top_insight["recommended_action"]
+
+    isolated_learning = client.get("/ops/learning-insights", headers=WORKSPACE_B)
+    assert isolated_learning.status_code == 200
+    assert all(
+        item["product_id"] != top_recommendation["product"]["id"]
+        for item in isolated_learning.json()["insights"]
     )
 
     completion_dry_run = client.post(

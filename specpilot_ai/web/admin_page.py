@@ -217,6 +217,12 @@ def admin_page_html() -> str:
         <div class="review-list" id="purchase-outcomes"></div>
       </div>
       <div class="panel">
+        <h2>학습 인사이트</h2>
+        <p>구매 결과, 피드백, 결제 검수 신호를 제품별 개선 액션으로 묶습니다.</p>
+        <div class="quality-list" id="learning-insight-summary"></div>
+        <div class="review-list" id="learning-insights"></div>
+      </div>
+      <div class="panel">
         <h2>완료 리포트 배치</h2>
         <p>저장된 구매 리포트를 템플릿과 수신자 그룹 기준으로 운영 outbox에 발송합니다.</p>
         <input id="completion-target" value="ops@example.com" />
@@ -272,6 +278,7 @@ def admin_page_html() -> str:
         betaBacklogResponse,
         betaBacklogSummaryResponse,
         regressionResponse,
+        learningInsightResponse,
         observabilityResponse,
         completionBatchResponse,
         completionTemplateResponse,
@@ -298,6 +305,7 @@ def admin_page_html() -> str:
         fetch('/beta/backlog'),
         fetch('/beta/backlog/summary'),
         fetch('/ops/regression'),
+        fetch('/ops/learning-insights'),
         fetch('/ops/observability/exports'),
         fetch('/reports/completion-batches'),
         fetch('/reports/completion-templates'),
@@ -324,6 +332,7 @@ def admin_page_html() -> str:
       const betaBacklog = await betaBacklogResponse.json();
       const betaBacklogSummary = await betaBacklogSummaryResponse.json();
       const regression = await regressionResponse.json();
+      const learningInsights = await learningInsightResponse.json();
       const observabilityExports = await observabilityResponse.json();
       const completionBatches = await completionBatchResponse.json();
       const completionTemplates = await completionTemplateResponse.json();
@@ -344,6 +353,7 @@ def admin_page_html() -> str:
       renderSourceProviders(providers);
       renderQuality(quality);
       renderOpsRegression(regression);
+      renderLearningInsights(learningInsights);
       renderFeedback(feedback);
       renderBetaLeads(betaLeads);
       renderBetaCohorts(betaCohorts);
@@ -573,6 +583,44 @@ def admin_page_html() -> str:
           <ul>${providerCards}</ul>
         </article>
       `;
+    }
+
+    function renderLearningInsights(dashboard) {
+      const summaryRoot = document.querySelector('#learning-insight-summary');
+      const listRoot = document.querySelector('#learning-insights');
+      const tone = dashboard.status === 'blocker'
+        ? 'danger'
+        : dashboard.status === 'warning' ? 'warn' : '';
+      const actions = dashboard.top_actions && dashboard.top_actions.length
+        ? dashboard.top_actions.map((item) => `<li>${item}</li>`).join('')
+        : '<li>현재 즉시 실행할 학습 액션은 없습니다.</li>';
+      summaryRoot.innerHTML = `
+        <article class="review-item quality-item ${tone}">
+          <span class="kicker">learning · ${dashboard.status}</span>
+          <h3>제품 인사이트 ${dashboard.insight_count}개</h3>
+          <p>${dashboard.summary}</p>
+          <ul>${actions}</ul>
+        </article>
+      `;
+      if (!dashboard.insights.length) {
+        listRoot.innerHTML = '<p>아직 제품별 학습 인사이트가 없습니다.</p>';
+        return;
+      }
+      listRoot.innerHTML = dashboard.insights.map((item) => {
+        const itemTone = item.status === 'blocker'
+          ? 'danger'
+          : item.status === 'warning' ? 'warn' : '';
+        const tags = item.learning_tags.length ? item.learning_tags.join(' / ') : '태그 없음';
+        return `
+          <article class="review-item quality-item ${itemTone}">
+            <span class="kicker">${item.status} · ${tags}</span>
+            <h3>${item.model_name || item.product_id} · 전환 ${Math.round(item.conversion_rate * 100)}%</h3>
+            <p>${item.evidence}</p>
+            <p>만족도 ${item.average_satisfaction} / 결제 보류 ${item.checkout_blocked_count}/${item.checkout_review_count} / 전환금액 ${Math.round(item.conversion_value_krw).toLocaleString()}원</p>
+            <p>${item.recommended_action}</p>
+          </article>
+        `;
+      }).join('');
     }
 
     function renderTraces(items) {

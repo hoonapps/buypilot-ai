@@ -520,6 +520,38 @@ class OpsRegressionDashboard(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class OpsLearningInsight(BaseModel):
+    product_id: str
+    model_name: str | None = None
+    outcome_count: int = 0
+    purchase_count: int = 0
+    abandoned_count: int = 0
+    delayed_count: int = 0
+    returned_count: int = 0
+    checkout_review_count: int = 0
+    checkout_blocked_count: int = 0
+    feedback_count: int = 0
+    average_satisfaction: float = 0
+    conversion_rate: float = 0
+    return_rate: float = 0
+    average_price_delta_krw: float = 0
+    conversion_value_krw: int = 0
+    status: CheckStatus = CheckStatus.ok
+    evidence: str = ""
+    recommended_action: str = ""
+    learning_tags: list[str] = Field(default_factory=list)
+
+
+class OpsLearningDashboard(BaseModel):
+    workspace_id: str
+    generated_at: str
+    status: CheckStatus
+    summary: str
+    insight_count: int = 0
+    top_actions: list[str] = Field(default_factory=list)
+    insights: list[OpsLearningInsight] = Field(default_factory=list)
+
+
 class ObservabilityExportRequest(BaseModel):
     trace_id: str
     destination: str = "opentelemetry"

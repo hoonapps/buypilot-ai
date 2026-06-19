@@ -44,6 +44,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 구매 실행 패키지: 결제 전 실행 단계, 판매자 확인 질문, 공유 검토 문구
 - 결제 전 검수: 저장 리포트 기준 최종 결제 금액, 옵션/사양, 판매자 답변, 리스크 승인 상태를 기록하고 결제 가능/보류 판정
 - 구매 결과 추적: 저장 리포트가 실제 구매, 이탈, 지연, 반품/취소로 이어졌는지 기록하고 최종 결제 금액 차이와 학습 신호 집계
+- 학습 인사이트: 구매 결과, 결제 전 검수 차단, 사용자 피드백을 제품별 전환/반품/가격 신호로 묶어 개선 액션 추천
 - 출처 신뢰도, 캐시 만료 기준, 제휴 고지 정책
 - Agent trace 조회와 SQLite span 저장
 - Observability export outbox: trace span과 품질 감사 payload를 OpenTelemetry/LangSmith 연동 전 큐로 저장하고 dispatch/retry 상태 추적
@@ -309,6 +310,13 @@ curl http://127.0.0.1:8000/reports/report_xxxxxxxxxxxx/purchase-outcomes \
 
 ```bash
 curl http://127.0.0.1:8000/purchase-outcomes \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
+제품별 학습 인사이트:
+
+```bash
+curl http://127.0.0.1:8000/ops/learning-insights \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
@@ -881,6 +889,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `share_token`, `shared_at`, `share_views`: 저장 리포트 공개 공유 상태
 - `/reports/completion-templates`, `/reports/completion-recipient-groups`, `/reports/completion-preview`, `/reports/completion-batches`, `/reports/completion-engagement`, `/reports/completion-provider-events`, `/reports/completion-deliveries/provider-webhooks`, `/t/o/{tracking_token}.png`, `/t/c/{tracking_token}`: 완료 리포트 템플릿, 수신자 그룹, unsubscribe 제외, 발송 전 렌더링 미리보기, batch와 개별 delivery 성공/실패/재시도/열람/클릭/반송/신고/수신 제외 상태, provider 삽입용 공개 추적 픽셀/클릭 리다이렉트
 - `purchase_outcomes`, `completed_purchase_outcomes`, `purchase_conversion_rate`, `average_final_price_delta_krw`, `purchase_outcome_value_krw`: 실제 구매 결과와 최종 결제 금액 차이를 보는 운영 지표
+- `/ops/learning-insights`: 실제 구매 결과, 결제 전 검수 차단, 만족도 피드백을 제품별 전환율, 반품률, 가격 차이, 개선 액션으로 집계
 - `feedback_count`, `average_satisfaction`, `purchase_intent_rate`: 추천 결과가 실제 구매 판단으로 이어지는지 보는 운영 지표
 - `beta_leads`: 베타 신청 리드 수
 - `alert_channels`, `alert_delivery_attempts`, `sent_alert_deliveries`, `failed_alert_deliveries`: 알림 발송 채널과 dispatch 운영 지표
@@ -959,6 +968,7 @@ make docker-build
 - `/reports/{report_id}/share`, `/public/reports/{share_token}`, `/r/{share_token}`이 공개 공유 리포트를 만들고 해제하는지
 - `/reports/{report_id}/checkout-review`, `/reports/{report_id}/checkout-reviews`, `/checkout-reviews`가 결제 전 검수와 워크스페이스 격리를 처리하는지
 - `/reports/{report_id}/purchase-outcomes`, `/purchase-outcomes`가 실제 구매, 이탈, 지연, 반품/취소 결과와 최종가 차이를 저장하고 워크스페이스별로 격리하는지
+- `/ops/learning-insights`가 구매 결과, 결제 검수, 피드백을 제품별 전환/리스크/개선 액션으로 묶고 워크스페이스별로 격리하는지
 - `/reports/completion-preview`, `/reports/completion-batches`, `/reports/completion-engagement`, `/reports/completion-provider-events`, `/reports/completion-deliveries/provider-webhooks`, `/t/o/{tracking_token}.png`, `/t/c/{tracking_token}`가 완료 리포트 미리보기, batch, delivery, 공개 추적 픽셀/클릭 리다이렉트, provider webhook, 열람/클릭/반송/신고/수신 제외 상태를 저장하고 워크스페이스별로 격리하는지
 - `/alerts/evaluate`, `/alerts/events`가 목표가 도달 이벤트를 저장하고 격리하는지
 - `/alerts/channels`, `/alerts/dispatch`, `/alerts/deliveries`가 발송 채널 설정, 큐 발송, 발송 시도 기록을 워크스페이스별로 처리하는지
@@ -1009,6 +1019,7 @@ GitHub Actions는 `main` push와 PR에서 다음을 실행합니다.
 - 구매 타이밍 윈도우는 현재가, 목표가, 적정가 밴드, 쿠폰/재고 변동 리스크를 묶어 지금 결제할지 기다릴지 판단하게 합니다.
 - 구매 실행 패키지는 결제 전 확인, 판매자 문의, 주변 검토 공유까지 한 흐름으로 제공합니다.
 - 구매 결과는 주문번호 원문을 저장하지 않고 마스킹하며, 실제 구매/이탈/지연/반품 신호와 최종가 차이를 모델 개선과 운영 판단에 사용합니다.
+- 학습 인사이트는 구매 결과, 결제 전 검수 차단, 피드백 만족도를 합쳐 제품별 전환율, 반품률, 가격 신선도, 다음 개선 액션으로 운영 콘솔에 노출합니다.
 - 완료 리포트 배치는 저장된 구매 리포트를 운영 채널 outbox로 묶어 전달하고, 템플릿, 수신자 그룹, unsubscribe 제외, 발송 전 렌더링 미리보기, provider 삽입용 공개 추적 픽셀/클릭 리다이렉트, provider webhook 기반 반송/신고/수신 제외, batch별 성공/실패/재시도/열람/클릭 상태를 남깁니다.
 - 목표가 도달 알림은 발송 큐와 채널별 dispatch 시도를 남기고 실패 시 재시도 기준을 함께 저장합니다.
 - 연락처와 이메일 원문은 저장하지 않고 마스킹된 값만 운영 콘솔에 노출합니다.

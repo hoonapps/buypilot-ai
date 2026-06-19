@@ -52,6 +52,8 @@ from specpilot_ai.core.models import (
     ObservabilityExportRecord,
     ObservabilityExportRequest,
     OperationsMetrics,
+    OpsLearningDashboard,
+    OpsLearningInsight,
     OpsRegressionDashboard,
     OpsRegressionPeriod,
     ProviderReliabilityMetric,
@@ -1729,6 +1731,101 @@ class SpecPilotStore:
             provider_reliability=provider_reliability,
             risk_flags=risk_flags,
             next_actions=next_actions,
+        )
+
+    def learning_insights_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 20,
+    ) -> OpsLearningDashboard:
+        capped_limit = max(1, min(limit, 100))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    product_id,
+                    MAX(model_name) AS model_name,
+                    COUNT(*) AS outcome_count,
+                    SUM(CASE WHEN status = 'purchased' THEN 1 ELSE 0 END)
+                        AS purchase_count,
+                    SUM(CASE WHEN status = 'abandoned' THEN 1 ELSE 0 END)
+                        AS abandoned_count,
+                    SUM(CASE WHEN status = 'delayed' THEN 1 ELSE 0 END)
+                        AS delayed_count,
+                    SUM(CASE WHEN status = 'returned' THEN 1 ELSE 0 END)
+                        AS returned_count,
+                    AVG(satisfaction) AS average_satisfaction,
+                    AVG(price_delta_krw) AS average_price_delta_krw,
+                    SUM(conversion_value_krw) AS conversion_value_krw,
+                    MAX(created_at) AS latest_at
+                FROM purchase_outcomes
+                WHERE workspace_id = ? AND product_id IS NOT NULL
+                GROUP BY product_id
+                ORDER BY latest_at DESC
+                LIMIT ?
+                """,
+                (workspace_id, capped_limit),
+            ).fetchall()
+            checkout_rows = conn.execute(
+                """
+                SELECT
+                    product_id,
+                    COUNT(*) AS checkout_review_count,
+                    SUM(CASE WHEN checkout_blocked = 1 THEN 1 ELSE 0 END)
+                        AS checkout_blocked_count
+                FROM checkout_reviews
+                WHERE workspace_id = ? AND product_id IS NOT NULL
+                GROUP BY product_id
+                """,
+                (workspace_id,),
+            ).fetchall()
+            feedback_rows = conn.execute(
+                """
+                SELECT
+                    selected_product_id AS product_id,
+                    COUNT(*) AS feedback_count,
+                    AVG(rating) AS feedback_satisfaction
+                FROM user_feedback
+                WHERE workspace_id = ? AND selected_product_id IS NOT NULL
+                GROUP BY selected_product_id
+                """,
+                (workspace_id,),
+            ).fetchall()
+        checkout_by_product = {row["product_id"]: row for row in checkout_rows}
+        feedback_by_product = {row["product_id"]: row for row in feedback_rows}
+        insights = [
+            _learning_insight_from_rows(
+                outcome=row,
+                checkout=checkout_by_product.get(row["product_id"]),
+                feedback=feedback_by_product.get(row["product_id"]),
+            )
+            for row in rows
+        ]
+        status = _learning_dashboard_status(insights)
+        top_actions = _learning_top_actions(insights)
+        if not insights:
+            return OpsLearningDashboard(
+                workspace_id=workspace_id,
+                generated_at=_now(),
+                status=CheckStatus.warning,
+                summary=(
+                    "아직 구매 결과 표본이 없습니다. 완료 리포트 발송 후 "
+                    "실제 구매, 이탈, 지연, 반품 결과를 최소 5건 이상 수집하세요."
+                ),
+                insight_count=0,
+                top_actions=[
+                    "구매 완료 사용자에게 purchase outcome 기록을 요청하세요.",
+                    "이탈 사용자는 가격, 신뢰, 옵션 불확실성 사유를 분리해 기록하세요.",
+                ],
+            )
+        return OpsLearningDashboard(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            status=status,
+            summary=_learning_dashboard_summary(status, insights),
+            insight_count=len(insights),
+            top_actions=top_actions,
+            insights=insights,
         )
 
     def create_observability_export_for_workspace(
@@ -4970,6 +5067,166 @@ def _ops_regression_period(label: str, rows: list[sqlite3.Row]) -> OpsRegression
         blocker_count=blockers,
         started_at=min(created_values) if created_values else None,
         ended_at=max(created_values) if created_values else None,
+    )
+
+
+def _learning_insight_from_rows(
+    *,
+    outcome: sqlite3.Row,
+    checkout: sqlite3.Row | None,
+    feedback: sqlite3.Row | None,
+) -> OpsLearningInsight:
+    outcome_count = int(outcome["outcome_count"] or 0)
+    purchase_count = int(outcome["purchase_count"] or 0)
+    abandoned_count = int(outcome["abandoned_count"] or 0)
+    delayed_count = int(outcome["delayed_count"] or 0)
+    returned_count = int(outcome["returned_count"] or 0)
+    checkout_review_count = int(checkout["checkout_review_count"] or 0) if checkout else 0
+    checkout_blocked_count = int(checkout["checkout_blocked_count"] or 0) if checkout else 0
+    feedback_count = int(feedback["feedback_count"] or 0) if feedback else 0
+    conversion_rate = purchase_count / outcome_count if outcome_count else 0
+    return_rate = returned_count / outcome_count if outcome_count else 0
+    average_satisfaction = _learning_average_satisfaction(outcome, feedback)
+    average_delta = round(float(outcome["average_price_delta_krw"] or 0), 2)
+    status, tags, action = _learning_status_and_action(
+        conversion_rate=conversion_rate,
+        return_rate=return_rate,
+        abandoned_count=abandoned_count,
+        delayed_count=delayed_count,
+        checkout_review_count=checkout_review_count,
+        checkout_blocked_count=checkout_blocked_count,
+        average_satisfaction=average_satisfaction,
+        average_delta=average_delta,
+    )
+    evidence = (
+        f"결과 {outcome_count}건, 구매 {purchase_count}건, 이탈 {abandoned_count}건, "
+        f"지연 {delayed_count}건, 반품 {returned_count}건, 최종가 차이 {average_delta:,.0f}원"
+    )
+    return OpsLearningInsight(
+        product_id=outcome["product_id"],
+        model_name=outcome["model_name"],
+        outcome_count=outcome_count,
+        purchase_count=purchase_count,
+        abandoned_count=abandoned_count,
+        delayed_count=delayed_count,
+        returned_count=returned_count,
+        checkout_review_count=checkout_review_count,
+        checkout_blocked_count=checkout_blocked_count,
+        feedback_count=feedback_count,
+        average_satisfaction=average_satisfaction,
+        conversion_rate=round(conversion_rate, 4),
+        return_rate=round(return_rate, 4),
+        average_price_delta_krw=average_delta,
+        conversion_value_krw=int(outcome["conversion_value_krw"] or 0),
+        status=status,
+        evidence=evidence,
+        recommended_action=action,
+        learning_tags=tags,
+    )
+
+
+def _learning_average_satisfaction(
+    outcome: sqlite3.Row,
+    feedback: sqlite3.Row | None,
+) -> float:
+    values = [
+        float(value)
+        for value in (
+            outcome["average_satisfaction"],
+            feedback["feedback_satisfaction"] if feedback else None,
+        )
+        if value is not None
+    ]
+    if not values:
+        return 0
+    return round(sum(values) / len(values), 2)
+
+
+def _learning_status_and_action(
+    *,
+    conversion_rate: float,
+    return_rate: float,
+    abandoned_count: int,
+    delayed_count: int,
+    checkout_review_count: int,
+    checkout_blocked_count: int,
+    average_satisfaction: float,
+    average_delta: float,
+) -> tuple[CheckStatus, list[str], str]:
+    tags: list[str] = []
+    if average_delta > 50_000:
+        tags.append("가격 신선도")
+    if checkout_review_count and checkout_blocked_count / checkout_review_count >= 0.35:
+        tags.append("결제 검수 차단")
+    if return_rate >= 0.2:
+        tags.append("반품 리스크")
+    if abandoned_count:
+        tags.append("구매 이탈")
+    if delayed_count:
+        tags.append("가격 대기")
+    if average_satisfaction and average_satisfaction < 4:
+        tags.append("만족도 낮음")
+    if return_rate >= 0.2 or (average_satisfaction and average_satisfaction < 3):
+        return (
+            CheckStatus.blocker,
+            tags,
+            "추천 노출을 줄이고 반품/낮은 만족도 사유를 가격, 호환성, 기대 성능으로 분해하세요.",
+        )
+    if conversion_rate < 0.5 or tags:
+        return (
+            CheckStatus.warning,
+            tags,
+            "가격 신선도, 옵션 검수, 이탈 사유를 보강한 뒤 유사 조건 랭킹을 재검토하세요.",
+        )
+    return (
+        CheckStatus.ok,
+        tags or ["긍정 전환"],
+        "실제 구매 전환 신호가 양호합니다. 유사 예산/목적 추천에서 긍정 근거로 유지하세요.",
+    )
+
+
+def _learning_dashboard_status(insights: list[OpsLearningInsight]) -> CheckStatus:
+    if any(item.status == CheckStatus.blocker for item in insights):
+        return CheckStatus.blocker
+    if any(item.status == CheckStatus.warning for item in insights):
+        return CheckStatus.warning
+    return CheckStatus.ok
+
+
+def _learning_top_actions(insights: list[OpsLearningInsight]) -> list[str]:
+    actions = [
+        f"{item.model_name or item.product_id}: {item.recommended_action}"
+        for item in insights
+        if item.status != CheckStatus.ok
+    ]
+    if not actions:
+        actions = [
+            f"{item.model_name or item.product_id}: {item.recommended_action}"
+            for item in insights[:3]
+        ]
+    return _dedupe_strings(actions)[:5]
+
+
+def _learning_dashboard_summary(
+    status: CheckStatus,
+    insights: list[OpsLearningInsight],
+) -> str:
+    outcome_count = sum(item.outcome_count for item in insights)
+    purchase_count = sum(item.purchase_count for item in insights)
+    conversion_rate = purchase_count / outcome_count if outcome_count else 0
+    if status == CheckStatus.blocker:
+        return (
+            f"구매 결과 {outcome_count}건 중 반품/만족도 차단 신호가 있습니다. "
+            f"전체 실구매 전환율은 {round(conversion_rate * 100)}%입니다."
+        )
+    if status == CheckStatus.warning:
+        return (
+            f"구매 결과 {outcome_count}건 기준 보강할 제품이 있습니다. "
+            f"전체 실구매 전환율은 {round(conversion_rate * 100)}%입니다."
+        )
+    return (
+        f"구매 결과 {outcome_count}건의 학습 신호가 안정적입니다. "
+        f"전체 실구매 전환율은 {round(conversion_rate * 100)}%입니다."
     )
 
 

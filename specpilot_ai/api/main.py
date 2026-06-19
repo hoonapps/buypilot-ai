@@ -55,6 +55,7 @@ from specpilot_ai.core.models import (
     ObservabilityExportRecord,
     ObservabilityExportRequest,
     OperationsMetrics,
+    OpsLearningDashboard,
     OpsRegressionDashboard,
     PriceAlertPlan,
     ProductBrief,
@@ -788,6 +789,17 @@ def ops_regression_dashboard(
     return _store().ops_regression_for_workspace(
         workspace.workspace_id,
         window_size=window_size,
+    )
+
+
+@app.get("/ops/learning-insights", response_model=OpsLearningDashboard)
+def ops_learning_insights(
+    limit: int = 20,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> OpsLearningDashboard:
+    return _store().learning_insights_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
     )
 
 
