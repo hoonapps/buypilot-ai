@@ -33,6 +33,9 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - TOP 3 추천과 제외 후보 2개
 - 비교표, 가격 알림 목표가, 구매 전 체크리스트
 - Agent trace 조회
+- SQLite 기반 분석 결과 저장
+- 저장 리포트 조회와 가격 알림 구독
+- 운영 지표 API
 - Neo4j 그래프 스키마 미리보기
 - 데모 모드 기본 지원
 
@@ -97,6 +100,46 @@ curl -X POST http://127.0.0.1:8000/alerts/preview \
 curl http://127.0.0.1:8000/traces/trace_xxxxxxxxxxxx
 ```
 
+### 리포트 저장
+
+```bash
+curl -X POST http://127.0.0.1:8000/reports/save \
+  -H "Content-Type: application/json" \
+  -d '{
+    "trace_id": "trace_xxxxxxxxxxxx",
+    "title": "영상 편집용 PC 구매 리포트",
+    "owner_label": "guest",
+    "notes": "200만원 예산 기준"
+  }'
+```
+
+저장된 리포트 목록:
+
+```bash
+curl http://127.0.0.1:8000/reports
+```
+
+### 가격 알림 구독
+
+```bash
+curl -X POST http://127.0.0.1:8000/alerts/subscribe \
+  -H "Content-Type: application/json" \
+  -d '{
+    "trace_id": "trace_xxxxxxxxxxxx",
+    "product_id": "build-001",
+    "target_price_krw": 1848000,
+    "channels": ["email"],
+    "contact": "buyer@example.com",
+    "owner_label": "guest"
+  }'
+```
+
+운영 지표:
+
+```bash
+curl http://127.0.0.1:8000/ops/metrics
+```
+
 ## 분석 워크플로
 
 LangGraph 노드는 다음 순서로 실행됩니다.
@@ -134,6 +177,22 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `report.price_alerts`: 목표가와 재조회 주기
 - `report.source_health`: 출처 상태 요약
 - `trace_events`: Agent 단계별 실행 로그
+
+## 로컬 저장소
+
+분석 실행, 저장 리포트, 가격 알림 구독은 기본적으로 SQLite에 저장됩니다.
+
+기본 경로:
+
+```text
+.specpilot/specpilot.sqlite3
+```
+
+환경 변수로 변경할 수 있습니다.
+
+```bash
+STORAGE_PATH=/data/specpilot.sqlite3
+```
 
 ## Neo4j 선택 실행
 
@@ -174,6 +233,7 @@ pytest -q
 - Neo4j 구매 그래프 스키마가 핵심 노드/관계를 갖는지
 - 루트 웹 UI가 표시되는지
 - `/analyze`, `/alerts/preview`, `/traces/{trace_id}`가 동작하는지
+- `/reports/save`, `/reports/{report_id}`, `/alerts/subscribe`, `/ops/metrics`가 동작하는지
 
 ## 운영 원칙
 
@@ -186,8 +246,8 @@ pytest -q
 ## 다음 제품화 과제
 
 - 실제 가격 비교/오픈마켓/공식 스토어 어댑터 연결
-- 사용자 계정과 저장 견적
-- 가격 알림 발송 채널 연동
+- 사용자 계정과 저장 견적 권한 모델
+- 실제 가격 알림 발송 채널 연동
 - LangSmith 또는 OpenTelemetry trace 저장
 - 관리자용 출처 오류율/분석 비용 대시보드
 - 실제 구매 시나리오 베타 테스트
