@@ -24,6 +24,7 @@ from specpilot_ai.core.models import (
     BetaBacklogAction,
     BetaBacklogActionRequest,
     BetaBacklogItem,
+    BetaBacklogSummary,
     BetaCohort,
     BetaCohortReport,
     BetaCohortRequest,
@@ -599,6 +600,17 @@ def beta_backlog(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> list[BetaBacklogItem]:
     return _store().beta_backlog_for_workspace(workspace.workspace_id, limit=limit)
+
+
+@app.get("/beta/backlog/summary", response_model=BetaBacklogSummary)
+def beta_backlog_summary(
+    limit: int = 200,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> BetaBacklogSummary:
+    return _store().beta_backlog_action_summary_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
 
 
 @app.patch("/beta/backlog/{backlog_id}", response_model=BetaBacklogAction)

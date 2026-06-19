@@ -20,6 +20,7 @@ from specpilot_ai.core.models import (
     BetaBacklogActionRequest,
     BetaBacklogItem,
     BetaBacklogStatus,
+    BetaBacklogSummary,
     BetaCohort,
     BetaCohortReport,
     BetaCohortRequest,
@@ -1250,24 +1251,41 @@ class SpecPilotStore:
         backlog_id: str,
         request: BetaBacklogActionRequest,
     ) -> BetaBacklogAction | None:
-        known_ids = {
-            item.backlog_id
+        known_items = {
+            item.backlog_id: item
             for item in self.beta_backlog_for_workspace(workspace_id, limit=200)
         }
-        if backlog_id not in known_ids:
+        known_item = known_items.get(backlog_id)
+        if known_item is None:
             return None
         now = _now()
+        existing = self._beta_backlog_action_for_workspace(workspace_id, backlog_id)
+        sla_due_at = request.sla_due_at or (
+            existing.sla_due_at if existing and existing.sla_due_at else known_item.sla_due_at
+        )
+        completed_at = (
+            now
+            if request.status == BetaBacklogStatus.done
+            else None
+        )
+        completion_summary = request.completion_summary
+        if request.status == BetaBacklogStatus.done and not completion_summary:
+            completion_summary = _beta_completion_summary(known_item, request)
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO beta_backlog_actions (
-                    backlog_id, workspace_id, status, assignee, note, updated_at
+                    backlog_id, workspace_id, status, assignee, note,
+                    sla_due_at, completed_at, completion_summary, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(workspace_id, backlog_id) DO UPDATE SET
                     status = excluded.status,
                     assignee = excluded.assignee,
                     note = excluded.note,
+                    sla_due_at = excluded.sla_due_at,
+                    completed_at = excluded.completed_at,
+                    completion_summary = excluded.completion_summary,
                     updated_at = excluded.updated_at
                 """,
                 (
@@ -1276,6 +1294,9 @@ class SpecPilotStore:
                     request.status.value,
                     request.assignee,
                     request.note,
+                    sla_due_at,
+                    completed_at,
+                    completion_summary,
                     now,
                 ),
             )
@@ -1285,7 +1306,61 @@ class SpecPilotStore:
             status=request.status,
             assignee=request.assignee,
             note=request.note,
+            sla_due_at=sla_due_at,
+            completed_at=completed_at,
+            completion_summary=completion_summary,
             updated_at=now,
+        )
+
+    def beta_backlog_action_summary_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 200,
+    ) -> BetaBacklogSummary:
+        items = self.beta_backlog_for_workspace(workspace_id, limit=limit)
+        done_items = [item for item in items if item.status == BetaBacklogStatus.done]
+        overdue_items = [item for item in items if item.is_overdue]
+        due_soon_items = [
+            item
+            for item in items
+            if _is_due_soon(item.sla_due_at)
+            and item.status not in {BetaBacklogStatus.done, BetaBacklogStatus.dismissed}
+        ]
+        next_actions: list[str] = []
+        if overdue_items:
+            next_actions.append(f"SLA 초과 백로그 {len(overdue_items)}건을 먼저 처리하세요.")
+        if due_soon_items:
+            next_actions.append(f"24시간 내 SLA 도래 항목 {len(due_soon_items)}건을 확인하세요.")
+        unassigned = [
+            item
+            for item in items
+            if not item.assignee
+            and item.status in {BetaBacklogStatus.open, BetaBacklogStatus.in_progress}
+        ]
+        if unassigned:
+            next_actions.append(f"담당자 미지정 백로그 {len(unassigned)}건을 배정하세요.")
+        if not next_actions:
+            next_actions.append("현재 운영 SLA 기준으로 즉시 처리할 백로그는 없습니다.")
+        return BetaBacklogSummary(
+            workspace_id=workspace_id,
+            total_count=len(items),
+            open_count=sum(1 for item in items if item.status == BetaBacklogStatus.open),
+            in_progress_count=sum(
+                1 for item in items if item.status == BetaBacklogStatus.in_progress
+            ),
+            done_count=len(done_items),
+            dismissed_count=sum(
+                1 for item in items if item.status == BetaBacklogStatus.dismissed
+            ),
+            overdue_count=len(overdue_items),
+            due_soon_count=len(due_soon_items),
+            blocker_count=sum(1 for item in items if item.severity == CheckStatus.blocker),
+            completion_summaries=[
+                item.completion_summary
+                for item in done_items
+                if item.completion_summary
+            ][:10],
+            next_actions=_dedupe_strings(next_actions),
         )
 
     def beta_cohort_report_for_workspace(
@@ -1352,9 +1427,18 @@ class SpecPilotStore:
         merged: list[BetaBacklogItem] = []
         for item in items:
             action = actions.get(item.backlog_id)
+            default_due_at = _default_sla_due_at(item)
             if action is None:
-                merged.append(item)
+                merged.append(
+                    item.model_copy(
+                        update={
+                            "sla_due_at": default_due_at,
+                            "is_overdue": _is_overdue(default_due_at, item.status),
+                        }
+                    )
+                )
                 continue
+            sla_due_at = action.sla_due_at or default_due_at
             merged.append(
                 item.model_copy(
                     update={
@@ -1362,10 +1446,32 @@ class SpecPilotStore:
                         "assignee": action.assignee,
                         "action_note": action.note,
                         "action_updated_at": action.updated_at,
+                        "sla_due_at": sla_due_at,
+                        "is_overdue": _is_overdue(sla_due_at, action.status),
+                        "completed_at": action.completed_at,
+                        "completion_summary": action.completion_summary,
                     }
                 )
             )
         return merged
+
+    def _beta_backlog_action_for_workspace(
+        self,
+        workspace_id: str,
+        backlog_id: str,
+    ) -> BetaBacklogAction | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM beta_backlog_actions
+                WHERE workspace_id = ? AND backlog_id = ?
+                """,
+                (workspace_id, backlog_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return _beta_backlog_action_from_row(row)
 
     def _hydrate_beta_cohort(self, cohort: BetaCohort) -> BetaCohort:
         keywords = cohort.keywords or [cohort.name, cohort.scenario, cohort.target_persona]
@@ -2259,6 +2365,9 @@ class SpecPilotStore:
                     status TEXT NOT NULL,
                     assignee TEXT NOT NULL DEFAULT '',
                     note TEXT NOT NULL DEFAULT '',
+                    sla_due_at TEXT,
+                    completed_at TEXT,
+                    completion_summary TEXT NOT NULL DEFAULT '',
                     updated_at TEXT NOT NULL,
                     PRIMARY KEY(workspace_id, backlog_id)
                 );
@@ -2345,6 +2454,14 @@ class SpecPilotStore:
                 CREATE INDEX IF NOT EXISTS idx_alert_attempts_status
                 ON alert_delivery_attempts(workspace_id, delivery_status)
                 """
+            )
+            _ensure_column(conn, "beta_backlog_actions", "sla_due_at", "TEXT")
+            _ensure_column(conn, "beta_backlog_actions", "completed_at", "TEXT")
+            _ensure_column(
+                conn,
+                "beta_backlog_actions",
+                "completion_summary",
+                "TEXT NOT NULL DEFAULT ''",
             )
 
     def _queued_alert_events(
@@ -2662,6 +2779,9 @@ def _beta_backlog_action_from_row(row: sqlite3.Row) -> BetaBacklogAction:
         status=BetaBacklogStatus(data["status"]),
         assignee=data["assignee"],
         note=data["note"],
+        sla_due_at=data["sla_due_at"],
+        completed_at=data["completed_at"],
+        completion_summary=data["completion_summary"],
         updated_at=data["updated_at"],
     )
 
@@ -2763,6 +2883,57 @@ def _cohort_keywords(request: BetaCohortRequest) -> list[str]:
 
 def _like_pattern(value: str) -> str:
     return f"%{value}%"
+
+
+def _default_sla_due_at(item: BetaBacklogItem) -> str:
+    created_at = _parse_iso_datetime(item.created_at) or datetime.now(UTC)
+    if item.severity == CheckStatus.blocker:
+        due_at = created_at + timedelta(hours=48)
+    elif item.severity == CheckStatus.warning:
+        due_at = created_at + timedelta(days=5)
+    else:
+        due_at = created_at + timedelta(days=7)
+    return due_at.isoformat()
+
+
+def _parse_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+def _is_overdue(
+    due_at: str | None,
+    status: BetaBacklogStatus,
+) -> bool:
+    if status in {BetaBacklogStatus.done, BetaBacklogStatus.dismissed}:
+        return False
+    parsed = _parse_iso_datetime(due_at)
+    return bool(parsed and parsed < datetime.now(UTC))
+
+
+def _is_due_soon(due_at: str | None) -> bool:
+    parsed = _parse_iso_datetime(due_at)
+    if parsed is None:
+        return False
+    now = datetime.now(UTC)
+    return now <= parsed <= now + timedelta(hours=24)
+
+
+def _beta_completion_summary(
+    item: BetaBacklogItem,
+    request: BetaBacklogActionRequest,
+) -> str:
+    note = request.note.strip()
+    if note:
+        return f"{item.title} 완료: {note}"
+    return f"{item.title} 완료 처리. 근거: {item.evidence}"
 
 
 def _ops_regression_period(label: str, rows: list[sqlite3.Row]) -> OpsRegressionPeriod:

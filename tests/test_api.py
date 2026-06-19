@@ -78,6 +78,7 @@ def test_admin_page_exposes_review_console() -> None:
     assert "베타 출시 준비도" in response.text
     assert "베타 cohort" in response.text
     assert "개선 백로그" in response.text
+    assert "SLA 상태" in response.text
     assert "cohort 리포트 export" in response.text
     assert "운영 상태" in response.text
 
@@ -579,6 +580,8 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     assert tracked_item["status"] == "in_progress"
     assert tracked_item["assignee"] == "pm"
     assert tracked_item["action_note"] == "pytest에서 운영 액션 상태 검증"
+    assert tracked_item["sla_due_at"]
+    assert tracked_item["is_overdue"] is False
 
     isolated_action = client.patch(
         f"/beta/backlog/{backlog_id}",
@@ -590,6 +593,30 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     unchanged_item = next(item for item in unchanged_backlog if item["backlog_id"] == backlog_id)
     assert unchanged_item["status"] == "in_progress"
     assert unchanged_item["assignee"] == "pm"
+
+    completed_action = client.patch(
+        f"/beta/backlog/{backlog_id}",
+        headers=WORKSPACE_A,
+        json={
+            "status": "done",
+            "assignee": "pm",
+            "note": "pytest에서 SLA 완료 처리",
+            "completion_summary": "pytest 완료 요약",
+        },
+    )
+    assert completed_action.status_code == 200
+    completed_payload = completed_action.json()
+    assert completed_payload["completed_at"]
+    assert completed_payload["completion_summary"] == "pytest 완료 요약"
+
+    backlog_summary = client.get("/beta/backlog/summary", headers=WORKSPACE_A)
+    assert backlog_summary.status_code == 200
+    summary_payload = backlog_summary.json()
+    assert summary_payload["workspace_id"] == readiness_payload["workspace_id"]
+    assert summary_payload["total_count"] >= 1
+    assert summary_payload["done_count"] >= 1
+    assert "pytest 완료 요약" in summary_payload["completion_summaries"]
+    assert summary_payload["next_actions"]
 
     cohort_report = client.get(
         f"/beta/cohorts/{cohort_payload['cohort_id']}/report",

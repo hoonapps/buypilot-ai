@@ -192,7 +192,8 @@ def admin_page_html() -> str:
       </div>
       <div class="panel">
         <h2>개선 백로그</h2>
-        <p>출시 준비도, 낮은 만족도, 품질 차단 사유에서 자동 생성된 개선 항목과 운영 상태입니다.</p>
+        <p>출시 준비도, 낮은 만족도, 품질 차단 사유에서 자동 생성된 개선 항목의 운영 상태와 SLA 상태입니다.</p>
+        <div class="quality-list" id="beta-backlog-summary"></div>
         <div class="review-list" id="beta-backlog"></div>
       </div>
     </section>
@@ -232,6 +233,7 @@ def admin_page_html() -> str:
         readinessResponse,
         betaCohortResponse,
         betaBacklogResponse,
+        betaBacklogSummaryResponse,
         regressionResponse
       ] = await Promise.all([
         fetch('/admin/dashboard'),
@@ -249,6 +251,7 @@ def admin_page_html() -> str:
         fetch('/beta/readiness'),
         fetch('/beta/cohorts'),
         fetch('/beta/backlog'),
+        fetch('/beta/backlog/summary'),
         fetch('/ops/regression')
       ]);
       const data = await response.json();
@@ -266,6 +269,7 @@ def admin_page_html() -> str:
       const readiness = await readinessResponse.json();
       const betaCohorts = await betaCohortResponse.json();
       const betaBacklog = await betaBacklogResponse.json();
+      const betaBacklogSummary = await betaBacklogSummaryResponse.json();
       const regression = await regressionResponse.json();
       renderMetrics(data.metrics);
       renderBetaReadiness(readiness);
@@ -280,6 +284,7 @@ def admin_page_html() -> str:
       renderFeedback(feedback);
       renderBetaLeads(betaLeads);
       renderBetaCohorts(betaCohorts);
+      renderBetaBacklogSummary(betaBacklogSummary);
       renderBetaBacklog(betaBacklog);
       renderChannels(channels, events);
       renderDeliveries(deliveries);
@@ -564,7 +569,8 @@ def admin_page_html() -> str:
             <h3>${item.title}</h3>
             <p>${item.evidence}</p>
             <p>${item.suggested_action}</p>
-            <p>담당: ${item.assignee || '미지정'} / 메모: ${item.action_note || '없음'}</p>
+            <p>담당: ${item.assignee || '미지정'} / SLA: ${item.sla_due_at || '미정'} ${item.is_overdue ? '· 지연' : ''}</p>
+            <p>메모: ${item.action_note || '없음'} / 완료 요약: ${item.completion_summary || '없음'}</p>
             <div class="actions">
               <button class="secondary" data-backlog-action="${item.backlog_id}" data-status="in_progress">진행 중</button>
               <button class="primary" data-backlog-action="${item.backlog_id}" data-status="done">완료</button>
@@ -580,12 +586,25 @@ def admin_page_html() -> str:
             body: JSON.stringify({
               status: button.dataset.status,
               assignee: 'ops',
-              note: button.dataset.status === 'done' ? '관리자 콘솔에서 완료 처리' : '관리자 콘솔에서 진행 시작'
+              note: button.dataset.status === 'done' ? '관리자 콘솔에서 완료 처리' : '관리자 콘솔에서 진행 시작',
+              completion_summary: button.dataset.status === 'done' ? '관리자 콘솔에서 SLA 항목 완료' : ''
             })
           });
           await loadDashboard();
         });
       });
+    }
+
+    function renderBetaBacklogSummary(summary) {
+      const root = document.querySelector('#beta-backlog-summary');
+      root.innerHTML = `
+        <article class="review-item quality-item ${summary.overdue_count ? 'danger' : summary.due_soon_count ? 'warn' : ''}">
+          <span class="kicker">SLA summary</span>
+          <h3>전체 ${summary.total_count}건 · 지연 ${summary.overdue_count}건 · 24시간 내 ${summary.due_soon_count}건</h3>
+          <p>open ${summary.open_count} / 진행 ${summary.in_progress_count} / 완료 ${summary.done_count} / blocker ${summary.blocker_count}</p>
+          <ul>${summary.next_actions.map((item) => `<li>${item}</li>`).join('')}</ul>
+        </article>
+      `;
     }
 
     function renderChannels(items, events) {

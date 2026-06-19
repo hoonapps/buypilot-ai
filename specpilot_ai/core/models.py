@@ -603,6 +603,10 @@ class BetaBacklogItem(BaseModel):
     assignee: str = ""
     action_note: str = ""
     action_updated_at: str | None = None
+    sla_due_at: str | None = None
+    is_overdue: bool = False
+    completed_at: str | None = None
+    completion_summary: str = ""
     created_at: str
 
 
@@ -610,6 +614,8 @@ class BetaBacklogActionRequest(BaseModel):
     status: BetaBacklogStatus = BetaBacklogStatus.in_progress
     assignee: str = ""
     note: str = ""
+    sla_due_at: str | None = None
+    completion_summary: str = ""
 
 
 class BetaBacklogAction(BaseModel):
@@ -618,7 +624,24 @@ class BetaBacklogAction(BaseModel):
     status: BetaBacklogStatus
     assignee: str = ""
     note: str = ""
+    sla_due_at: str | None = None
+    completed_at: str | None = None
+    completion_summary: str = ""
     updated_at: str
+
+
+class BetaBacklogSummary(BaseModel):
+    workspace_id: str = "demo"
+    total_count: int = 0
+    open_count: int = 0
+    in_progress_count: int = 0
+    done_count: int = 0
+    dismissed_count: int = 0
+    overdue_count: int = 0
+    due_soon_count: int = 0
+    blocker_count: int = 0
+    completion_summaries: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 class BetaCohortReport(BaseModel):
