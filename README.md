@@ -38,6 +38,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 저장 리포트 조회와 가격 알림 구독
 - 목표가 도달 평가와 발송 큐 이벤트 저장
 - 운영 지표 API
+- 분석 품질 감사와 예상 비용 대시보드
 - 가격/리뷰/벤치마크/공식 스토어 소스 어댑터 계약
 - 관리자 검수 콘솔(`/admin`)
 - 공개 신뢰 정책 API(`/policy/trust`)
@@ -218,6 +219,13 @@ curl http://127.0.0.1:8000/ops/metrics \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
+분석 품질/비용 감사:
+
+```bash
+curl http://127.0.0.1:8000/ops/quality \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
 ### 소스 어댑터 상태와 수집
 
 ```bash
@@ -284,6 +292,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `report.source_health`: 출처 상태 요약
 - `report.source_trust`: 출처별 신뢰 등급, 신뢰도, 캐시 TTL, 검수 필요 여부
 - `report.trust_policy`: 가격 캐시, 제휴 고지, 공정성, 리뷰 표현 정책
+- `quality_audit`: 분석 품질 점수, 예상 소스 호출, 예상 토큰/비용, 공개 차단 사유
 - `trace_events`: Agent 단계별 실행 로그
 
 ## 로컬 저장소
@@ -356,6 +365,7 @@ make docker-build
 - `/analyze`, `/alerts/preview`, `/traces/{trace_id}`가 동작하는지
 - `/reports/save`, `/reports/{report_id}`, `/alerts/subscribe`, `/ops/metrics`가 동작하는지
 - `/alerts/evaluate`, `/alerts/events`가 목표가 도달 이벤트를 저장하고 격리하는지
+- `/ops/quality`가 품질 감사와 예상 비용을 워크스페이스별로 반환하는지
 - `/sources/status`, `/sources/collect`, `/admin/reviews`, `/admin/dashboard`가 동작하는지
 - `/policy/trust`가 캐시, 제휴 고지, 공정성 정책을 반환하는지
 - `/health`, `/ready` 운영 엔드포인트가 동작하는지
@@ -378,11 +388,11 @@ GitHub Actions는 `main` push와 PR에서 다음을 실행합니다.
 - 특정 판매처 편향을 줄이기 위해 가격, 호환성, 리뷰, 안정성 점수를 분리합니다.
 - 제휴 링크를 붙일 경우 추천 기준과 제휴 고지를 분리해서 노출해야 합니다.
 - 신뢰도 0.8 미만 또는 리스크 플래그가 있는 근거는 관리자 검수 큐에 넣습니다.
+- 공개 전 품질 점수, 경고 수, 차단 사유, 예상 비용을 운영 콘솔에서 확인합니다.
 
 ## 다음 제품화 과제
 
 - 실제 가격 비교/오픈마켓/공식 스토어 어댑터의 네트워크 커넥터 연결
 - 실제 가격 알림 발송 채널 어댑터 연동
 - LangSmith 또는 OpenTelemetry trace 저장
-- 관리자용 분석 비용 대시보드
 - 실제 구매 시나리오 베타 테스트
