@@ -46,6 +46,19 @@ def public_report_html(report: PublicReport) -> str:
         """
         for row in purchase.comparison_table
     )
+    criteria_rows = "\n".join(
+        f"""
+        <tr>
+          <td>{escape(item.model_name)}</td>
+          <td>{item.coverage_score}점</td>
+          <td>{item.matched_count}</td>
+          <td>{item.warning_count}</td>
+          <td>{item.blocker_count}</td>
+          <td>{escape(item.summary)}</td>
+        </tr>
+        """
+        for item in purchase.criteria_matches
+    )
     flags = "\n".join(f"<li>{escape(flag)}</li>" for flag in purchase.verification_flags)
     trust = "\n".join(
         f"<li>{escape(source.source_name)} · {escape(source.trust_grade)} · 신뢰도 {round(source.confidence * 100)}%</li>"
@@ -196,6 +209,15 @@ def public_report_html(report: PublicReport) -> str:
         <table>
           <thead><tr><th>순위</th><th>모델</th><th>실구매가</th><th>목적</th><th>호환</th><th>주요 리스크</th></tr></thead>
           <tbody>{rows}</tbody>
+        </table>
+      </div>
+    </section>
+    <section class="panel section">
+      <h2>조건 충족 매트릭스</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>모델</th><th>충족률</th><th>충족</th><th>확인</th><th>차단</th><th>요약</th></tr></thead>
+          <tbody>{criteria_rows}</tbody>
         </table>
       </div>
     </section>

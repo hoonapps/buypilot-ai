@@ -284,6 +284,16 @@ def launch_page_html() -> str:
           <td>${row.main_risk}</td>
         </tr>
       `).join('');
+      const criteriaRows = (report.criteria_matches || []).map((item) => `
+        <tr>
+          <td>${item.model_name}</td>
+          <td>${item.coverage_score}</td>
+          <td>${item.matched_count}</td>
+          <td>${item.warning_count}</td>
+          <td>${item.blocker_count}</td>
+          <td>${item.summary}</td>
+        </tr>
+      `).join('');
       const alerts = report.price_alerts.map((alert) => `
         <li>${alert.product_id}: 목표가 ${won(alert.target_price_krw)} / ${alert.recheck_interval_days}일마다 재확인</li>
       `).join('');
@@ -344,6 +354,13 @@ def launch_page_html() -> str:
             <table>
               <thead><tr><th>순위</th><th>모델</th><th>실구매가</th><th>목적</th><th>호환</th><th>주요 리스크</th></tr></thead>
               <tbody>${rows}</tbody>
+            </table>
+          </div>
+          <div class="card comparison-card">
+            <h3>조건 충족 매트릭스</h3>
+            <table>
+              <thead><tr><th>모델</th><th>충족률</th><th>충족</th><th>확인</th><th>차단</th><th>요약</th></tr></thead>
+              <tbody>${criteriaRows}</tbody>
             </table>
           </div>
           <div class="card">

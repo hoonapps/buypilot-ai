@@ -243,6 +243,24 @@ class ScenarioOption(BaseModel):
     tradeoff: str
 
 
+class CriterionMatchItem(BaseModel):
+    check_type: str
+    criterion: str
+    status: CheckStatus
+    evidence: str
+
+
+class ProductCriteriaMatch(BaseModel):
+    product_id: str
+    model_name: str
+    coverage_score: float = Field(ge=0, le=100)
+    matched_count: int = Field(ge=0)
+    warning_count: int = Field(ge=0)
+    blocker_count: int = Field(ge=0)
+    summary: str
+    items: list[CriterionMatchItem] = Field(default_factory=list)
+
+
 class PurchaseReport(BaseModel):
     summary: str
     top_recommendations: list[Recommendation]
@@ -261,6 +279,7 @@ class PurchaseReport(BaseModel):
     trust_policy: TrustPolicySummary | None = None
     purchase_decision: PurchaseDecision | None = None
     scenario_options: list[ScenarioOption] = Field(default_factory=list)
+    criteria_matches: list[ProductCriteriaMatch] = Field(default_factory=list)
     final_pick_id: str | None = None
 
 

@@ -41,6 +41,13 @@ def test_desktop_pc_analysis_returns_top_three_and_compatibility_notes() -> None
         "performance",
         "safe",
     }
+    assert len(response.report.criteria_matches) == 5
+    assert response.report.criteria_matches[0].items
+    assert response.report.criteria_matches[0].coverage_score > 0
+    assert any(
+        item.criterion == "32GB RAM"
+        for item in response.report.criteria_matches[0].items
+    )
     assert any(source.evidence_count > 0 for source in response.report.source_trust)
     assert response.quality_audit is not None
     assert response.quality_audit.quality_score > 0

@@ -15,10 +15,12 @@ from specpilot_ai.core.models import (
     CheckStatus,
     ComparisonRow,
     CompatibilityCheck,
+    CriterionMatchItem,
     ExcludedProduct,
     PriceAlertPlan,
     PriceSnapshot,
     ProductCandidate,
+    ProductCriteriaMatch,
     PurchaseCriteria,
     PurchaseDecision,
     PurchaseReport,
@@ -420,6 +422,7 @@ def report_writer(state: PurchaseState) -> PurchaseState:
         state["criteria"],
     )
     scenario_options = _scenario_options(ranked[:5], products, prices, reviews)
+    criteria_matches = _criteria_matches(ranked[:5], products, state["criteria"])
     state["report"] = PurchaseReport(
         summary=summary_chain.invoke(
             {
@@ -447,6 +450,7 @@ def report_writer(state: PurchaseState) -> PurchaseState:
         trust_policy=trust_policy,
         purchase_decision=purchase_decision,
         scenario_options=scenario_options,
+        criteria_matches=criteria_matches,
         final_pick_id=recommendations[0].product.id if recommendations else None,
     )
     _trace(
@@ -778,3 +782,144 @@ def _scenario_tradeoff(scenario: str, card: ScoreCard, review: ReviewInsight) ->
         return "예산 여유와 발열, 소음 리스크를 결제 전 한 번 더 확인해야 합니다."
     risk = review.risk_signals[0] if review.risk_signals else "가격 변동"
     return f"보수적인 선택이지만 {risk} 신호는 확인해야 합니다."
+
+
+def _criteria_matches(
+    ranked: list[ScoreCard],
+    products: dict[str, ProductCandidate],
+    criteria: PurchaseCriteria,
+) -> list[ProductCriteriaMatch]:
+    matches: list[ProductCriteriaMatch] = []
+    for card in ranked:
+        product = products[card.product_id]
+        items = [
+            _criterion_match("must_have", condition, product)
+            for condition in criteria.must_haves
+        ]
+        items.extend(
+            _criterion_match("exclusion", condition, product)
+            for condition in criteria.exclusions
+        )
+        ok_count = sum(item.status == CheckStatus.ok for item in items)
+        warning_count = sum(item.status == CheckStatus.warning for item in items)
+        blocker_count = sum(item.status == CheckStatus.blocker for item in items)
+        denominator = max(1, len(items))
+        coverage_score = round(((ok_count + warning_count * 0.5) / denominator) * 100, 1)
+        if not items:
+            summary = "입력된 필수/제외 조건이 없어 목적 적합도와 호환성 중심으로 평가했습니다."
+        elif blocker_count:
+            summary = f"{blocker_count}개 조건은 결제 전 확인이 필요합니다."
+        elif warning_count:
+            summary = f"{ok_count}개 조건 충족, {warning_count}개 조건은 부분 확인이 필요합니다."
+        else:
+            summary = "입력 조건을 모두 충족하거나 제외 조건에 걸리지 않습니다."
+        matches.append(
+            ProductCriteriaMatch(
+                product_id=product.id,
+                model_name=product.model_name,
+                coverage_score=coverage_score,
+                matched_count=ok_count,
+                warning_count=warning_count,
+                blocker_count=blocker_count,
+                summary=summary,
+                items=items,
+            )
+        )
+    return matches
+
+
+def _criterion_match(
+    check_type: str,
+    condition: str,
+    product: ProductCandidate,
+) -> CriterionMatchItem:
+    normalized = condition.strip()
+    if check_type == "exclusion":
+        status, evidence = _exclusion_status(normalized, product)
+    else:
+        status, evidence = _must_have_status(normalized, product)
+    return CriterionMatchItem(
+        check_type=check_type,
+        criterion=normalized,
+        status=status,
+        evidence=evidence,
+    )
+
+
+def _must_have_status(condition: str, product: ProductCandidate) -> tuple[CheckStatus, str]:
+    text = _product_text(product)
+    lowered = condition.lower()
+    ram = float(product.specs.get("ram_gb", 0))
+    gpu = str(product.specs.get("gpu", "")).lower()
+
+    if "32" in lowered and "ram" in lowered:
+        if ram >= 32:
+            return CheckStatus.ok, f"RAM {int(ram)}GB 구성입니다."
+        return CheckStatus.blocker, f"RAM {int(ram)}GB라 32GB 조건에 부족합니다."
+    if "qhd" in lowered or "144" in lowered:
+        if any(token in gpu for token in ["4070", "4080", "4070 super"]):
+            return CheckStatus.ok, f"{product.specs.get('gpu')} 기준 QHD 고주사율 여유가 있습니다."
+        if any(token in gpu for token in ["4060", "7600", "m4"]):
+            return CheckStatus.warning, f"{product.specs.get('gpu')}는 옵션 타협 시 적합합니다."
+        return CheckStatus.warning, "해상도와 주사율은 실제 게임/작업 벤치마크를 추가 확인하세요."
+    if "업그레이드" in condition or "upgrade" in lowered:
+        slots = float(product.specs.get("upgrade_slots", 0))
+        if slots >= 2:
+            return CheckStatus.ok, f"업그레이드 여지 {int(slots)}개가 있습니다."
+        if slots >= 1:
+            return CheckStatus.warning, "일부 저장장치나 메모리 업그레이드만 가능합니다."
+        return CheckStatus.blocker, "업그레이드 여지가 제한적입니다."
+    if "휴대" in condition or "가벼" in condition:
+        weight = float(product.specs.get("weight_kg", 9))
+        if product.category == Category.laptop and weight <= 1.8:
+            return CheckStatus.ok, f"무게 {weight:g}kg로 휴대 조건에 맞습니다."
+        if product.category == Category.laptop and weight <= 2.2:
+            return CheckStatus.warning, f"무게 {weight:g}kg라 휴대성은 보통입니다."
+        return CheckStatus.blocker, "휴대성을 우선하는 조건과 맞지 않습니다."
+    if "외장" in condition and "gpu" in lowered:
+        if "rtx" in gpu or "radeon" in gpu:
+            return CheckStatus.ok, f"{product.specs.get('gpu')} 외장 GPU 구성입니다."
+        return (
+            CheckStatus.warning,
+            f"{product.specs.get('gpu')} 구성이라 외장 GPU 조건은 확인이 필요합니다.",
+        )
+    if condition and condition.lower() in text:
+        return CheckStatus.ok, "제품명, 태그, 옵션 설명에서 조건이 확인됩니다."
+    return (
+        CheckStatus.warning,
+        "데모 카탈로그 기준 직접 일치 근거가 부족해 상세 옵션명을 확인하세요.",
+    )
+
+
+def _exclusion_status(condition: str, product: ProductCandidate) -> tuple[CheckStatus, str]:
+    lowered = condition.lower()
+    text = _product_text(product)
+    ram = float(product.specs.get("ram_gb", 0))
+    if "중고" in condition or "리퍼" in condition or "refurb" in lowered:
+        return CheckStatus.ok, "데모 카탈로그는 신품 판매 후보만 사용합니다."
+    if "출처" in condition and ("없는" in condition or "없" in condition):
+        if product.source_url:
+            return CheckStatus.ok, "출처 URL이 연결된 후보입니다."
+        return CheckStatus.blocker, "출처 URL이 없어 제외 조건에 걸립니다."
+    if "8gb" in lowered or "8 gb" in lowered:
+        if ram <= 8:
+            return CheckStatus.blocker, f"RAM {int(ram)}GB라 제외 조건에 걸립니다."
+        return CheckStatus.ok, f"RAM {int(ram)}GB라 8GB 제외 조건에 걸리지 않습니다."
+    if condition and lowered in text:
+        return CheckStatus.blocker, "제외 키워드가 제품 설명에서 발견됐습니다."
+    return CheckStatus.ok, "제외 조건과 직접 충돌하지 않습니다."
+
+
+def _product_text(product: ProductCandidate) -> str:
+    specs = " ".join(str(value) for value in product.specs.values())
+    return " ".join(
+        [
+            product.brand,
+            product.model_name,
+            product.normalized_model,
+            product.form_factor,
+            product.option_summary,
+            *product.tags,
+            specs,
+        ]
+    ).lower()
