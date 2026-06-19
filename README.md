@@ -1,56 +1,84 @@
-# Ontology Studio
+# SpecPilot AI
 
-Ontology Studio is a product MVP scaffold for building ontology-driven GraphRAG systems with LangChain, LangGraph, and Neo4j.
+SpecPilot AI is an AI purchase decision agent for desktop PC builds and laptops.
 
-The product idea is simple: teams upload documents or structured data, the system proposes an ontology, stores entities and relationships in Neo4j, and routes questions through the best retrieval strategy.
+It helps a user say, "I need a 2 million KRW PC for video editing and gaming," then turns that request into a few realistic build or laptop options with compatibility checks, price evidence, review risk signals, and a final recommendation report.
 
-## Why this product
+## Product focus
 
-Plain vector RAG is useful, but it often misses relationships such as ownership, hierarchy, legal dependency, investment exposure, publisher influence, or document lineage. GraphRAG adds a knowledge graph so the answer can use both semantic similarity and explicit relationships.
+This is not a generic shopping bot. The first product wedge is **computer and laptop purchasing**:
 
-## Product modules
+- Desktop PC build recommendations
+- Laptop recommendations
+- CPU/GPU/RAM/SSD/PSU compatibility checks
+- Price comparison source aggregation
+- Review and benchmark summary
+- Upgrade path and buyer-fit explanation
 
-- **Ontology designer**: defines node labels, relationship types, properties, and constraints.
-- **Ingestion pipeline**: turns documents, CSV rows, and domain text into graph-ready records.
-- **Graph memory**: stores the ontology and extracted knowledge in Neo4j.
-- **Retrieval router**: chooses vector search, full-text search, Text2Cypher, or enhanced GraphRAG.
-- **LangGraph workflow**: keeps ingestion, search, validation, and answer generation as explicit state transitions.
-- **API layer**: exposes product endpoints for frontend or B2B integration.
+Price comparison services, open markets, official stores, benchmark pages, and community reviews are treated as data sources. The product should not be branded around one source.
+
+## MVP user stories
+
+- As a first-time PC buyer, I want 3 build options within my budget so I do not overpay or buy incompatible parts.
+- As a video editor, I want to know whether CPU, GPU, RAM, and SSD choices match Premiere Pro and DaVinci Resolve.
+- As a gamer, I want a build matched to my monitor resolution and refresh rate.
+- As a laptop buyer, I want to compare performance, weight, heat, fan noise, upgrade limits, and real purchase price.
+
+## Agent workflow
+
+The LangGraph workflow is explicit and inspectable:
+
+1. Intent Parser - structure budget, purpose, category, must-haves, exclusions.
+2. Clarifier - flag missing budget, display target, or compatibility requirements.
+3. Query Planner - create search plans for specs, prices, reviews, and benchmarks.
+4. Product Collector - collect desktop build or laptop candidates.
+5. Deduplicator - normalize model names and remove duplicate variants.
+6. Compatibility Checker - validate CPU socket, motherboard, PSU wattage, RAM and form factor.
+7. Price Tracker - compute effective price with shipping/coupon/build fees.
+8. Review Analyzer - summarize pros, cons, repeated complaints and risk signals.
+9. Scoring Engine - score purpose fit, price, review trust, stability, preference and compatibility.
+10. Verifier - check source links, price timestamp, and compatibility notes.
+11. Report Writer - produce TOP 3, excluded options, timing and checklist.
 
 ## Stack
 
-- Python 3.12
-- FastAPI
-- LangChain
-- LangGraph
-- langchain-neo4j
-- Neo4j AuraDB or local Neo4j
-- uv for environment management
+- FastAPI for the API layer
+- LangGraph for stateful agent execution
+- LangChain LCEL for prompt and deterministic report writing steps
+- Neo4j for build, component, offer, seller, benchmark, review and compatibility graph
+- PostgreSQL later for user history, saved comparisons and alerts
+- Redis/Celery or Temporal later for scheduled price rechecks
 
-## Quick start
-
-```bash
-uv sync
-cp .env.example .env
-uv run uvicorn ontology_studio.api.main:app --reload
-```
-
-If `uv` is not installed:
+## Run locally
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
-uvicorn ontology_studio.api.main:app --reload
+uvicorn specpilot_ai.api.main:app --reload
 ```
 
 Open:
 
 - `http://127.0.0.1:8000/health`
 - `http://127.0.0.1:8000/product/brief`
-- `http://127.0.0.1:8000/query`
+- `http://127.0.0.1:8000/categories`
+- `http://127.0.0.1:8000/graph/schema`
 
-The default configuration runs in demo mode, so it does not require an LLM key or Neo4j connection to inspect the workflow shape.
+## Demo request
+
+```bash
+curl -X POST http://127.0.0.1:8000/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "영상 편집과 게임용 데스크톱 200만원 안에서 맞춰줘",
+    "category": "desktop_pc",
+    "budget_krw": 2000000,
+    "purpose": "Premiere Pro, DaVinci Resolve, QHD gaming",
+    "must_haves": ["QHD 144Hz", "32GB RAM", "업그레이드 여지"],
+    "channels": ["price_compare", "open_market", "official_store"]
+  }'
+```
 
 ## Optional Neo4j
 
@@ -58,22 +86,57 @@ The default configuration runs in demo mode, so it does not require an LLM key o
 docker compose up -d neo4j
 ```
 
-Then set:
+Environment:
 
 ```bash
 NEO4J_URI=bolt://localhost:7687
 NEO4J_USERNAME=neo4j
-NEO4J_PASSWORD=ontology-studio-password
+NEO4J_PASSWORD=specpilot-password
 ```
 
-## Example request
+`DEMO_MODE=true` is the default, so no external API key or Neo4j instance is required for the current demo workflow.
 
-```bash
-curl -X POST http://127.0.0.1:8000/query \
-  -H "Content-Type: application/json" \
-  -d '{"question":"ETF 상품 추천에서 어떤 검색 전략을 써야 해?","domain":"finance"}'
+## Scoring weights
+
+- Purpose fit: 35%
+- Price competitiveness: 22%
+- Review trust: 15%
+- Purchase stability: 10%
+- Compatibility: 10%
+- Personal preference: 8%
+
+## Data model direction
+
+Neo4j graph:
+
+```cypher
+(:Build)-[:USES]->(:Component)
+(:Build)-[:SOLD_AS]->(:Offer)-[:OFFERED_BY]->(:Seller)
+(:Build)-[:CHECKED_BY]->(:CompatibilitySignal)
+(:Component)-[:HAS_BENCHMARK]->(:Benchmark)
+(:Laptop)-[:HAS_REVIEW]->(:Review)
 ```
 
-## Product direction
+Relational tables later:
 
-The best first vertical is **Compliance Copilot**: legal documents, internal policies, owners, approval evidence, and audit events naturally form a graph. A second vertical is **ETF Advisor**, because products, issuers, sectors, assets, risk factors, and investor profiles are strongly relational.
+- users
+- analysis_runs
+- saved_builds
+- offers
+- price_alerts
+- graph_traces
+
+## Product roadmap
+
+- Week 1: desktop/laptop requirements, component taxonomy and scoring rules
+- Week 2: LangGraph state model, intent parser, clarifier
+- Week 3: price/spec source adapters and model normalization
+- Week 4: compatibility checker for CPU socket, board, RAM, PSU and case
+- Week 5: review/benchmark analyzer and risk signal extraction
+- Week 6: recommendation report API and comparison UI
+- Week 7: saved builds, price alerts and trace dashboard
+- Week 8: beta testing with real PC purchase scenarios
+
+## Important policy
+
+SpecPilot AI should explain uncertainty. It should say "review risk signal" or "price needs recheck," not make absolute claims about fake reviews, exact future prices, or guaranteed performance.
