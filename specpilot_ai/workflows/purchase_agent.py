@@ -10,7 +10,11 @@ from specpilot_ai.core.models import (
     AgentStep,
     AnalyzeRequest,
     AnalyzeResponse,
+    BenchmarkEvidence,
     Category,
+    CheckStatus,
+    CompatibilityCheck,
+    ComparisonRow,
     ExcludedProduct,
     PriceSnapshot,
     ProductCandidate,
@@ -19,7 +23,22 @@ from specpilot_ai.core.models import (
     Recommendation,
     ReviewInsight,
     ScoreCard,
+    TraceEvent,
 )
+from specpilot_ai.data.catalog import desktop_candidates, laptop_candidates, price_snapshot_for
+from specpilot_ai.services.compatibility import (
+    build_compatibility_checks,
+    compatibility_score,
+    compatibility_summary,
+)
+from specpilot_ai.services.evidence import benchmarks_for, main_risk, review_for, strongest_reason
+from specpilot_ai.services.pricing import (
+    build_price_alerts,
+    price_competitiveness,
+    price_timing_message,
+    purchase_stability,
+)
+from specpilot_ai.services.tracing import trace_event
 
 
 class PurchaseState(TypedDict, total=False):
@@ -29,18 +48,41 @@ class PurchaseState(TypedDict, total=False):
     candidates: list[ProductCandidate]
     normalized_products: list[ProductCandidate]
     compatibility_notes: list[str]
+    compatibility_checks: list[CompatibilityCheck]
     price_snapshots: list[PriceSnapshot]
     review_insights: list[ReviewInsight]
+    benchmark_evidence: list[BenchmarkEvidence]
     scorecards: list[ScoreCard]
     citations: list[str]
     verification_flags: list[str]
     report: PurchaseReport
     steps: list[AgentStep]
+    trace_events: list[TraceEvent]
     graph_trace_id: str
 
 
 def _record(state: PurchaseState, step: AgentStep) -> None:
     state.setdefault("steps", []).append(step)
+
+
+def _trace(
+    state: PurchaseState,
+    step: AgentStep,
+    title: str,
+    detail: str,
+    *,
+    status: CheckStatus = CheckStatus.ok,
+    evidence_count: int = 0,
+) -> None:
+    state.setdefault("trace_events", []).append(
+        trace_event(
+            step,
+            title,
+            detail,
+            status=status,
+            evidence_count=evidence_count,
+        )
+    )
 
 
 def intent_parser(state: PurchaseState) -> PurchaseState:
@@ -56,6 +98,13 @@ def intent_parser(state: PurchaseState) -> PurchaseState:
         channels=request.channels,
     )
     state["graph_trace_id"] = f"trace_{uuid4().hex[:12]}"
+    _trace(
+        state,
+        AgentStep.intent_parser,
+        "요청 구조화",
+        f"{request.category.value}, 예산 {request.budget_krw or '미입력'}, 조건 {len(request.must_haves)}개",
+        evidence_count=len(request.must_haves) + len(request.exclusions),
+    )
     return state
 
 
@@ -71,6 +120,14 @@ def clarifier(state: PurchaseState) -> PurchaseState:
             "범용 게이밍 기준을 적용했습니다."
         )
     state["verification_flags"] = flags
+    _trace(
+        state,
+        AgentStep.clarifier,
+        "모호성 점검",
+        "추가 질문 없이 분석 가능" if not flags else " / ".join(flags),
+        status=CheckStatus.ok if not flags else CheckStatus.warning,
+        evidence_count=len(flags),
+    )
     return state
 
 
@@ -84,6 +141,13 @@ def query_planner(state: PurchaseState) -> PurchaseState:
         *[f"{condition} {criteria.category.value}" for condition in criteria.must_haves],
         *[f"source:{channel}" for channel in channel_list],
     ]
+    _trace(
+        state,
+        AgentStep.query_planner,
+        "검색 계획 생성",
+        f"가격/스펙/리뷰/벤치마크 축으로 {len(state['search_plan'])}개 쿼리를 준비했습니다.",
+        evidence_count=len(state["search_plan"]),
+    )
     return state
 
 
@@ -91,9 +155,16 @@ def product_collector(state: PurchaseState) -> PurchaseState:
     _record(state, AgentStep.product_collector)
     criteria = state["criteria"]
     state["candidates"] = (
-        _desktop_build_candidates(criteria)
+        desktop_candidates()
         if criteria.category == Category.desktop_pc
-        else _laptop_candidates(criteria)
+        else laptop_candidates()
+    )
+    _trace(
+        state,
+        AgentStep.product_collector,
+        "후보 수집",
+        f"{criteria.category.value} 후보 {len(state['candidates'])}개를 수집했습니다.",
+        evidence_count=len(state["candidates"]),
     )
     return state
 
@@ -108,62 +179,73 @@ def deduplicator(state: PurchaseState) -> PurchaseState:
         normalized.append(candidate)
         seen.add(candidate.normalized_model)
     state["normalized_products"] = normalized
+    _trace(
+        state,
+        AgentStep.deduplicator,
+        "모델 정규화",
+        f"중복 제거 후 {len(normalized)}개 후보가 남았습니다.",
+        evidence_count=len(normalized),
+    )
     return state
 
 
 def compatibility_checker(state: PurchaseState) -> PurchaseState:
     _record(state, AgentStep.compatibility_checker)
+    checks: list[CompatibilityCheck] = []
     notes = []
     for product in state["normalized_products"]:
-        if product.category == Category.desktop_pc:
-            notes.append(
-                f"{product.model_name}: {product.specs['cpu_socket']} CPU와 "
-                f"{product.specs['motherboard_socket']} 보드 소켓 확인, "
-                f"권장 파워 {product.specs['psu_watt']}W"
-            )
-        else:
-            notes.append(
-                f"{product.model_name}: RAM {product.specs['ram_gb']}GB, "
-                f"무게 {product.specs['weight_kg']}kg, 외장 GPU 여부 확인"
-            )
+        product_checks = build_compatibility_checks(product)
+        checks.extend(product_checks)
+        notes.append(f"{product.model_name}: {compatibility_summary(product_checks)}")
+    state["compatibility_checks"] = checks
     state["compatibility_notes"] = notes
+    warning_count = sum(check.status != CheckStatus.ok for check in checks)
+    _trace(
+        state,
+        AgentStep.compatibility_checker,
+        "호환성 검증",
+        f"총 {len(checks)}개 규칙을 확인했고 경고/차단은 {warning_count}개입니다.",
+        status=CheckStatus.ok if warning_count == 0 else CheckStatus.warning,
+        evidence_count=len(checks),
+    )
     return state
 
 
 def price_tracker(state: PurchaseState) -> PurchaseState:
     _record(state, AgentStep.price_tracker)
     now = datetime.now(UTC).isoformat()
-    prices = [1_920_000, 1_740_000, 2_180_000, 1_560_000, 2_390_000]
-    sellers = ["Price Compare", "Open Market", "Official Store", "PC Builder", "Marketplace"]
     state["price_snapshots"] = [
-        PriceSnapshot(
-            product_id=product.id,
-            seller=sellers[index],
-            price_krw=prices[index],
-            shipping_fee_krw=0 if index < 3 else 5000,
-            coupon_krw=70000 if index in {0, 1} else 0,
-            captured_at=now,
-            url=product.source_url,
-        )
-        for index, product in enumerate(state["normalized_products"])
+        price_snapshot_for(product, now) for product in state["normalized_products"]
     ]
+    _trace(
+        state,
+        AgentStep.price_tracker,
+        "실구매가 계산",
+        "배송비, 조립비, 쿠폰, 카드 할인까지 반영했습니다.",
+        evidence_count=len(state["price_snapshots"]),
+    )
     return state
 
 
 def review_analyzer(state: PurchaseState) -> PurchaseState:
     _record(state, AgentStep.review_analyzer)
-    state["review_insights"] = [
-        ReviewInsight(
-            product_id=product.id,
-            pros=_pros_for(product),
-            cons=_cons_for(product),
-            repeated_complaints=_complaints_for(product),
-            risk_signals=_risk_signals_for(index),
-            trust_score=max(0.58, 0.9 - index * 0.07),
-        )
-        for index, product in enumerate(state["normalized_products"])
+    state["review_insights"] = [review_for(product) for product in state["normalized_products"]]
+    state["benchmark_evidence"] = [
+        item
+        for product in state["normalized_products"]
+        for item in benchmarks_for(product)
     ]
-    state["citations"] = [product.source_url for product in state["normalized_products"]]
+    state["citations"] = [
+        *[product.source_url for product in state["normalized_products"]],
+        *[evidence.evidence_url for evidence in state["benchmark_evidence"]],
+    ]
+    _trace(
+        state,
+        AgentStep.review_analyzer,
+        "리뷰/벤치마크 근거 분석",
+        f"리뷰 {len(state['review_insights'])}개와 벤치마크 {len(state['benchmark_evidence'])}개를 연결했습니다.",
+        evidence_count=sum(review.evidence_count for review in state["review_insights"]),
+    )
     return state
 
 
@@ -171,6 +253,7 @@ def scoring_engine(state: PurchaseState) -> PurchaseState:
     _record(state, AgentStep.scoring_engine)
     prices = {price.product_id: price for price in state["price_snapshots"]}
     reviews = {review.product_id: review for review in state["review_insights"]}
+    checks_by_product = _group_by_product(state["compatibility_checks"])
     budget = state["criteria"].budget_krw or 2_000_000
     cards: list[ScoreCard] = []
 
@@ -178,11 +261,11 @@ def scoring_engine(state: PurchaseState) -> PurchaseState:
         price = prices[product.id]
         review = reviews[product.id]
         purpose_fit = _purpose_fit(product, state["criteria"])
-        price_score = min(100, max(30, 100 - ((price.effective_price_krw - budget) / budget) * 100))
+        price_score = price_competitiveness(price, budget)
         review_score = review.trust_score * 100
-        stability = 90 if price.seller in {"Price Compare", "Official Store"} else 78
+        stability = purchase_stability(price)
         preference = 78 + min(12, len(state["criteria"].must_haves) * 3)
-        compatibility = _compatibility_score(product)
+        compatibility = compatibility_score(checks_by_product.get(product.id, []))
         total = (
             purpose_fit * 0.35
             + price_score * 0.22
@@ -208,6 +291,13 @@ def scoring_engine(state: PurchaseState) -> PurchaseState:
             )
         )
     state["scorecards"] = cards
+    _trace(
+        state,
+        AgentStep.scoring_engine,
+        "가중 점수화",
+        "목적 35%, 가격 22%, 리뷰 15%, 안정성 10%, 호환성 10%, 선호 8%를 반영했습니다.",
+        evidence_count=len(cards),
+    )
     return state
 
 
@@ -218,9 +308,24 @@ def verifier(state: PurchaseState) -> PurchaseState:
         flags.append("일부 후보의 출처 링크가 부족합니다.")
     if not state.get("compatibility_notes"):
         flags.append("호환성 검증 결과가 없습니다.")
-    state["verification_flags"] = flags or [
-        "데모 데이터 기준 가격/출처/호환성 검증을 통과했습니다."
+    if not state.get("benchmark_evidence"):
+        flags.append("벤치마크 근거가 부족합니다.")
+    stale_or_weak = [
+        price for price in state["price_snapshots"] if price.stock_status not in {"in_stock", "limited"}
     ]
+    if stale_or_weak:
+        flags.append("일부 가격의 재고 상태가 불명확합니다.")
+    state["verification_flags"] = flags or [
+        "데모 데이터 기준 가격/출처/호환성/벤치마크 검증을 통과했습니다."
+    ]
+    _trace(
+        state,
+        AgentStep.verifier,
+        "검증 게이트",
+        " / ".join(state["verification_flags"]),
+        status=CheckStatus.ok if not flags else CheckStatus.warning,
+        evidence_count=len(state["verification_flags"]),
+    )
     return state
 
 
@@ -229,6 +334,8 @@ def report_writer(state: PurchaseState) -> PurchaseState:
     products = {product.id: product for product in state["normalized_products"]}
     prices = {price.product_id: price for price in state["price_snapshots"]}
     reviews = {review.product_id: review for review in state["review_insights"]}
+    checks_by_product = _group_by_product(state["compatibility_checks"])
+    benchmarks_by_product = _group_by_product(state["benchmark_evidence"])
     ranked = sorted(state["scorecards"], key=lambda card: card.total_score, reverse=True)
 
     prompt = ChatPromptTemplate.from_messages(
@@ -254,10 +361,11 @@ def report_writer(state: PurchaseState) -> PurchaseState:
             score=card,
             fit_summary=_fit_summary(products[card.product_id], card),
             before_buy_checklist=[
-                "CPU 소켓, 메인보드 칩셋, RAM 규격, 파워 용량을 확인하세요.",
-                "모니터 해상도와 주사율 기준으로 GPU가 과하거나 부족하지 않은지 확인하세요.",
-                "최종 결제 화면의 배송비, 조립비, 윈도우 포함 여부를 다시 확인하세요.",
+                *_checklist_for(products[card.product_id]),
+                "최종 결제 화면의 배송비, 조립비, OS 포함 여부, 카드 혜택을 다시 확인하세요.",
             ],
+            benchmark_evidence=benchmarks_by_product.get(card.product_id, []),
+            compatibility_checks=checks_by_product.get(card.product_id, []),
         )
         for index, card in enumerate(ranked[:3])
     ]
@@ -268,6 +376,22 @@ def report_writer(state: PurchaseState) -> PurchaseState:
         )
         for card in ranked[3:5]
     ]
+    comparison_table = [
+        ComparisonRow(
+            product_id=card.product_id,
+            rank=index + 1 if index < 3 else None,
+            model_name=products[card.product_id].model_name,
+            effective_price_krw=prices[card.product_id].effective_price_krw,
+            purpose_fit=card.purpose_fit,
+            compatibility=card.compatibility,
+            review_trust=card.review_trust,
+            strongest_reason=strongest_reason(products[card.product_id], reviews[card.product_id]),
+            main_risk=main_risk(reviews[card.product_id]),
+        )
+        for index, card in enumerate(ranked[:5])
+    ]
+    ranked_ids = [card.product_id for card in ranked]
+    price_alerts = build_price_alerts(state["price_snapshots"], state["criteria"], ranked_ids)
     state["report"] = PurchaseReport(
         summary=summary_chain.invoke(
             {
@@ -278,13 +402,27 @@ def report_writer(state: PurchaseState) -> PurchaseState:
         ),
         top_recommendations=recommendations,
         excluded_products=excluded,
-        purchase_timing=(
-            "부품 가격 합계가 목표 예산보다 3-5% 낮아질 때 구매, "
-            "급하지 않으면 7일 단위 재조회"
+        purchase_timing=price_timing_message(
+            state["price_snapshots"],
+            state["criteria"].budget_krw,
         ),
         compatibility_notes=state["compatibility_notes"],
         citations=state["citations"],
         verification_flags=state["verification_flags"],
+        comparison_table=comparison_table,
+        benchmark_evidence=state["benchmark_evidence"],
+        compatibility_checks=state["compatibility_checks"],
+        price_alerts=price_alerts,
+        source_health=_source_health(state["price_snapshots"], state["citations"]),
+        decision_matrix=_decision_matrix(recommendations, excluded),
+        final_pick_id=recommendations[0].product.id if recommendations else None,
+    )
+    _trace(
+        state,
+        AgentStep.report_writer,
+        "구매 리포트 작성",
+        f"TOP {len(recommendations)}개와 제외 {len(excluded)}개, 가격 알림 {len(price_alerts)}개를 생성했습니다.",
+        evidence_count=len(comparison_table),
     )
     return state
 
@@ -333,162 +471,8 @@ def run_analysis(request: AnalyzeRequest) -> AnalyzeResponse:
         steps=state["steps"],
         report=state["report"],
         graph_trace_id=state["graph_trace_id"],
+        trace_events=state["trace_events"],
     )
-
-
-def _desktop_build_candidates(category: PurchaseCriteria) -> list[ProductCandidate]:
-    return [
-        ProductCandidate(
-            id="build-001",
-            brand="SpecPilot",
-            model_name="Creator RTX 4070 Build",
-            normalized_model="creator-rtx4070-7800x3d-b650",
-            category=category.category,
-            form_factor="desktop_build",
-            specs={
-                "cpu": "Ryzen 7 7800X3D",
-                "gpu": "RTX 4070 SUPER",
-                "motherboard": "B650",
-                "cpu_socket": "AM5",
-                "motherboard_socket": "AM5",
-                "ram_gb": 32,
-                "ssd_tb": 1,
-                "psu_watt": 750,
-            },
-            source_url="https://example.com/pc-builds/creator-rtx4070",
-        ),
-        ProductCandidate(
-            id="build-002",
-            brand="SpecPilot",
-            model_name="Balanced RTX 4060 Ti Build",
-            normalized_model="balanced-rtx4060ti-7500f-b650",
-            category=category.category,
-            form_factor="desktop_build",
-            specs={
-                "cpu": "Ryzen 5 7500F",
-                "gpu": "RTX 4060 Ti",
-                "motherboard": "B650",
-                "cpu_socket": "AM5",
-                "motherboard_socket": "AM5",
-                "ram_gb": 32,
-                "ssd_tb": 1,
-                "psu_watt": 650,
-            },
-            source_url="https://example.com/pc-builds/balanced-rtx4060ti",
-        ),
-        ProductCandidate(
-            id="build-003",
-            brand="SpecPilot",
-            model_name="Intel Creator RTX 4070 Build",
-            normalized_model="intel-creator-rtx4070-14700-b760",
-            category=category.category,
-            form_factor="desktop_build",
-            specs={
-                "cpu": "Core i7-14700",
-                "gpu": "RTX 4070",
-                "motherboard": "B760",
-                "cpu_socket": "LGA1700",
-                "motherboard_socket": "LGA1700",
-                "ram_gb": 32,
-                "ssd_tb": 2,
-                "psu_watt": 750,
-            },
-            source_url="https://example.com/pc-builds/intel-creator-rtx4070",
-        ),
-        ProductCandidate(
-            id="build-004",
-            brand="SpecPilot",
-            model_name="Budget RX 7600 Build",
-            normalized_model="budget-rx7600-5600-b550",
-            category=category.category,
-            form_factor="desktop_build",
-            specs={
-                "cpu": "Ryzen 5 5600",
-                "gpu": "RX 7600",
-                "motherboard": "B550",
-                "cpu_socket": "AM4",
-                "motherboard_socket": "AM4",
-                "ram_gb": 16,
-                "ssd_tb": 1,
-                "psu_watt": 600,
-            },
-            source_url="https://example.com/pc-builds/budget-rx7600",
-        ),
-        ProductCandidate(
-            id="build-005",
-            brand="SpecPilot",
-            model_name="High-End RTX 4080 Build",
-            normalized_model="highend-rtx4080-7900x-b650e",
-            category=category.category,
-            form_factor="desktop_build",
-            specs={
-                "cpu": "Ryzen 9 7900X",
-                "gpu": "RTX 4080 SUPER",
-                "motherboard": "B650E",
-                "cpu_socket": "AM5",
-                "motherboard_socket": "AM5",
-                "ram_gb": 64,
-                "ssd_tb": 2,
-                "psu_watt": 850,
-            },
-            source_url="https://example.com/pc-builds/highend-rtx4080",
-        ),
-    ]
-
-
-def _laptop_candidates(criteria: PurchaseCriteria) -> list[ProductCandidate]:
-    return [
-        ProductCandidate(
-            id="laptop-001",
-            brand="ASUS",
-            model_name="ProArt P16",
-            normalized_model="asus-proart-p16-32gb",
-            category=criteria.category,
-            form_factor="laptop",
-            specs={"cpu": "Ryzen AI 9", "ram_gb": 32, "gpu": "RTX 4060", "weight_kg": 1.85},
-            source_url="https://example.com/laptops/asus-proart-p16",
-        ),
-        ProductCandidate(
-            id="laptop-002",
-            brand="Lenovo",
-            model_name="Yoga Pro 7",
-            normalized_model="lenovo-yoga-pro-7-32gb",
-            category=criteria.category,
-            form_factor="laptop",
-            specs={"cpu": "Ryzen 7", "ram_gb": 32, "gpu": "RTX 4050", "weight_kg": 1.59},
-            source_url="https://example.com/laptops/lenovo-yoga-pro-7",
-        ),
-        ProductCandidate(
-            id="laptop-003",
-            brand="Apple",
-            model_name="MacBook Pro 14",
-            normalized_model="apple-macbook-pro-14-m4",
-            category=criteria.category,
-            form_factor="laptop",
-            specs={"cpu": "M4", "ram_gb": 16, "gpu": "integrated", "weight_kg": 1.55},
-            source_url="https://example.com/laptops/macbook-pro-14",
-        ),
-        ProductCandidate(
-            id="laptop-004",
-            brand="LG",
-            model_name="gram Pro 16",
-            normalized_model="lg-gram-pro-16",
-            category=criteria.category,
-            form_factor="laptop",
-            specs={"cpu": "Core Ultra 7", "ram_gb": 16, "gpu": "Arc", "weight_kg": 1.19},
-            source_url="https://example.com/laptops/lg-gram-pro-16",
-        ),
-        ProductCandidate(
-            id="laptop-005",
-            brand="Dell",
-            model_name="XPS 15",
-            normalized_model="dell-xps-15",
-            category=criteria.category,
-            form_factor="laptop",
-            specs={"cpu": "Core Ultra 7", "ram_gb": 32, "gpu": "RTX 4050", "weight_kg": 1.86},
-            source_url="https://example.com/laptops/dell-xps-15",
-        ),
-    ]
 
 
 def _purpose_fit(product: ProductCandidate, criteria: PurchaseCriteria) -> float:
@@ -505,47 +489,19 @@ def _purpose_fit(product: ProductCandidate, criteria: PurchaseCriteria) -> float
         score += 6
     if product.category == Category.desktop_pc and float(product.specs.get("psu_watt", 0)) >= 650:
         score += 5
+    if any("업그레이드" in item or "upgrade" in item.lower() for item in criteria.must_haves):
+        score += float(product.specs.get("upgrade_slots", 0)) * 2
+    if any("휴대" in item or "가벼" in item for item in criteria.must_haves):
+        if product.category == Category.laptop and float(product.specs.get("weight_kg", 9)) <= 1.6:
+            score += 8
     return min(100, score)
 
 
-def _compatibility_score(product: ProductCandidate) -> float:
-    if product.category == Category.laptop:
-        return 92.0
-    socket_match = product.specs.get("cpu_socket") == product.specs.get("motherboard_socket")
-    psu = float(product.specs.get("psu_watt", 0))
-    gpu = str(product.specs.get("gpu", ""))
-    required = 850 if "4080" in gpu else 750 if "4070" in gpu else 650 if "4060" in gpu else 550
-    return 96.0 if socket_match and psu >= required else 68.0
-
-
-def _pros_for(product: ProductCandidate) -> list[str]:
-    if product.category == Category.desktop_pc:
-        return ["부품 교체와 업그레이드가 쉬움", "예산 대비 그래픽 성능을 조정하기 좋음"]
-    return ["완제품이라 구매와 이동이 편함", "작업 환경 이동이 잦은 사용자에게 적합"]
-
-
-def _cons_for(product: ProductCandidate) -> list[str]:
-    if product.category == Category.desktop_pc:
-        return [
-            "조립비, 윈도우 포함 여부, 케이스 호환성 확인 필요",
-            "부품별 AS 정책이 다를 수 있음",
-        ]
-    return ["고성능 작업 시 발열과 팬 소음 확인 필요", "RAM/SSD 업그레이드 제한 가능성"]
-
-
-def _complaints_for(product: ProductCandidate) -> list[str]:
-    if product.category == Category.desktop_pc:
-        return ["파워 용량", "케이스 크기", "쿨러 간섭", "조립비"]
-    return ["팬 소음", "발열", "충전기 무게", "옵션별 가격 차이"]
-
-
-def _risk_signals_for(index: int) -> list[str]:
-    signals = [
-        "동일한 문구의 후기 또는 견적 댓글이 반복됨",
-        "가격 정보의 수집 시점이 오래되었을 수 있음",
-        "벤치마크와 실사용 후기가 다르게 나타남",
-    ]
-    return signals[: max(1, 3 - index % 3)]
+def _group_by_product(items):
+    grouped = {}
+    for item in items:
+        grouped.setdefault(item.product_id, []).append(item)
+    return grouped
 
 
 def _fit_summary(product: ProductCandidate, card: ScoreCard) -> str:
@@ -553,3 +509,45 @@ def _fit_summary(product: ProductCandidate, card: ScoreCard) -> str:
         f"{product.model_name}은 총점 {card.total_score}점으로 목적 적합도, "
         "가격, 호환성의 균형이 좋은 후보입니다."
     )
+
+
+def _checklist_for(product: ProductCandidate) -> list[str]:
+    if product.category == Category.desktop_pc:
+        return [
+            "CPU 소켓, 메인보드 칩셋, RAM 규격, 파워 용량을 확인하세요.",
+            "케이스 GPU 길이와 CPU 쿨러 높이 여유를 확인하세요.",
+            "모니터 해상도와 주사율 기준으로 GPU 체급이 과하거나 부족하지 않은지 확인하세요.",
+        ]
+    return [
+        "RAM/SSD 옵션명이 실제 판매 페이지와 같은지 확인하세요.",
+        "장시간 고부하 작업의 발열과 팬 소음 후기를 확인하세요.",
+        "무게, 충전기, 배터리 용량이 이동 패턴과 맞는지 확인하세요.",
+    ]
+
+
+def _source_health(prices: list[PriceSnapshot], citations: list[str]) -> list[str]:
+    source_types = sorted({price.source_type for price in prices})
+    limited = [price for price in prices if price.stock_status == "limited"]
+    return [
+        f"가격 출처 {len(source_types)}종: {', '.join(source_types)}",
+        f"출처 링크 {len(citations)}개 연결",
+        f"재고 한정 후보 {len(limited)}개",
+        "제휴 여부와 무관하게 가격/호환성/리뷰 점수 기준으로 정렬합니다.",
+    ]
+
+
+def _decision_matrix(
+    recommendations: list[Recommendation],
+    excluded: list[ExcludedProduct],
+) -> list[str]:
+    lines = [
+        f"최종 1순위: {recommendations[0].product.model_name} - {recommendations[0].fit_summary}"
+        if recommendations
+        else "추천 후보가 없습니다.",
+        "TOP 3는 예산, 목적 적합도, 호환성, 리뷰 신뢰도 균형으로 선정했습니다.",
+    ]
+    if excluded:
+        lines.append(
+            "제외 후보는 구매하지 말라는 의미가 아니라 이번 요청 조건에서 우선순위가 낮다는 뜻입니다."
+        )
+    return lines
