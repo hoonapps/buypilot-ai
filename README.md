@@ -53,6 +53,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - SQLite 기반 분석 결과 저장
 - 저장 리포트 조회와 가격 알림 구독
 - 저장 리포트 공개 공유 링크 생성과 공개 리포트 페이지
+- 리포트 기반 구매 상담 Q&A: 저장 리포트에 가격, 호환성, 리스크, 비교, 결제 전 질문을 던지고 근거/다음 행동과 함께 답변 저장
 - 완료 리포트 배치 발송: 저장 리포트를 이메일/웹훅/SMS outbox로 묶어 발송하고 미리보기, 성공/실패/재시도, 공개 추적 픽셀/클릭 리다이렉트, provider webhook, 반송/신고/수신 제외, 열람/클릭 상태 추적
 - 목표가 도달 평가와 발송 큐 이벤트 저장
 - 이메일/웹훅/SMS 알림 채널 설정, 발송 큐 dispatch, 발송 시도/재시도 기록
@@ -248,6 +249,35 @@ http://127.0.0.1:8000/r/share_xxxxxxxxxxxxxxxxxxxx
 
 ```bash
 curl -X DELETE http://127.0.0.1:8000/reports/report_xxxxxxxxxxxx/share \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
+저장 리포트 기반 구매 상담:
+
+```bash
+curl -X POST http://127.0.0.1:8000/reports/report_xxxxxxxxxxxx/advisor-questions \
+  -H "Content-Type: application/json" \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY" \
+  -d '{
+    "question": "지금 결제해도 돼, 아니면 목표가까지 기다리는 게 좋아?",
+    "context": "이번 주 안에는 구매 가능하지만 가격이 중요합니다.",
+    "selected_product_id": "desktop_creator_4070",
+    "buyer_stage": "pre_checkout",
+    "contact": "buyer@example.com"
+  }'
+```
+
+상담 이력 조회:
+
+```bash
+curl http://127.0.0.1:8000/reports/report_xxxxxxxxxxxx/advisor-questions \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
+워크스페이스 전체 상담 이력:
+
+```bash
+curl http://127.0.0.1:8000/advisor-questions \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
@@ -1039,6 +1069,7 @@ make docker-build
 - `/analyze`, `/alerts/preview`, `/traces/{trace_id}`가 동작하는지
 - `/reports/save`, `/reports/{report_id}`, `/alerts/subscribe`, `/ops/metrics`가 동작하는지
 - `/reports/{report_id}/share`, `/public/reports/{share_token}`, `/r/{share_token}`이 공개 공유 리포트를 만들고 해제하는지
+- `/reports/{report_id}/advisor-questions`, `/advisor-questions`가 저장 리포트 기반 구매 상담 답변, 근거, 다음 행동, 워크스페이스 격리를 처리하는지
 - `/reports/{report_id}/checkout-review`, `/reports/{report_id}/checkout-reviews`, `/checkout-reviews`가 결제 전 검수와 워크스페이스 격리를 처리하는지
 - `/reports/{report_id}/purchase-links`, `/reports/{report_id}/purchase-link-governance`, `/buy/{link_id}`가 제휴/비제휴 구매 링크, 정책 경고, 공개 클릭 redirect, 클릭 지표를 처리하는지
 - `/reports/{report_id}/purchase-outcomes`, `/purchase-outcomes`가 실제 구매, 이탈, 지연, 반품/취소 결과와 최종가 차이를 저장하고 워크스페이스별로 격리하는지

@@ -82,6 +82,8 @@ def test_admin_page_exposes_review_console() -> None:
     assert "열람/클릭 이벤트" in response.text
     assert "tracking_pixel_path" in response.text
     assert "provider webhook 이벤트" in response.text
+    assert "구매 상담 Q&A" in response.text
+    assert "advisor-questions" in response.text
     assert "결제 전 검수" in response.text
     assert "checkout-reviews" in response.text
     assert "구매 결과" in response.text
@@ -362,6 +364,58 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
 
     blocked_detail = client.get(f"/reports/{saved_payload['report_id']}", headers=WORKSPACE_B)
     assert blocked_detail.status_code == 404
+
+    advisor_answer = client.post(
+        f"/reports/{saved_payload['report_id']}/advisor-questions",
+        headers=WORKSPACE_A,
+        json={
+            "question": "지금 결제해도 돼, 아니면 목표가까지 기다리는 게 좋아?",
+            "context": "이번 주 안에는 구매 가능하지만 가격이 중요합니다.",
+            "selected_product_id": analysis["report"]["final_pick_id"],
+            "buyer_stage": "pre_checkout",
+            "contact": "buyer@example.com",
+        },
+    )
+    assert advisor_answer.status_code == 200
+    advisor_payload = advisor_answer.json()
+    assert advisor_payload["report_id"] == saved_payload["report_id"]
+    assert advisor_payload["workspace_id"] == saved_payload["workspace_id"]
+    assert advisor_payload["question"].startswith("지금 결제")
+    assert advisor_payload["selected_product_id"] == analysis["report"]["final_pick_id"]
+    assert advisor_payload["selected_model_name"]
+    assert advisor_payload["answer"]
+    assert advisor_payload["grounded_evidence"]
+    assert advisor_payload["next_actions"]
+    assert advisor_payload["contact_masked"] == "bu***@example.com"
+    assert advisor_payload["status"] in {"ok", "warning", "blocker"}
+
+    report_advisor_answers = client.get(
+        f"/reports/{saved_payload['report_id']}/advisor-questions",
+        headers=WORKSPACE_A,
+    )
+    assert report_advisor_answers.status_code == 200
+    assert any(
+        item["answer_id"] == advisor_payload["answer_id"]
+        for item in report_advisor_answers.json()
+    )
+
+    workspace_advisor_answers = client.get("/advisor-questions", headers=WORKSPACE_A)
+    assert any(
+        item["answer_id"] == advisor_payload["answer_id"]
+        for item in workspace_advisor_answers.json()
+    )
+
+    isolated_advisor_answer = client.post(
+        f"/reports/{saved_payload['report_id']}/advisor-questions",
+        headers=WORKSPACE_B,
+        json={"question": "다른 워크스페이스에서 볼 수 있나?"},
+    )
+    assert isolated_advisor_answer.status_code == 404
+    isolated_advisor_answers = client.get("/advisor-questions", headers=WORKSPACE_B)
+    assert all(
+        item["answer_id"] != advisor_payload["answer_id"]
+        for item in isolated_advisor_answers.json()
+    )
 
     top_recommendation = analysis["report"]["top_recommendations"][0]
     checkout_review = client.post(
@@ -659,6 +713,7 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     metrics_after_share = client.get("/ops/metrics", headers=WORKSPACE_A).json()
     assert metrics_after_share["shared_reports"] >= 1
     assert metrics_after_share["public_share_views"] >= 2
+    assert metrics_after_share["report_advisor_answers"] >= 1
     assert metrics_after_share["checkout_reviews"] >= 2
     assert metrics_after_share["checkout_blocked_reviews"] >= 1
     assert metrics_after_share["purchase_outcomes"] >= 2

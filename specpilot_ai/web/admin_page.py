@@ -230,6 +230,11 @@ def admin_page_html() -> str:
     </section>
     <section class="grid top-grid" style="margin-top:14px">
       <div class="panel">
+        <h2>구매 상담 Q&A</h2>
+        <p>저장 리포트에 사용자가 던진 후속 질문과 근거 기반 답변, 경고 상태를 확인합니다.</p>
+        <div class="review-list" id="advisor-questions"></div>
+      </div>
+      <div class="panel">
         <h2>결제 전 검수</h2>
         <p>저장 리포트에서 실제 결제 직전 가격, 옵션, 판매자 답변, 리스크 승인 상태를 검수합니다.</p>
         <div class="review-list" id="checkout-reviews"></div>
@@ -312,6 +317,7 @@ def admin_page_html() -> str:
         completionGroupResponse,
         completionEngagementResponse,
         completionProviderEventResponse,
+        advisorQuestionResponse,
         checkoutReviewResponse,
         purchaseOutcomeResponse
       ] = await Promise.all([
@@ -343,6 +349,7 @@ def admin_page_html() -> str:
         fetch('/reports/completion-recipient-groups'),
         fetch('/reports/completion-engagement'),
         fetch('/reports/completion-provider-events'),
+        fetch('/advisor-questions'),
         fetch('/checkout-reviews'),
         fetch('/purchase-outcomes')
       ]);
@@ -374,6 +381,7 @@ def admin_page_html() -> str:
       const completionGroups = await completionGroupResponse.json();
       const completionEngagement = await completionEngagementResponse.json();
       const completionProviderEvents = await completionProviderEventResponse.json();
+      const advisorQuestions = await advisorQuestionResponse.json();
       const checkoutReviews = await checkoutReviewResponse.json();
       const purchaseOutcomes = await purchaseOutcomeResponse.json();
       latestCompletionTemplates = completionTemplates;
@@ -405,6 +413,7 @@ def admin_page_html() -> str:
       renderCompletionBatches(completionBatches);
       renderCompletionEngagement(completionEngagement);
       renderCompletionProviderEvents(completionProviderEvents);
+      renderAdvisorQuestions(advisorQuestions);
       renderCheckoutReviews(checkoutReviews);
       renderPurchaseOutcomes(purchaseOutcomes);
       renderTraces(traces);
@@ -430,6 +439,8 @@ def admin_page_html() -> str:
         ['완료 반송', metrics.completion_delivery_bounces],
         ['완료 신고', metrics.completion_delivery_complaints],
         ['완료 제외', metrics.completion_delivery_suppressions],
+        ['상담 답변', metrics.report_advisor_answers],
+        ['상담 경고', metrics.report_advisor_warning_answers],
         ['결제 검수', metrics.checkout_reviews],
         ['결제 보류', metrics.checkout_blocked_reviews],
         ['결제 가능', metrics.checkout_ready_reviews],
@@ -1006,6 +1017,29 @@ def admin_page_html() -> str:
             <h3>선택 ${item.selected_count}건 · 성공 ${item.sent_count}건 · 실패 ${item.failed_count}건</h3>
             <p>${item.note || '메모 없음'}</p>
             <ul>${deliveries}</ul>
+          </article>
+        `;
+      }).join('');
+    }
+
+    function renderAdvisorQuestions(items) {
+      const root = document.querySelector('#advisor-questions');
+      if (!items.length) {
+        root.innerHTML = '<p>아직 구매 상담 질문이 없습니다.</p>';
+        return;
+      }
+      root.innerHTML = items.map((item) => {
+        const tone = item.status === 'blocker' ? 'danger' : item.status === 'warning' ? 'warn' : '';
+        const evidence = (item.grounded_evidence || []).map((line) => `<li>${line}</li>`).join('');
+        const actions = (item.next_actions || []).map((line) => `<li>${line}</li>`).join('');
+        return `
+          <article class="review-item quality-item ${tone}">
+            <span class="kicker">${item.status} · ${new Date(item.created_at).toLocaleString()}</span>
+            <h3>${item.selected_model_name || item.selected_product_id || '리포트 상담'} · ${Math.round(item.confidence)}점</h3>
+            <p><strong>Q.</strong> ${item.question}</p>
+            <p><strong>A.</strong> ${item.answer}</p>
+            <ul>${evidence || '<li>저장 근거 없음</li>'}</ul>
+            <ul>${actions || '<li>추가 행동 없음</li>'}</ul>
           </article>
         `;
       }).join('');

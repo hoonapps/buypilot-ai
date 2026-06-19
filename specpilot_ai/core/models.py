@@ -843,6 +843,34 @@ class SavedReportDetail(SavedReportSummary):
     notes: str = ""
 
 
+class ReportAdvisorQuestionRequest(BaseModel):
+    question: str = Field(min_length=2)
+    context: str = ""
+    selected_product_id: str | None = None
+    buyer_stage: str = "pre_checkout"
+    contact: str = ""
+
+
+class ReportAdvisorAnswer(BaseModel):
+    answer_id: str
+    report_id: str
+    trace_id: str
+    workspace_id: str = "demo"
+    question: str
+    context: str = ""
+    selected_product_id: str | None = None
+    selected_model_name: str | None = None
+    buyer_stage: str
+    answer: str
+    status: CheckStatus
+    confidence: float = Field(ge=0, le=100)
+    grounded_evidence: list[str] = Field(default_factory=list)
+    cited_product_ids: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+    contact_masked: str = ""
+    created_at: str
+
+
 class CheckoutReviewRequest(BaseModel):
     product_id: str | None = None
     confirmed_price_krw: int | None = Field(default=None, ge=0)
@@ -1292,6 +1320,8 @@ class OperationsMetrics(BaseModel):
     checkout_reviews: int = 0
     checkout_blocked_reviews: int = 0
     checkout_ready_reviews: int = 0
+    report_advisor_answers: int = 0
+    report_advisor_warning_answers: int = 0
     purchase_outcomes: int = 0
     completed_purchase_outcomes: int = 0
     abandoned_purchase_outcomes: int = 0

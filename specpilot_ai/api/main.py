@@ -73,6 +73,8 @@ from specpilot_ai.core.models import (
     PurchaseOutcome,
     PurchaseOutcomeRequest,
     QualityDashboard,
+    ReportAdvisorAnswer,
+    ReportAdvisorQuestionRequest,
     ReportShare,
     ReviewDecision,
     ReviewDecisionRequest,
@@ -540,6 +542,61 @@ def get_report(
     if report is None:
         raise HTTPException(status_code=404, detail="저장 리포트를 찾을 수 없습니다.")
     return report
+
+
+@app.post(
+    "/reports/{report_id}/advisor-questions",
+    response_model=ReportAdvisorAnswer,
+)
+def create_report_advisor_answer(
+    report_id: str,
+    request: ReportAdvisorQuestionRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> ReportAdvisorAnswer:
+    answer = _store().create_report_advisor_answer_for_workspace(
+        workspace.workspace_id,
+        report_id,
+        request,
+    )
+    if answer is None:
+        raise HTTPException(
+            status_code=404,
+            detail="상담 답변을 만들 저장 리포트를 찾을 수 없습니다.",
+        )
+    return answer
+
+
+@app.get(
+    "/reports/{report_id}/advisor-questions",
+    response_model=list[ReportAdvisorAnswer],
+)
+def list_report_advisor_answers(
+    report_id: str,
+    limit: int = 50,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[ReportAdvisorAnswer]:
+    report = _store().get_report_for_workspace(workspace.workspace_id, report_id)
+    if report is None:
+        raise HTTPException(
+            status_code=404,
+            detail="상담 답변을 조회할 저장 리포트를 찾을 수 없습니다.",
+        )
+    return _store().list_report_advisor_answers_for_workspace(
+        workspace.workspace_id,
+        report_id=report_id,
+        limit=limit,
+    )
+
+
+@app.get("/advisor-questions", response_model=list[ReportAdvisorAnswer])
+def list_workspace_report_advisor_answers(
+    limit: int = 50,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[ReportAdvisorAnswer]:
+    return _store().list_report_advisor_answers_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
 
 
 @app.post("/reports/{report_id}/checkout-review", response_model=CheckoutReview)

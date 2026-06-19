@@ -77,6 +77,8 @@ from specpilot_ai.core.models import (
     PurchaseOutcomeRequest,
     PurchaseOutcomeStatus,
     QualityDashboard,
+    ReportAdvisorAnswer,
+    ReportAdvisorQuestionRequest,
     ReportShare,
     ReviewDecision,
     ReviewQueueItem,
@@ -938,6 +940,74 @@ class SpecPilotStore:
             updated_at=data["updated_at"],
             response=response,
         )
+
+    def create_report_advisor_answer_for_workspace(
+        self,
+        workspace_id: str,
+        report_id: str,
+        request: ReportAdvisorQuestionRequest,
+    ) -> ReportAdvisorAnswer | None:
+        report = self.get_report_for_workspace(workspace_id, report_id)
+        if report is None:
+            return None
+        answer = _build_report_advisor_answer(report, request)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO report_advisor_answers (
+                    answer_id, report_id, trace_id, workspace_id, question, context,
+                    selected_product_id, selected_model_name, buyer_stage, answer,
+                    status, confidence, grounded_evidence_json, cited_product_ids_json,
+                    next_actions_json, contact_masked, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    answer.answer_id,
+                    answer.report_id,
+                    answer.trace_id,
+                    answer.workspace_id,
+                    answer.question,
+                    answer.context,
+                    answer.selected_product_id,
+                    answer.selected_model_name,
+                    answer.buyer_stage,
+                    answer.answer,
+                    answer.status.value,
+                    answer.confidence,
+                    json.dumps(answer.grounded_evidence, ensure_ascii=False),
+                    json.dumps(answer.cited_product_ids, ensure_ascii=False),
+                    json.dumps(answer.next_actions, ensure_ascii=False),
+                    answer.contact_masked,
+                    answer.created_at,
+                ),
+            )
+        return answer
+
+    def list_report_advisor_answers_for_workspace(
+        self,
+        workspace_id: str,
+        report_id: str | None = None,
+        limit: int = 50,
+    ) -> list[ReportAdvisorAnswer]:
+        if report_id:
+            where = "workspace_id = ? AND report_id = ?"
+            params: tuple[object, ...] = (workspace_id, report_id, limit)
+        else:
+            where = "workspace_id = ?"
+            params = (workspace_id, limit)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT *
+                FROM report_advisor_answers
+                WHERE {where}
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [_report_advisor_answer_from_row(row) for row in rows]
 
     def create_checkout_review_for_workspace(
         self,
@@ -3582,6 +3652,18 @@ class SpecPilotStore:
                 """,
                 params,
             ).fetchone()[0]
+            report_advisor_answers = conn.execute(
+                f"SELECT COUNT(*) FROM report_advisor_answers{where}",
+                params,
+            ).fetchone()[0]
+            report_advisor_warning_answers = conn.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM report_advisor_answers{where}
+                {' AND ' if where else ' WHERE '}status IN ('warning', 'blocker')
+                """,
+                params,
+            ).fetchone()[0]
             purchase_outcomes = conn.execute(
                 f"SELECT COUNT(*) FROM purchase_outcomes{where}",
                 params,
@@ -3708,6 +3790,8 @@ class SpecPilotStore:
             checkout_reviews=checkout_reviews,
             checkout_blocked_reviews=checkout_blocked_reviews,
             checkout_ready_reviews=checkout_ready_reviews,
+            report_advisor_answers=report_advisor_answers,
+            report_advisor_warning_answers=report_advisor_warning_answers,
             purchase_outcomes=purchase_outcomes,
             completed_purchase_outcomes=completed_purchase_outcomes,
             abandoned_purchase_outcomes=abandoned_purchase_outcomes,
@@ -4000,6 +4084,28 @@ class SpecPilotStore:
                     share_views INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
+                    FOREIGN KEY(trace_id) REFERENCES analysis_runs(trace_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS report_advisor_answers (
+                    answer_id TEXT PRIMARY KEY,
+                    report_id TEXT NOT NULL,
+                    trace_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    question TEXT NOT NULL,
+                    context TEXT NOT NULL DEFAULT '',
+                    selected_product_id TEXT,
+                    selected_model_name TEXT,
+                    buyer_stage TEXT NOT NULL DEFAULT 'pre_checkout',
+                    answer TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    confidence REAL NOT NULL DEFAULT 0,
+                    grounded_evidence_json TEXT NOT NULL DEFAULT '[]',
+                    cited_product_ids_json TEXT NOT NULL DEFAULT '[]',
+                    next_actions_json TEXT NOT NULL DEFAULT '[]',
+                    contact_masked TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(report_id) REFERENCES saved_reports(report_id),
                     FOREIGN KEY(trace_id) REFERENCES analysis_runs(trace_id)
                 );
 
@@ -4438,6 +4544,10 @@ class SpecPilotStore:
 
                 CREATE INDEX IF NOT EXISTS idx_saved_reports_trace
                     ON saved_reports(trace_id);
+                CREATE INDEX IF NOT EXISTS idx_report_advisor_workspace
+                    ON report_advisor_answers(workspace_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_report_advisor_report
+                    ON report_advisor_answers(report_id, created_at);
                 CREATE INDEX IF NOT EXISTS idx_checkout_reviews_workspace
                     ON checkout_reviews(workspace_id, created_at);
                 CREATE INDEX IF NOT EXISTS idx_checkout_reviews_report
@@ -5017,6 +5127,29 @@ def _saved_report_summary_from_row(row: sqlite3.Row) -> SavedReportSummary:
     )
 
 
+def _report_advisor_answer_from_row(row: sqlite3.Row) -> ReportAdvisorAnswer:
+    data = dict(row)
+    return ReportAdvisorAnswer(
+        answer_id=data["answer_id"],
+        report_id=data["report_id"],
+        trace_id=data["trace_id"],
+        workspace_id=data["workspace_id"],
+        question=data["question"],
+        context=data["context"],
+        selected_product_id=data["selected_product_id"],
+        selected_model_name=data["selected_model_name"],
+        buyer_stage=data["buyer_stage"],
+        answer=data["answer"],
+        status=CheckStatus(data["status"]),
+        confidence=data["confidence"],
+        grounded_evidence=json.loads(data["grounded_evidence_json"]),
+        cited_product_ids=json.loads(data["cited_product_ids_json"]),
+        next_actions=json.loads(data["next_actions_json"]),
+        contact_masked=data["contact_masked"],
+        created_at=data["created_at"],
+    )
+
+
 def _checkout_review_from_row(row: sqlite3.Row) -> CheckoutReview:
     data = dict(row)
     return CheckoutReview(
@@ -5273,6 +5406,307 @@ def _purchase_learning_signal(
     return (
         request.reason.strip()
         or "구매 후 반품/취소가 발생했습니다. 호환성, 배송, 기대 성능 차이를 회귀 분석해야 합니다."
+    )
+
+
+def _build_report_advisor_answer(
+    report: SavedReportDetail,
+    request: ReportAdvisorQuestionRequest,
+) -> ReportAdvisorAnswer:
+    purchase = report.response.report
+    question = request.question.strip()
+    context = request.context.strip()
+    selected = _advisor_selected_recommendation(report, request.selected_product_id)
+    final_pick = _advisor_selected_recommendation(report, purchase.final_pick_id)
+    top = selected or final_pick or (
+        purchase.top_recommendations[0] if purchase.top_recommendations else None
+    )
+    if top is None:
+        return ReportAdvisorAnswer(
+            answer_id=f"advisor_{uuid4().hex[:12]}",
+            report_id=report.report_id,
+            trace_id=report.trace_id,
+            workspace_id=report.workspace_id,
+            question=question,
+            context=context,
+            selected_product_id=request.selected_product_id,
+            buyer_stage=request.buyer_stage,
+            answer="저장 리포트에 추천 후보가 없어 추가 상담 답변을 만들 수 없습니다.",
+            status=CheckStatus.blocker,
+            confidence=0,
+            grounded_evidence=[],
+            cited_product_ids=[],
+            next_actions=["분석을 다시 실행해 추천 후보가 포함된 리포트를 저장하세요."],
+            contact_masked=_mask_contact(request.contact) if request.contact else "",
+            created_at=_now(),
+        )
+
+    topic = _advisor_question_topic(question)
+    evidence = _advisor_evidence_for_topic(purchase, top.product.id, topic)
+    next_actions = _advisor_next_actions_for_topic(purchase, top.product.id, topic)
+    status = _advisor_status_for_topic(purchase, top.product.id, topic)
+    answer = _advisor_answer_text(purchase, top, topic, question)
+    cited_ids = _dedupe_nonempty(
+        [
+            top.product.id,
+            *[
+                item.product.id
+                for item in purchase.top_recommendations[:3]
+                if topic == "compare"
+            ],
+        ]
+    )
+    confidence = 88.0
+    if status == CheckStatus.warning:
+        confidence = 78.0
+    if status == CheckStatus.blocker:
+        confidence = 62.0
+
+    return ReportAdvisorAnswer(
+        answer_id=f"advisor_{uuid4().hex[:12]}",
+        report_id=report.report_id,
+        trace_id=report.trace_id,
+        workspace_id=report.workspace_id,
+        question=question,
+        context=context,
+        selected_product_id=top.product.id,
+        selected_model_name=top.product.model_name,
+        buyer_stage=request.buyer_stage.strip() or "pre_checkout",
+        answer=answer,
+        status=status,
+        confidence=confidence,
+        grounded_evidence=evidence,
+        cited_product_ids=cited_ids,
+        next_actions=next_actions,
+        contact_masked=_mask_contact(request.contact) if request.contact else "",
+        created_at=_now(),
+    )
+
+
+def _advisor_selected_recommendation(
+    report: SavedReportDetail,
+    product_id: str | None,
+):
+    if not product_id:
+        return None
+    return next(
+        (
+            item
+            for item in report.response.report.top_recommendations
+            if item.product.id == product_id
+        ),
+        None,
+    )
+
+
+def _advisor_question_topic(question: str) -> str:
+    normalized = question.lower()
+    if any(word in normalized for word in ["가격", "할인", "기다", "언제", "목표가", "타이밍"]):
+        return "price"
+    if any(
+        word in normalized
+        for word in ["호환", "파워", "케이스", "램", "ram", "업그레이드", "소켓"]
+    ):
+        return "compatibility"
+    if any(word in normalized for word in ["리스크", "후기", "리뷰", "발열", "소음", "as", "불만"]):
+        return "risk"
+    if any(word in normalized for word in ["비교", "대안", "1순위", "2순위", "차이", "더 나"]):
+        return "compare"
+    if any(word in normalized for word in ["결제", "구매", "주문", "판매자", "옵션", "체크"]):
+        return "checkout"
+    return "summary"
+
+
+def _advisor_evidence_for_topic(purchase, product_id: str, topic: str) -> list[str]:
+    recommendation = next(
+        (item for item in purchase.top_recommendations if item.product.id == product_id),
+        None,
+    )
+    deal = next((item for item in purchase.deal_windows if item.product_id == product_id), None)
+    evidence_pack = next(
+        (item for item in purchase.evidence_packs if item.product_id == product_id),
+        None,
+    )
+    option_audit = next(
+        (item for item in purchase.option_audits if item.product_id == product_id),
+        None,
+    )
+    evidence: list[str] = []
+    if recommendation:
+        evidence.append(
+            f"{recommendation.product.model_name}: 총점 {recommendation.score.total_score}점, "
+            f"실구매가 {recommendation.price.effective_price_krw:,}원"
+        )
+    if topic == "price" and deal:
+        evidence.append(
+            f"현재가 {deal.current_price_krw:,}원, 목표가 {deal.target_price_krw:,}원, "
+            f"적정가 밴드 {deal.fair_price_band_krw}"
+        )
+        evidence.append(f"가격 판단: {deal.wait_reason}")
+    if topic == "compatibility":
+        checks = [
+            item
+            for item in purchase.compatibility_checks
+            if item.product_id == product_id
+        ][:4]
+        evidence.extend(f"{item.component}: {item.message}" for item in checks)
+    if topic == "risk":
+        if evidence_pack:
+            evidence.append(evidence_pack.review_evidence)
+            evidence.append(evidence_pack.trust_summary)
+        if purchase.purchase_decision and purchase.purchase_decision.risk_flags:
+            evidence.extend(purchase.purchase_decision.risk_flags[:3])
+    if topic == "compare":
+        evidence.extend(
+            f"TOP {item.rank}: {item.product.model_name} / {item.price.effective_price_krw:,}원 / "
+            f"{item.score.total_score}점"
+            for item in purchase.top_recommendations[:3]
+        )
+    if topic == "checkout" and option_audit:
+        evidence.extend(
+            f"{item.field}: {item.expected_value} / {item.verification_hint}"
+            for item in option_audit.critical_items[:3]
+        )
+        evidence.extend(option_audit.mismatch_risks[:3])
+    if topic == "summary" and purchase.purchase_decision:
+        evidence.append(
+            f"{purchase.purchase_decision.label}: {purchase.purchase_decision.reason}"
+        )
+    return _dedupe_nonempty(evidence)[:8]
+
+
+def _advisor_next_actions_for_topic(purchase, product_id: str, topic: str) -> list[str]:
+    deal = next((item for item in purchase.deal_windows if item.product_id == product_id), None)
+    option_audit = next(
+        (item for item in purchase.option_audits if item.product_id == product_id),
+        None,
+    )
+    if topic == "price":
+        actions = [deal.buy_trigger] if deal else []
+        if deal and deal.current_price_krw > deal.target_price_krw:
+            actions.append("목표가 알림을 걸고 같은 성능대 대안 후보를 다시 비교하세요.")
+        return _dedupe_nonempty(actions) or [
+            "결제 직전 판매 페이지 가격과 배송비를 다시 확인하세요."
+        ]
+    if topic == "compatibility":
+        return [
+            "보유 모니터 해상도와 주사율을 기준으로 GPU가 과하거나 부족하지 않은지 확인하세요.",
+            "케이스, 파워, 메인보드, RAM 규격을 최종 판매 옵션명과 대조하세요.",
+        ]
+    if topic == "risk":
+        return [
+            "반복 불만과 AS/반품 조건을 판매 페이지에서 다시 확인하세요.",
+            "리스크가 마음에 걸리면 안전 우선 대안 시나리오를 우선 검토하세요.",
+        ]
+    if topic == "compare":
+        return [
+            "1순위와 2순위의 가격 차이를 성능/안정성 점수 차이와 함께 비교하세요.",
+            "예산을 10% 줄였을 때도 선택이 유지되는지 스트레스 테스트 결과를 확인하세요.",
+        ]
+    if topic == "checkout":
+        questions = purchase.execution_plan.seller_questions if purchase.execution_plan else []
+        actions = list(questions[:3])
+        if option_audit:
+            actions.extend(item.verification_hint for item in option_audit.critical_items[:3])
+        return _dedupe_nonempty(actions) or [
+            "주문 옵션명, 최종 결제 금액, 반품 조건을 캡처해 보관하세요."
+        ]
+    if purchase.purchase_decision:
+        return purchase.purchase_decision.next_steps[:4]
+    return ["추천 리포트의 TOP 3와 제외 후보를 다시 확인하세요."]
+
+
+def _advisor_status_for_topic(purchase, product_id: str, topic: str) -> CheckStatus:
+    deal = next((item for item in purchase.deal_windows if item.product_id == product_id), None)
+    option_audit = next(
+        (item for item in purchase.option_audits if item.product_id == product_id),
+        None,
+    )
+    if topic == "price" and deal:
+        return deal.status
+    if topic == "checkout" and option_audit and option_audit.purchase_blockers:
+        return CheckStatus.blocker
+    if topic == "risk" and purchase.purchase_decision and purchase.purchase_decision.risk_flags:
+        return CheckStatus.warning
+    if topic == "compatibility":
+        checks = [
+            item.status
+            for item in purchase.compatibility_checks
+            if item.product_id == product_id
+        ]
+        if CheckStatus.blocker in checks:
+            return CheckStatus.blocker
+        if CheckStatus.warning in checks:
+            return CheckStatus.warning
+    return CheckStatus.ok
+
+
+def _advisor_answer_text(purchase, recommendation, topic: str, question: str) -> str:
+    model_name = recommendation.product.model_name
+    price = recommendation.price.effective_price_krw
+    decision_label = (
+        purchase.purchase_decision.label
+        if purchase.purchase_decision
+        else "추가 확인 필요"
+    )
+    if topic == "price":
+        deal = next(
+            (
+                item
+                for item in purchase.deal_windows
+                if item.product_id == recommendation.product.id
+            ),
+            None,
+        )
+        if deal and deal.current_price_krw > deal.target_price_krw:
+            return (
+                f"{model_name}은 현재 {deal.current_price_krw:,}원으로 목표가 "
+                f"{deal.target_price_krw:,}원보다 높습니다. 지금 당장 필요한 상황이 아니라면 "
+                f"가격 알림을 걸고 {deal.buy_trigger} 조건을 기다리는 쪽이 유리합니다."
+            )
+        return (
+            f"{model_name}은 현재 리포트 기준 실구매가 {price:,}원입니다. "
+            "목표가와 큰 차이가 없거나 구매 트리거를 충족하면 결제 전 검수 후 진행할 수 있습니다."
+        )
+    if topic == "compatibility":
+        return (
+            f"{model_name}은 리포트의 호환성 검수 기준으로 목적 적합도와 구성 균형을 통과했습니다. "
+            "다만 최종 판매 옵션명에서 RAM, SSD, 파워, 케이스/노트북 세부 옵션이 "
+            "리포트와 같은지 확인해야 합니다."
+        )
+    if topic == "risk":
+        return (
+            f"{model_name}의 핵심 리스크는 리뷰 반복 불만, 출처 신뢰도, 옵션 불일치 가능성입니다. "
+            "확정 표현이 아니라 리포트 근거에 묶인 위험 신호로 보고, "
+            "판매자 확인과 반품 조건 확인 후 결정하세요."
+        )
+    if topic == "compare":
+        runner_up = (
+            purchase.top_recommendations[1]
+            if len(purchase.top_recommendations) > 1
+            else None
+        )
+        if runner_up:
+            return (
+                f"1순위 {model_name}은 {price:,}원, "
+                f"2순위 {runner_up.product.model_name}은 "
+                f"{runner_up.price.effective_price_krw:,}원입니다. "
+                "점수 차이가 작고 가격 차이가 크면 대안 시나리오를, "
+                "점수 차이가 크면 1순위를 유지하는 판단이 맞습니다."
+            )
+        return (
+            f"{model_name}이 현재 리포트의 최상위 후보입니다. "
+            "대안 후보가 부족하면 조건을 바꿔 재분석하세요."
+        )
+    if topic == "checkout":
+        return (
+            f"{model_name}을 결제하려면 주문 옵션명, 최종 결제 금액, 배송비/쿠폰, 판매자 답변을 "
+            "리포트와 대조해야 합니다. 리스크 승인 누락이 있으면 결제 보류로 두는 것이 맞습니다."
+        )
+    return (
+        f"질문 '{question}'에 대한 리포트 기반 답변입니다. 현재 판정은 '{decision_label}'이고, "
+        f"기준 후보는 {model_name}입니다. 리포트에 없는 스펙이나 가격은 단정하지 않고 "
+        "결제 직전 재확인이 필요합니다."
     )
 
 
