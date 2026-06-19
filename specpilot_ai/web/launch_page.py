@@ -250,6 +250,10 @@ def launch_page_html() -> str:
       latestAnalysis = data;
       latestSavedReport = null;
       const report = data.report;
+      const decision = report.purchase_decision || {};
+      const decisionSteps = (decision.next_steps || []).map((item) => `<li>${item}</li>`).join('');
+      const decisionRisks = (decision.risk_flags || []).map((item) => `<li>${item}</li>`).join('');
+      const firstChecklist = (report.top_recommendations[0]?.before_buy_checklist || []).map((item) => `<li>${item}</li>`).join('');
       const topCards = report.top_recommendations.map((rec) => `
         <article class="card">
           <div class="rank">TOP ${rec.rank}</div>
@@ -311,6 +315,16 @@ def launch_page_html() -> str:
         </div>
         <div class="grid cards">${topCards}</div>
         <section class="sections">
+          <div class="card">
+            <h3>구매 판정</h3>
+            <p><strong>${decision.label || '판정 대기'}</strong> · 확신도 ${decision.confidence || 0}점</p>
+            <p>${decision.reason || '분석 결과를 기반으로 구매 가능성을 계산합니다.'}</p>
+            <ul class="list">${decisionSteps}</ul>
+          </div>
+          <div class="card">
+            <h3>결제 전 체크리스트</h3>
+            <ul class="list">${firstChecklist || decisionRisks || '<li>최종 판매 페이지의 가격과 옵션명을 다시 확인하세요.</li>'}</ul>
+          </div>
           <div class="card comparison-card">
             <h3>비교표</h3>
             <table>

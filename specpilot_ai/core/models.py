@@ -223,6 +223,15 @@ class TrustPolicySummary(BaseModel):
     source_assessments: list[SourceTrustAssessment] = Field(default_factory=list)
 
 
+class PurchaseDecision(BaseModel):
+    verdict: str
+    label: str
+    confidence: float = Field(ge=0, le=100)
+    reason: str
+    risk_flags: list[str] = Field(default_factory=list)
+    next_steps: list[str] = Field(default_factory=list)
+
+
 class PurchaseReport(BaseModel):
     summary: str
     top_recommendations: list[Recommendation]
@@ -239,6 +248,7 @@ class PurchaseReport(BaseModel):
     decision_matrix: list[str] = Field(default_factory=list)
     source_trust: list[SourceTrustAssessment] = Field(default_factory=list)
     trust_policy: TrustPolicySummary | None = None
+    purchase_decision: PurchaseDecision | None = None
     final_pick_id: str | None = None
 
 

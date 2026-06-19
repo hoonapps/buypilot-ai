@@ -7,6 +7,7 @@ from specpilot_ai.core.models import PublicReport
 
 def public_report_html(report: PublicReport) -> str:
     purchase = report.response.report
+    decision = purchase.purchase_decision
     top_cards = "\n".join(
         f"""
         <article class="card">
@@ -36,6 +37,20 @@ def public_report_html(report: PublicReport) -> str:
     trust = "\n".join(
         f"<li>{escape(source.source_name)} · {escape(source.trust_grade)} · 신뢰도 {round(source.confidence * 100)}%</li>"
         for source in purchase.source_trust
+    )
+    decision_steps = "\n".join(
+        f"<li>{escape(item)}</li>" for item in (decision.next_steps if decision else [])
+    )
+    decision_risks = "\n".join(
+        f"<li>{escape(item)}</li>" for item in (decision.risk_flags if decision else [])
+    )
+    checklist = "\n".join(
+        f"<li>{escape(item)}</li>"
+        for item in (
+            purchase.top_recommendations[0].before_buy_checklist
+            if purchase.top_recommendations
+            else []
+        )
     )
     return f"""
 <!doctype html>
@@ -146,6 +161,18 @@ def public_report_html(report: PublicReport) -> str:
       </aside>
     </section>
     <section class="grid cards">{top_cards}</section>
+    <section class="two section">
+      <div class="panel">
+        <span class="kicker">Purchase decision</span>
+        <h2>{escape(decision.label if decision else "구매 판정")}</h2>
+        <p>확신도 {decision.confidence if decision else 0}점 · {escape(decision.reason if decision else "분석 결과 기반 구매 가능성을 계산합니다.")}</p>
+        <ul>{decision_steps or "<li>최종 판매 페이지의 가격과 옵션명을 다시 확인하세요.</li>"}</ul>
+      </div>
+      <div class="panel">
+        <h2>결제 전 체크리스트</h2>
+        <ul>{checklist or decision_risks or "<li>출처, 가격, 재고, 옵션명을 다시 확인하세요.</li>"}</ul>
+      </div>
+    </section>
     <section class="panel section">
       <h2>후보 비교표</h2>
       <div class="table-wrap">

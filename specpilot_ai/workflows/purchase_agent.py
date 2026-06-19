@@ -16,13 +16,16 @@ from specpilot_ai.core.models import (
     ComparisonRow,
     CompatibilityCheck,
     ExcludedProduct,
+    PriceAlertPlan,
     PriceSnapshot,
     ProductCandidate,
     PurchaseCriteria,
+    PurchaseDecision,
     PurchaseReport,
     Recommendation,
     ReviewInsight,
     ScoreCard,
+    SourceTrustAssessment,
     TraceEvent,
 )
 from specpilot_ai.data.catalog import desktop_candidates, laptop_candidates, price_snapshot_for
@@ -408,6 +411,13 @@ def report_writer(state: PurchaseState) -> PurchaseState:
         state["benchmark_evidence"],
     )
     trust_policy = build_trust_policy(source_trust)
+    purchase_decision = _purchase_decision(
+        recommendations,
+        price_alerts,
+        source_trust,
+        state["verification_flags"],
+        state["criteria"],
+    )
     state["report"] = PurchaseReport(
         summary=summary_chain.invoke(
             {
@@ -433,6 +443,7 @@ def report_writer(state: PurchaseState) -> PurchaseState:
         decision_matrix=_decision_matrix(recommendations, excluded),
         source_trust=source_trust,
         trust_policy=trust_policy,
+        purchase_decision=purchase_decision,
         final_pick_id=recommendations[0].product.id if recommendations else None,
     )
     _trace(
@@ -575,3 +586,108 @@ def _decision_matrix(
             "이번 요청 조건에서 우선순위가 낮다는 뜻입니다."
         )
     return lines
+
+
+def _purchase_decision(
+    recommendations: list[Recommendation],
+    price_alerts: list[PriceAlertPlan],
+    source_trust: list[SourceTrustAssessment],
+    verification_flags: list[str],
+    criteria: PurchaseCriteria,
+) -> PurchaseDecision:
+    if not recommendations:
+        return PurchaseDecision(
+            verdict="review_required",
+            label="추천 불가",
+            confidence=0,
+            reason="비교 가능한 추천 후보가 충분하지 않습니다.",
+            risk_flags=["추천 후보 부족"],
+            next_steps=["예산, 용도, 필수 조건을 더 구체화한 뒤 다시 분석하세요."],
+        )
+
+    top = recommendations[0]
+    top_alert = next(
+        (alert for alert in price_alerts if alert.product_id == top.product.id),
+        price_alerts[0] if price_alerts else None,
+    )
+    blocker_checks = [
+        check.message
+        for check in top.compatibility_checks
+        if check.status == CheckStatus.blocker
+    ]
+    warning_checks = [
+        check.message
+        for check in top.compatibility_checks
+        if check.status == CheckStatus.warning
+    ]
+    review_required_sources = [
+        source.source_name for source in source_trust if source.requires_human_review
+    ]
+    target_gap = (
+        top.price.effective_price_krw - top_alert.target_price_krw
+        if top_alert is not None
+        else 0
+    )
+    budget_gap = (
+        top.price.effective_price_krw - criteria.budget_krw
+        if criteria.budget_krw is not None
+        else 0
+    )
+    risk_flags = [
+        *blocker_checks,
+        *warning_checks[:2],
+        *[f"검수 필요 출처: {name}" for name in review_required_sources[:2]],
+        *top.review.risk_signals[:2],
+    ]
+
+    next_steps = [
+        *top.before_buy_checklist[:3],
+        "공개 리포트를 공유해 가족, 동료, 커뮤니티에서 한 번 더 검토받으세요.",
+    ]
+    confidence = min(98.0, max(35.0, top.score.total_score - len(risk_flags) * 4))
+
+    if blocker_checks or review_required_sources:
+        return PurchaseDecision(
+            verdict="review_required",
+            label="검수 후 구매",
+            confidence=round(confidence, 1),
+            reason=(
+                "상위 후보의 점수는 높지만 호환성 또는 출처 검수 신호가 있어 "
+                "결제 전 확인이 필요합니다."
+            ),
+            risk_flags=risk_flags or verification_flags,
+            next_steps=[
+                "검수 플래그와 출처 신뢰도를 먼저 확인하세요.",
+                *next_steps,
+            ],
+        )
+
+    if budget_gap > 0 or target_gap > max(30_000, int(top.price.effective_price_krw * 0.025)):
+        wait_reason = (
+            f"현재 실구매가가 목표가보다 {target_gap:,}원 높습니다."
+            if target_gap > 0
+            else "현재 실구매가가 입력 예산을 초과합니다."
+        )
+        return PurchaseDecision(
+            verdict="wait_for_price",
+            label="가격 대기",
+            confidence=round(confidence, 1),
+            reason=wait_reason,
+            risk_flags=risk_flags,
+            next_steps=[
+                "1순위 가격 알림을 설정하고 목표가 도달 후 다시 확인하세요.",
+                *next_steps,
+            ],
+        )
+
+    return PurchaseDecision(
+        verdict="buy_now",
+        label="구매 진행 가능",
+        confidence=round(confidence, 1),
+        reason=(
+            "목적 적합도, 가격, 호환성, 리뷰 신뢰도가 균형을 이루고 "
+            "중대한 차단 신호가 없습니다."
+        ),
+        risk_flags=risk_flags,
+        next_steps=next_steps,
+    )

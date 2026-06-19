@@ -15,6 +15,7 @@ def test_launch_page_exposes_product_ui() -> None:
     assert "분석 실행" in response.text
     assert "목표가 도달 테스트" in response.text
     assert "공유 링크 생성" in response.text
+    assert "구매 판정" in response.text
     assert "피드백 보내기" in response.text
     assert "베타 신청" in response.text
 
@@ -86,6 +87,7 @@ def test_analyze_endpoint_returns_trace_and_alerts() -> None:
     assert payload["report"]["price_alerts"]
     assert payload["report"]["source_trust"]
     assert payload["report"]["trust_policy"]["fairness_rules"]
+    assert payload["report"]["purchase_decision"]["next_steps"]
     assert payload["report"]["top_recommendations"][0]["price"]["effective_price_krw"] > 0
     assert payload["quality_audit"]["quality_score"] > 0
     assert payload["quality_audit"]["estimated_cost_krw"] > 0
@@ -165,6 +167,7 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     assert public_page.status_code == 200
     assert "테스트 구매 리포트" in public_page.text
     assert "후보 비교표" in public_page.text
+    assert "결제 전 체크리스트" in public_page.text
 
     report_after_share = client.get(
         f"/reports/{saved_payload['report_id']}",

@@ -28,6 +28,13 @@ def test_desktop_pc_analysis_returns_top_three_and_compatibility_notes() -> None
     assert response.report.source_trust
     assert response.report.trust_policy is not None
     assert response.report.trust_policy.affiliate_disclosure
+    assert response.report.purchase_decision is not None
+    assert response.report.purchase_decision.verdict in {
+        "buy_now",
+        "wait_for_price",
+        "review_required",
+    }
+    assert response.report.purchase_decision.next_steps
     assert any(source.evidence_count > 0 for source in response.report.source_trust)
     assert response.quality_audit is not None
     assert response.quality_audit.quality_score > 0
