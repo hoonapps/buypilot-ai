@@ -275,6 +275,50 @@ class QualityDashboard(BaseModel):
     recent_audits: list[AnalysisQualityAudit] = Field(default_factory=list)
 
 
+class FeedbackRequest(BaseModel):
+    trace_id: str
+    rating: int = Field(ge=1, le=5)
+    purchase_intent: bool = False
+    selected_product_id: str | None = None
+    reason: str = ""
+    improvement_requests: list[str] = Field(default_factory=list)
+    contact: str = ""
+
+
+class FeedbackRecord(BaseModel):
+    feedback_id: str
+    trace_id: str
+    workspace_id: str = "demo"
+    rating: int
+    purchase_intent: bool
+    selected_product_id: str | None = None
+    reason: str
+    improvement_requests: list[str]
+    contact_masked: str = ""
+    created_at: str
+
+
+class BetaLeadRequest(BaseModel):
+    email: str = Field(min_length=3)
+    persona: str = "individual_buyer"
+    use_case: str
+    company_size: str = "personal"
+    contact_consent: bool = True
+    source: str = "web"
+
+
+class BetaLead(BaseModel):
+    lead_id: str
+    workspace_id: str = "demo"
+    email_masked: str
+    persona: str
+    use_case: str
+    company_size: str
+    contact_consent: bool
+    source: str
+    created_at: str
+
+
 class SaveReportRequest(BaseModel):
     trace_id: str
     title: str | None = None
@@ -359,9 +403,13 @@ class OperationsMetrics(BaseModel):
     alert_subscriptions: int
     alert_events: int = 0
     triggered_alerts: int = 0
+    feedback_count: int = 0
+    beta_leads: int = 0
     latest_trace_id: str | None = None
     average_top_score: float = 0
     average_quality_score: float = 0
+    average_satisfaction: float = 0
+    purchase_intent_rate: float = 0
     estimated_cost_krw: float = 0
     conversion_ready_rate: float = 0
 

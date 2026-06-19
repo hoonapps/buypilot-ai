@@ -200,6 +200,61 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     assert quality_payload["total_estimated_cost_krw"] > 0
     assert any(item["trace_id"] == trace_id for item in quality_payload["recent_audits"])
 
+    feedback = client.post(
+        "/feedback",
+        headers=WORKSPACE_A,
+        json={
+            "trace_id": trace_id,
+            "rating": 5,
+            "purchase_intent": True,
+            "selected_product_id": first_alert["product_id"],
+            "reason": "추천 근거와 가격 알림이 충분합니다.",
+            "improvement_requests": ["실제 판매 링크 연동"],
+            "contact": "buyer@example.com",
+        },
+    )
+    assert feedback.status_code == 200
+    feedback_payload = feedback.json()
+    assert feedback_payload["rating"] == 5
+    assert feedback_payload["contact_masked"] == "bu***@example.com"
+
+    feedback_list = client.get("/feedback", headers=WORKSPACE_A)
+    assert any(
+        item["feedback_id"] == feedback_payload["feedback_id"]
+        for item in feedback_list.json()
+    )
+
+    isolated_feedback = client.get("/feedback", headers=WORKSPACE_B)
+    assert all(
+        item["feedback_id"] != feedback_payload["feedback_id"]
+        for item in isolated_feedback.json()
+    )
+
+    beta_lead = client.post(
+        "/beta/leads",
+        headers=WORKSPACE_A,
+        json={
+            "email": "creator@example.com",
+            "persona": "creator",
+            "use_case": "영상 편집용 PC와 노트북 추천을 반복해서 비교",
+            "company_size": "freelancer",
+            "contact_consent": True,
+            "source": "pytest",
+        },
+    )
+    assert beta_lead.status_code == 200
+    lead_payload = beta_lead.json()
+    assert lead_payload["email_masked"] == "cr***@example.com"
+
+    beta_leads = client.get("/beta/leads", headers=WORKSPACE_A)
+    assert any(item["lead_id"] == lead_payload["lead_id"] for item in beta_leads.json())
+
+    metrics_after_feedback = client.get("/ops/metrics", headers=WORKSPACE_A).json()
+    assert metrics_after_feedback["feedback_count"] >= 1
+    assert metrics_after_feedback["beta_leads"] >= 1
+    assert metrics_after_feedback["average_satisfaction"] >= 5
+    assert metrics_after_feedback["purchase_intent_rate"] > 0
+
 
 def test_alert_preview_endpoint_returns_three_targets() -> None:
     response = client.post(

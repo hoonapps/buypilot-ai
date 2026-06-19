@@ -12,7 +12,11 @@ from specpilot_ai.core.models import (
     AlertSubscriptionRequest,
     AnalyzeRequest,
     AnalyzeResponse,
+    BetaLead,
+    BetaLeadRequest,
     Category,
+    FeedbackRecord,
+    FeedbackRequest,
     OperationsMetrics,
     PriceAlertPlan,
     ProductBrief,
@@ -341,6 +345,46 @@ def quality_dashboard(
 @app.get("/me", response_model=WorkspaceContext)
 def me(workspace: WorkspaceContext = WORKSPACE_DEPENDENCY) -> WorkspaceContext:
     return workspace
+
+
+@app.post("/feedback", response_model=FeedbackRecord)
+def create_feedback(
+    request: FeedbackRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> FeedbackRecord:
+    response = _TRACE_CACHE.get(
+        (workspace.workspace_id, request.trace_id)
+    ) or _store().get_analysis_for_workspace(
+        workspace.workspace_id,
+        request.trace_id,
+    )
+    if response is None:
+        raise HTTPException(status_code=404, detail="피드백을 연결할 분석 결과를 찾을 수 없습니다.")
+    return _store().create_feedback_for_workspace(workspace.workspace_id, request)
+
+
+@app.get("/feedback", response_model=list[FeedbackRecord])
+def list_feedback(
+    limit: int = 50,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[FeedbackRecord]:
+    return _store().list_feedback_for_workspace(workspace.workspace_id, limit=limit)
+
+
+@app.post("/beta/leads", response_model=BetaLead)
+def create_beta_lead(
+    request: BetaLeadRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> BetaLead:
+    return _store().create_beta_lead_for_workspace(workspace.workspace_id, request)
+
+
+@app.get("/beta/leads", response_model=list[BetaLead])
+def list_beta_leads(
+    limit: int = 50,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[BetaLead]:
+    return _store().list_beta_leads_for_workspace(workspace.workspace_id, limit=limit)
 
 
 @app.get("/sources/status", response_model=list[SourceAdapterStatus])

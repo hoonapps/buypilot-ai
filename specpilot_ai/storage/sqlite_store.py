@@ -11,6 +11,10 @@ from specpilot_ai.core.models import (
     AlertSubscription,
     AnalysisQualityAudit,
     AnalyzeResponse,
+    BetaLead,
+    BetaLeadRequest,
+    FeedbackRecord,
+    FeedbackRequest,
     OperationsMetrics,
     QualityDashboard,
     ReviewDecision,
@@ -483,6 +487,125 @@ class SpecPilotStore:
             recent_audits=audits,
         )
 
+    def create_feedback_for_workspace(
+        self,
+        workspace_id: str,
+        request: FeedbackRequest,
+    ) -> FeedbackRecord:
+        now = _now()
+        record = FeedbackRecord(
+            feedback_id=f"feedback_{uuid4().hex[:12]}",
+            trace_id=request.trace_id,
+            workspace_id=workspace_id,
+            rating=request.rating,
+            purchase_intent=request.purchase_intent,
+            selected_product_id=request.selected_product_id,
+            reason=request.reason,
+            improvement_requests=request.improvement_requests,
+            contact_masked=_mask_contact(request.contact) if request.contact else "",
+            created_at=now,
+        )
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO user_feedback (
+                    feedback_id, trace_id, workspace_id, rating, purchase_intent,
+                    selected_product_id, reason, improvement_requests_json,
+                    contact_masked, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.feedback_id,
+                    record.trace_id,
+                    record.workspace_id,
+                    record.rating,
+                    1 if record.purchase_intent else 0,
+                    record.selected_product_id,
+                    record.reason,
+                    json.dumps(record.improvement_requests, ensure_ascii=False),
+                    record.contact_masked,
+                    record.created_at,
+                ),
+            )
+        return record
+
+    def list_feedback_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 50,
+    ) -> list[FeedbackRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM user_feedback
+                WHERE workspace_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (workspace_id, limit),
+            ).fetchall()
+        return [_feedback_from_row(row) for row in rows]
+
+    def create_beta_lead_for_workspace(
+        self,
+        workspace_id: str,
+        request: BetaLeadRequest,
+    ) -> BetaLead:
+        now = _now()
+        lead = BetaLead(
+            lead_id=f"lead_{uuid4().hex[:12]}",
+            workspace_id=workspace_id,
+            email_masked=_mask_contact(request.email),
+            persona=request.persona,
+            use_case=request.use_case,
+            company_size=request.company_size,
+            contact_consent=request.contact_consent,
+            source=request.source,
+            created_at=now,
+        )
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO beta_leads (
+                    lead_id, workspace_id, email_masked, persona, use_case,
+                    company_size, contact_consent, source, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    lead.lead_id,
+                    lead.workspace_id,
+                    lead.email_masked,
+                    lead.persona,
+                    lead.use_case,
+                    lead.company_size,
+                    1 if lead.contact_consent else 0,
+                    lead.source,
+                    lead.created_at,
+                ),
+            )
+        return lead
+
+    def list_beta_leads_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 50,
+    ) -> list[BetaLead]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM beta_leads
+                WHERE workspace_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (workspace_id, limit),
+            ).fetchall()
+        return [_beta_lead_from_row(row) for row in rows]
+
     def add_review_items(self, items: list[ReviewQueueItem]) -> list[ReviewQueueItem]:
         with self._connect() as conn:
             for item in items:
@@ -579,6 +702,14 @@ class SpecPilotStore:
                 f"SELECT COUNT(*) FROM alert_subscriptions{where}",
                 params,
             ).fetchone()[0]
+            feedback_count = conn.execute(
+                f"SELECT COUNT(*) FROM user_feedback{where}",
+                params,
+            ).fetchone()[0]
+            beta_leads = conn.execute(
+                f"SELECT COUNT(*) FROM beta_leads{where}",
+                params,
+            ).fetchone()[0]
             alert_events = conn.execute(
                 f"SELECT COUNT(*) FROM alert_delivery_events{where}",
                 params,
@@ -608,6 +739,16 @@ class SpecPilotStore:
                 f"SELECT AVG(quality_score), SUM(estimated_cost_krw) FROM analysis_runs{where}",
                 params,
             ).fetchone()
+            feedback_row = conn.execute(
+                f"""
+                SELECT
+                    AVG(rating) AS average_satisfaction,
+                    AVG(CASE WHEN purchase_intent = 1 THEN 1.0 ELSE 0.0 END)
+                        AS purchase_intent_rate
+                FROM user_feedback{where}
+                """,
+                params,
+            ).fetchone()
             ready_row = conn.execute(
                 f"""
                 SELECT AVG(CASE WHEN final_pick_id IS NOT NULL THEN 1.0 ELSE 0.0 END)
@@ -622,9 +763,13 @@ class SpecPilotStore:
             alert_subscriptions=alert_subscriptions,
             alert_events=alert_events,
             triggered_alerts=triggered_alerts,
+            feedback_count=feedback_count,
+            beta_leads=beta_leads,
             latest_trace_id=latest["trace_id"] if latest else None,
             average_top_score=round(float(score_row[0] or 0), 2),
             average_quality_score=round(float(quality_row[0] or 0), 2),
+            average_satisfaction=round(float(feedback_row["average_satisfaction"] or 0), 2),
+            purchase_intent_rate=round(float(feedback_row["purchase_intent_rate"] or 0), 4),
             estimated_cost_krw=round(float(quality_row[1] or 0), 2),
             conversion_ready_rate=round(float(ready_row[0] or 0), 4),
         )
@@ -710,6 +855,32 @@ class SpecPilotStore:
                     FOREIGN KEY(subscription_id) REFERENCES alert_subscriptions(subscription_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS user_feedback (
+                    feedback_id TEXT PRIMARY KEY,
+                    trace_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    rating INTEGER NOT NULL,
+                    purchase_intent INTEGER NOT NULL,
+                    selected_product_id TEXT,
+                    reason TEXT NOT NULL DEFAULT '',
+                    improvement_requests_json TEXT NOT NULL DEFAULT '[]',
+                    contact_masked TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(trace_id) REFERENCES analysis_runs(trace_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS beta_leads (
+                    lead_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    email_masked TEXT NOT NULL,
+                    persona TEXT NOT NULL,
+                    use_case TEXT NOT NULL,
+                    company_size TEXT NOT NULL,
+                    contact_consent INTEGER NOT NULL,
+                    source TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_saved_reports_trace
                     ON saved_reports(trace_id);
                 CREATE INDEX IF NOT EXISTS idx_alerts_trace
@@ -720,6 +891,12 @@ class SpecPilotStore:
                     ON alert_delivery_events(workspace_id);
                 CREATE INDEX IF NOT EXISTS idx_alert_events_subscription
                     ON alert_delivery_events(subscription_id);
+                CREATE INDEX IF NOT EXISTS idx_user_feedback_workspace
+                    ON user_feedback(workspace_id);
+                CREATE INDEX IF NOT EXISTS idx_user_feedback_trace
+                    ON user_feedback(trace_id);
+                CREATE INDEX IF NOT EXISTS idx_beta_leads_workspace
+                    ON beta_leads(workspace_id);
                 """
             )
             _ensure_column(conn, "analysis_runs", "workspace_id", "TEXT NOT NULL DEFAULT 'demo'")
@@ -792,6 +969,37 @@ def _alert_event_from_row(row: sqlite3.Row) -> AlertDeliveryEvent:
         contact_masked=data["contact_masked"],
         delivery_status=data["delivery_status"],
         message=data["message"],
+        created_at=data["created_at"],
+    )
+
+
+def _feedback_from_row(row: sqlite3.Row) -> FeedbackRecord:
+    data = dict(row)
+    return FeedbackRecord(
+        feedback_id=data["feedback_id"],
+        trace_id=data["trace_id"],
+        workspace_id=data["workspace_id"],
+        rating=data["rating"],
+        purchase_intent=bool(data["purchase_intent"]),
+        selected_product_id=data["selected_product_id"],
+        reason=data["reason"],
+        improvement_requests=json.loads(data["improvement_requests_json"]),
+        contact_masked=data["contact_masked"],
+        created_at=data["created_at"],
+    )
+
+
+def _beta_lead_from_row(row: sqlite3.Row) -> BetaLead:
+    data = dict(row)
+    return BetaLead(
+        lead_id=data["lead_id"],
+        workspace_id=data["workspace_id"],
+        email_masked=data["email_masked"],
+        persona=data["persona"],
+        use_case=data["use_case"],
+        company_size=data["company_size"],
+        contact_consent=bool(data["contact_consent"]),
+        source=data["source"],
         created_at=data["created_at"],
     )
 
