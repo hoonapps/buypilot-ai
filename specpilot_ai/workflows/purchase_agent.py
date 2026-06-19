@@ -24,6 +24,7 @@ from specpilot_ai.core.models import (
     PurchaseReport,
     Recommendation,
     ReviewInsight,
+    ScenarioOption,
     ScoreCard,
     SourceTrustAssessment,
     TraceEvent,
@@ -418,6 +419,7 @@ def report_writer(state: PurchaseState) -> PurchaseState:
         state["verification_flags"],
         state["criteria"],
     )
+    scenario_options = _scenario_options(ranked[:5], products, prices, reviews)
     state["report"] = PurchaseReport(
         summary=summary_chain.invoke(
             {
@@ -444,6 +446,7 @@ def report_writer(state: PurchaseState) -> PurchaseState:
         source_trust=source_trust,
         trust_policy=trust_policy,
         purchase_decision=purchase_decision,
+        scenario_options=scenario_options,
         final_pick_id=recommendations[0].product.id if recommendations else None,
     )
     _trace(
@@ -691,3 +694,87 @@ def _purchase_decision(
         risk_flags=risk_flags,
         next_steps=next_steps,
     )
+
+
+def _scenario_options(
+    ranked: list[ScoreCard],
+    products: dict[str, ProductCandidate],
+    prices: dict[str, PriceSnapshot],
+    reviews: dict[str, ReviewInsight],
+) -> list[ScenarioOption]:
+    if not ranked:
+        return []
+
+    def value_key(card: ScoreCard) -> tuple[float, float]:
+        return (
+            card.price_competitiveness - prices[card.product_id].effective_price_krw / 100_000,
+            card.total_score,
+        )
+
+    def performance_key(card: ScoreCard) -> tuple[float, float]:
+        return (card.purpose_fit + card.total_score, card.compatibility)
+
+    def safety_key(card: ScoreCard) -> tuple[float, float]:
+        return (card.purchase_stability + card.review_trust + card.compatibility, card.total_score)
+
+    scenario_specs = [
+        ("value", "예산 절감", value_key),
+        ("performance", "성능 우선", performance_key),
+        ("safe", "안전 우선", safety_key),
+    ]
+
+    options: list[ScenarioOption] = []
+    used_product_ids: set[str] = set()
+    for scenario, label, key_fn in scenario_specs:
+        sorted_cards = sorted(ranked, key=key_fn, reverse=True)
+        card = next(
+            (
+                candidate
+                for candidate in sorted_cards
+                if candidate.product_id not in used_product_ids
+            ),
+            sorted_cards[0],
+        )
+        product = products[card.product_id]
+        price = prices[card.product_id]
+        review = reviews[card.product_id]
+        used_product_ids.add(card.product_id)
+        options.append(
+            ScenarioOption(
+                scenario=scenario,
+                label=label,
+                product_id=card.product_id,
+                model_name=product.model_name,
+                effective_price_krw=price.effective_price_krw,
+                total_score=card.total_score,
+                why=_scenario_why(scenario, card, product),
+                tradeoff=_scenario_tradeoff(scenario, card, review),
+            )
+        )
+    return options
+
+
+def _scenario_why(scenario: str, card: ScoreCard, product: ProductCandidate) -> str:
+    if scenario == "value":
+        return (
+            f"{product.model_name}은 가격 경쟁력 {card.price_competitiveness}점으로 "
+            "예산을 아끼면서도 핵심 조건을 유지하는 선택입니다."
+        )
+    if scenario == "performance":
+        return (
+            f"{product.model_name}은 목적 적합도 {card.purpose_fit}점으로 "
+            "작업 성능과 체감 속도를 우선할 때 적합합니다."
+        )
+    return (
+        f"{product.model_name}은 구매 안정성 {card.purchase_stability}점과 "
+        f"리뷰 신뢰도 {card.review_trust}점이 균형적입니다."
+    )
+
+
+def _scenario_tradeoff(scenario: str, card: ScoreCard, review: ReviewInsight) -> str:
+    if scenario == "value":
+        return "최고 성능 후보보다 렌더링, 고주사율 게임 여유는 낮을 수 있습니다."
+    if scenario == "performance":
+        return "예산 여유와 발열, 소음 리스크를 결제 전 한 번 더 확인해야 합니다."
+    risk = review.risk_signals[0] if review.risk_signals else "가격 변동"
+    return f"보수적인 선택이지만 {risk} 신호는 확인해야 합니다."

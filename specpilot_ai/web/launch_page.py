@@ -254,6 +254,16 @@ def launch_page_html() -> str:
       const decisionSteps = (decision.next_steps || []).map((item) => `<li>${item}</li>`).join('');
       const decisionRisks = (decision.risk_flags || []).map((item) => `<li>${item}</li>`).join('');
       const firstChecklist = (report.top_recommendations[0]?.before_buy_checklist || []).map((item) => `<li>${item}</li>`).join('');
+      const scenarioCards = (report.scenario_options || []).map((item) => `
+        <article class="card">
+          <span class="rank">${item.label}</span>
+          <h3>${item.model_name}</h3>
+          <div class="price">${won(item.effective_price_krw)}</div>
+          <span class="score">총점 ${item.total_score}</span>
+          <p>${item.why}</p>
+          <p>${item.tradeoff}</p>
+        </article>
+      `).join('');
       const topCards = report.top_recommendations.map((rec) => `
         <article class="card">
           <div class="rank">TOP ${rec.rank}</div>
@@ -314,6 +324,10 @@ def launch_page_html() -> str:
           </div>
         </div>
         <div class="grid cards">${topCards}</div>
+        <section class="section">
+          <h3>대안 시나리오</h3>
+          <div class="grid cards">${scenarioCards}</div>
+        </section>
         <section class="sections">
           <div class="card">
             <h3>구매 판정</h3>

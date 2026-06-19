@@ -20,6 +20,19 @@ def public_report_html(report: PublicReport) -> str:
         """
         for rec in purchase.top_recommendations
     )
+    scenario_cards = "\n".join(
+        f"""
+        <article class="card">
+          <span class="rank">{escape(item.label)}</span>
+          <h3>{escape(item.model_name)}</h3>
+          <strong>{_won(item.effective_price_krw)}</strong>
+          <small>총점 {item.total_score}</small>
+          <p>{escape(item.why)}</p>
+          <p>{escape(item.tradeoff)}</p>
+        </article>
+        """
+        for item in purchase.scenario_options
+    )
     rows = "\n".join(
         f"""
         <tr>
@@ -161,6 +174,10 @@ def public_report_html(report: PublicReport) -> str:
       </aside>
     </section>
     <section class="grid cards">{top_cards}</section>
+    <section class="section">
+      <h2>대안 시나리오</h2>
+      <div class="grid cards">{scenario_cards}</div>
+    </section>
     <section class="two section">
       <div class="panel">
         <span class="kicker">Purchase decision</span>

@@ -232,6 +232,17 @@ class PurchaseDecision(BaseModel):
     next_steps: list[str] = Field(default_factory=list)
 
 
+class ScenarioOption(BaseModel):
+    scenario: str
+    label: str
+    product_id: str
+    model_name: str
+    effective_price_krw: int
+    total_score: float = Field(ge=0, le=100)
+    why: str
+    tradeoff: str
+
+
 class PurchaseReport(BaseModel):
     summary: str
     top_recommendations: list[Recommendation]
@@ -249,6 +260,7 @@ class PurchaseReport(BaseModel):
     source_trust: list[SourceTrustAssessment] = Field(default_factory=list)
     trust_policy: TrustPolicySummary | None = None
     purchase_decision: PurchaseDecision | None = None
+    scenario_options: list[ScenarioOption] = Field(default_factory=list)
     final_pick_id: str | None = None
 
 

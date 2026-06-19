@@ -35,6 +35,12 @@ def test_desktop_pc_analysis_returns_top_three_and_compatibility_notes() -> None
         "review_required",
     }
     assert response.report.purchase_decision.next_steps
+    assert len(response.report.scenario_options) == 3
+    assert {option.scenario for option in response.report.scenario_options} == {
+        "value",
+        "performance",
+        "safe",
+    }
     assert any(source.evidence_count > 0 for source in response.report.source_trust)
     assert response.quality_audit is not None
     assert response.quality_audit.quality_score > 0
