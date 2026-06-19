@@ -300,6 +300,7 @@ def launch_page_html() -> str:
           <div class="actions">
             <button class="primary mini-action" type="button" id="save-report">리포트 저장</button>
             <button class="secondary mini-action" type="button" id="subscribe-alert">1순위 가격 알림</button>
+            <button class="secondary mini-action" type="button" id="test-alert">목표가 도달 테스트</button>
             <button class="secondary mini-action" type="button" id="view-metrics">운영 지표</button>
           </div>
         </div>
@@ -373,10 +374,28 @@ def launch_page_html() -> str:
         alert(`알림 구독 완료: ${subscribed.subscription_id}`);
       });
 
+      document.querySelector('#test-alert')?.addEventListener('click', async () => {
+        const first = latestAnalysis.report.price_alerts[0];
+        const response = await fetch('/alerts/evaluate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            price_overrides_krw: {
+              [first.product_id]: first.target_price_krw - 1
+            },
+            dry_run: false
+          })
+        });
+        const evaluated = await response.json();
+        const events = await fetch('/alerts/events').then((item) => item.json());
+        const latest = events[0];
+        alert(`평가 ${evaluated.evaluated_count}건 / 발송 큐 ${evaluated.triggered_count}건${latest ? ' / 최근 이벤트 ' + latest.event_id : ''}`);
+      });
+
       document.querySelector('#view-metrics')?.addEventListener('click', async () => {
         const response = await fetch('/ops/metrics');
         const metrics = await response.json();
-        alert(`분석 ${metrics.analysis_runs}건 / 저장 ${metrics.saved_reports}건 / 알림 ${metrics.alert_subscriptions}건`);
+        alert(`분석 ${metrics.analysis_runs}건 / 저장 ${metrics.saved_reports}건 / 알림 ${metrics.alert_subscriptions}건 / 발송 이벤트 ${metrics.alert_events}건`);
       });
     }
 

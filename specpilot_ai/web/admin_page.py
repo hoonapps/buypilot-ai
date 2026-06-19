@@ -133,6 +133,8 @@ def admin_page_html() -> str:
         ['분석', metrics.analysis_runs],
         ['저장', metrics.saved_reports],
         ['알림', metrics.alert_subscriptions],
+        ['발송 큐', metrics.alert_events],
+        ['트리거', metrics.triggered_alerts],
         ['전환 준비율', Math.round(metrics.conversion_ready_rate * 100) + '%']
       ].map(([label, value]) => `<div class="card"><span class="kicker">${label}</span><div class="metric">${value}</div></div>`).join('');
     }

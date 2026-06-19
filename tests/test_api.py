@@ -13,6 +13,7 @@ def test_launch_page_exposes_product_ui() -> None:
     assert response.status_code == 200
     assert "SpecPilot AI" in response.text
     assert "분석 실행" in response.text
+    assert "목표가 도달 테스트" in response.text
 
 
 def test_health_and_ready_endpoints_expose_operations_state() -> None:
@@ -44,6 +45,7 @@ def test_admin_page_exposes_review_console() -> None:
     assert response.status_code == 200
     assert "SpecPilot AI Admin" in response.text
     assert "소스 수집" in response.text
+    assert "발송 큐" in response.text
 
 
 def test_trust_policy_endpoint_exposes_cache_and_fairness_rules() -> None:
