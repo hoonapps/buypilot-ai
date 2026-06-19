@@ -1,3 +1,5 @@
+# ruff: noqa: E501
+
 def launch_page_html() -> str:
     return """
 <!doctype html>

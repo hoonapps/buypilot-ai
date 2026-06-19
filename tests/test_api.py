@@ -2,7 +2,6 @@ from fastapi.testclient import TestClient
 
 from specpilot_ai.api.main import app
 
-
 client = TestClient(app)
 
 

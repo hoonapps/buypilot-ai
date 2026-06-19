@@ -13,8 +13,8 @@ from specpilot_ai.core.models import (
     BenchmarkEvidence,
     Category,
     CheckStatus,
-    CompatibilityCheck,
     ComparisonRow,
+    CompatibilityCheck,
     ExcludedProduct,
     PriceSnapshot,
     ProductCandidate,
@@ -102,7 +102,10 @@ def intent_parser(state: PurchaseState) -> PurchaseState:
         state,
         AgentStep.intent_parser,
         "요청 구조화",
-        f"{request.category.value}, 예산 {request.budget_krw or '미입력'}, 조건 {len(request.must_haves)}개",
+        (
+            f"{request.category.value}, 예산 {request.budget_krw or '미입력'}, "
+            f"조건 {len(request.must_haves)}개"
+        ),
         evidence_count=len(request.must_haves) + len(request.exclusions),
     )
     return state
@@ -243,7 +246,10 @@ def review_analyzer(state: PurchaseState) -> PurchaseState:
         state,
         AgentStep.review_analyzer,
         "리뷰/벤치마크 근거 분석",
-        f"리뷰 {len(state['review_insights'])}개와 벤치마크 {len(state['benchmark_evidence'])}개를 연결했습니다.",
+        (
+            f"리뷰 {len(state['review_insights'])}개와 "
+            f"벤치마크 {len(state['benchmark_evidence'])}개를 연결했습니다."
+        ),
         evidence_count=sum(review.evidence_count for review in state["review_insights"]),
     )
     return state
@@ -311,7 +317,9 @@ def verifier(state: PurchaseState) -> PurchaseState:
     if not state.get("benchmark_evidence"):
         flags.append("벤치마크 근거가 부족합니다.")
     stale_or_weak = [
-        price for price in state["price_snapshots"] if price.stock_status not in {"in_stock", "limited"}
+        price
+        for price in state["price_snapshots"]
+        if price.stock_status not in {"in_stock", "limited"}
     ]
     if stale_or_weak:
         flags.append("일부 가격의 재고 상태가 불명확합니다.")
@@ -421,7 +429,10 @@ def report_writer(state: PurchaseState) -> PurchaseState:
         state,
         AgentStep.report_writer,
         "구매 리포트 작성",
-        f"TOP {len(recommendations)}개와 제외 {len(excluded)}개, 가격 알림 {len(price_alerts)}개를 생성했습니다.",
+        (
+            f"TOP {len(recommendations)}개와 제외 {len(excluded)}개, "
+            f"가격 알림 {len(price_alerts)}개를 생성했습니다."
+        ),
         evidence_count=len(comparison_table),
     )
     return state
@@ -548,6 +559,7 @@ def _decision_matrix(
     ]
     if excluded:
         lines.append(
-            "제외 후보는 구매하지 말라는 의미가 아니라 이번 요청 조건에서 우선순위가 낮다는 뜻입니다."
+            "제외 후보는 구매하지 말라는 의미가 아니라 "
+            "이번 요청 조건에서 우선순위가 낮다는 뜻입니다."
         )
     return lines
