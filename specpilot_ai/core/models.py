@@ -22,6 +22,12 @@ class AgentStep(StrEnum):
     report_writer = "report_writer"
 
 
+class CheckStatus(StrEnum):
+    ok = "ok"
+    warning = "warning"
+    blocker = "blocker"
+
+
 class PurchaseCriteria(BaseModel):
     category: Category
     budget_krw: int | None = Field(default=None, ge=0)
@@ -52,6 +58,10 @@ class ProductCandidate(BaseModel):
     form_factor: str
     specs: dict[str, str | int | float]
     source_url: str
+    option_summary: str = ""
+    tags: list[str] = Field(default_factory=list)
+    source_type: str = "demo_catalog"
+    availability: str = "in_stock"
 
 
 class PriceSnapshot(BaseModel):
@@ -60,12 +70,24 @@ class PriceSnapshot(BaseModel):
     price_krw: int
     shipping_fee_krw: int = 0
     coupon_krw: int = 0
+    assembly_fee_krw: int = 0
+    os_fee_krw: int = 0
+    card_discount_krw: int = 0
     captured_at: str
     url: str
+    stock_status: str = "in_stock"
+    source_type: str = "price_compare"
 
     @property
     def effective_price_krw(self) -> int:
-        return self.price_krw + self.shipping_fee_krw - self.coupon_krw
+        return (
+            self.price_krw
+            + self.shipping_fee_krw
+            + self.assembly_fee_krw
+            + self.os_fee_krw
+            - self.coupon_krw
+            - self.card_discount_krw
+        )
 
 
 class ReviewInsight(BaseModel):
@@ -75,6 +97,53 @@ class ReviewInsight(BaseModel):
     repeated_complaints: list[str]
     risk_signals: list[str]
     trust_score: float = Field(ge=0, le=1)
+    evidence_count: int = Field(default=0, ge=0)
+    sentiment_summary: str = ""
+
+
+class CompatibilityCheck(BaseModel):
+    product_id: str
+    component: str
+    status: CheckStatus
+    message: str
+    evidence: str
+
+
+class BenchmarkEvidence(BaseModel):
+    product_id: str
+    workload: str
+    score_label: str
+    summary: str
+    evidence_url: str
+
+
+class ComparisonRow(BaseModel):
+    product_id: str
+    rank: int | None = None
+    model_name: str
+    effective_price_krw: int
+    purpose_fit: float
+    compatibility: float
+    review_trust: float
+    strongest_reason: str
+    main_risk: str
+
+
+class PriceAlertPlan(BaseModel):
+    product_id: str
+    current_price_krw: int
+    target_price_krw: int
+    recheck_interval_days: int
+    channels: list[str]
+    trigger_reason: str
+
+
+class TraceEvent(BaseModel):
+    step: AgentStep
+    title: str
+    detail: str
+    status: CheckStatus = CheckStatus.ok
+    evidence_count: int = 0
 
 
 class ScoreCard(BaseModel):
@@ -97,6 +166,8 @@ class Recommendation(BaseModel):
     score: ScoreCard
     fit_summary: str
     before_buy_checklist: list[str]
+    benchmark_evidence: list[BenchmarkEvidence] = Field(default_factory=list)
+    compatibility_checks: list[CompatibilityCheck] = Field(default_factory=list)
 
 
 class ExcludedProduct(BaseModel):
@@ -112,6 +183,13 @@ class PurchaseReport(BaseModel):
     compatibility_notes: list[str]
     citations: list[str]
     verification_flags: list[str]
+    comparison_table: list[ComparisonRow] = Field(default_factory=list)
+    benchmark_evidence: list[BenchmarkEvidence] = Field(default_factory=list)
+    compatibility_checks: list[CompatibilityCheck] = Field(default_factory=list)
+    price_alerts: list[PriceAlertPlan] = Field(default_factory=list)
+    source_health: list[str] = Field(default_factory=list)
+    decision_matrix: list[str] = Field(default_factory=list)
+    final_pick_id: str | None = None
 
 
 class AnalyzeResponse(BaseModel):
@@ -119,6 +197,7 @@ class AnalyzeResponse(BaseModel):
     steps: list[AgentStep]
     report: PurchaseReport
     graph_trace_id: str
+    trace_events: list[TraceEvent] = Field(default_factory=list)
 
 
 class ProductBrief(BaseModel):
