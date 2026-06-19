@@ -1,0 +1,12 @@
+.git
+.github
+.venv
+.specpilot
+__pycache__
+.pytest_cache
+.ruff_cache
+*.egg-info
+*.pyc
+.DS_Store
+output
+tmp

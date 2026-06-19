@@ -1,4 +1,30 @@
 services:
+  app:
+    build:
+      context: .
+    container_name: specpilot-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: production
+      APP_VERSION: 0.1.0
+      DEMO_MODE: "true"
+      STORAGE_PATH: /data/specpilot.sqlite3
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USERNAME: neo4j
+      NEO4J_PASSWORD: specpilot-password
+      NEO4J_DATABASE: neo4j
+    volumes:
+      - specpilot_data:/data
+    depends_on:
+      - neo4j
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   neo4j:
     image: neo4j:5.26
     container_name: specpilot-neo4j
@@ -16,5 +42,6 @@ services:
       - neo4j_logs:/logs
 
 volumes:
+  specpilot_data:
   neo4j_data:
   neo4j_logs:
