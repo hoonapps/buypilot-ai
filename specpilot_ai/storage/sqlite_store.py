@@ -32,6 +32,7 @@ from specpilot_ai.core.models import (
     CheckStatus,
     FeedbackRecord,
     FeedbackRequest,
+    ObservabilityDispatchResponse,
     ObservabilityExportRecord,
     ObservabilityExportRequest,
     OperationsMetrics,
@@ -972,6 +973,10 @@ class SpecPilotStore:
             span_count=len(spans),
             quality_score=quality.quality_score if quality else 0,
             payload=payload,
+            provider_message="export outbox에 적재되었습니다.",
+            retry_count=0,
+            dispatched_at=None,
+            next_retry_at=None,
             created_at=now,
         )
         with self._connect() as conn:
@@ -979,9 +984,10 @@ class SpecPilotStore:
                 """
                 INSERT INTO observability_exports (
                     export_id, workspace_id, trace_id, destination, status,
-                    span_count, quality_score, payload_json, created_at
+                    span_count, quality_score, payload_json, provider_message,
+                    retry_count, dispatched_at, next_retry_at, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.export_id,
@@ -992,6 +998,10 @@ class SpecPilotStore:
                     record.span_count,
                     record.quality_score,
                     json.dumps(record.payload, ensure_ascii=False),
+                    record.provider_message,
+                    record.retry_count,
+                    record.dispatched_at,
+                    record.next_retry_at,
                     record.created_at,
                 ),
             )
@@ -1014,6 +1024,70 @@ class SpecPilotStore:
                 (workspace_id, limit),
             ).fetchall()
         return [_observability_export_from_row(row) for row in rows]
+
+    def dispatch_observability_exports_for_workspace(
+        self,
+        workspace_id: str,
+        *,
+        export_ids: list[str],
+        dry_run: bool,
+        limit: int,
+    ) -> ObservabilityDispatchResponse:
+        exports = self._queued_observability_exports(
+            workspace_id,
+            export_ids=export_ids,
+            limit=limit,
+        )
+        now = _now()
+        dispatched: list[ObservabilityExportRecord] = []
+        with self._connect() as conn:
+            for export in exports:
+                retry_count = export.retry_count + 1
+                status, provider_message, next_retry_at = _observability_dispatch_status(
+                    export,
+                    retry_count=retry_count,
+                    dry_run=dry_run,
+                    now=now,
+                )
+                updated = export.model_copy(
+                    update={
+                        "status": status,
+                        "provider_message": provider_message,
+                        "retry_count": retry_count,
+                        "dispatched_at": now if status == "sent" else None,
+                        "next_retry_at": next_retry_at,
+                    }
+                )
+                dispatched.append(updated)
+                if not dry_run:
+                    conn.execute(
+                        """
+                        UPDATE observability_exports
+                        SET status = ?,
+                            provider_message = ?,
+                            retry_count = ?,
+                            dispatched_at = ?,
+                            next_retry_at = ?
+                        WHERE workspace_id = ? AND export_id = ?
+                        """,
+                        (
+                            updated.status,
+                            updated.provider_message,
+                            updated.retry_count,
+                            updated.dispatched_at,
+                            updated.next_retry_at,
+                            workspace_id,
+                            updated.export_id,
+                        ),
+                    )
+        return ObservabilityDispatchResponse(
+            workspace_id=workspace_id,
+            selected_count=len(exports),
+            sent_count=sum(1 for item in dispatched if item.status == "sent"),
+            failed_count=sum(1 for item in dispatched if item.status == "failed"),
+            dry_run=dry_run,
+            exports=dispatched,
+        )
 
     def create_feedback_for_workspace(
         self,
@@ -2402,6 +2476,10 @@ class SpecPilotStore:
                     span_count INTEGER NOT NULL DEFAULT 0,
                     quality_score REAL NOT NULL DEFAULT 0,
                     payload_json TEXT NOT NULL DEFAULT '{}',
+                    provider_message TEXT NOT NULL DEFAULT '',
+                    retry_count INTEGER NOT NULL DEFAULT 0,
+                    dispatched_at TEXT,
+                    next_retry_at TEXT,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY(trace_id) REFERENCES analysis_runs(trace_id)
                 );
@@ -2489,6 +2567,8 @@ class SpecPilotStore:
                     ON trace_spans(workspace_id, trace_id);
                 CREATE INDEX IF NOT EXISTS idx_observability_exports_workspace
                     ON observability_exports(workspace_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_observability_exports_status
+                    ON observability_exports(workspace_id, status);
                 CREATE INDEX IF NOT EXISTS idx_user_feedback_workspace
                     ON user_feedback(workspace_id);
                 CREATE INDEX IF NOT EXISTS idx_user_feedback_trace
@@ -2512,6 +2592,20 @@ class SpecPilotStore:
                 "quality_audit_json",
                 "TEXT NOT NULL DEFAULT '{}'",
             )
+            _ensure_column(
+                conn,
+                "observability_exports",
+                "provider_message",
+                "TEXT NOT NULL DEFAULT ''",
+            )
+            _ensure_column(
+                conn,
+                "observability_exports",
+                "retry_count",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+            _ensure_column(conn, "observability_exports", "dispatched_at", "TEXT")
+            _ensure_column(conn, "observability_exports", "next_retry_at", "TEXT")
             _ensure_column(conn, "saved_reports", "workspace_id", "TEXT NOT NULL DEFAULT 'demo'")
             _ensure_column(conn, "saved_reports", "share_token", "TEXT")
             _ensure_column(conn, "saved_reports", "shared_at", "TEXT")
@@ -2590,6 +2684,42 @@ class SpecPilotStore:
                     (workspace_id, limit),
                 ).fetchall()
         return [_alert_event_from_row(row) for row in rows]
+
+    def _queued_observability_exports(
+        self,
+        workspace_id: str,
+        *,
+        export_ids: list[str],
+        limit: int,
+    ) -> list[ObservabilityExportRecord]:
+        with self._connect() as conn:
+            if export_ids:
+                placeholders = ", ".join("?" for _ in export_ids)
+                rows = conn.execute(
+                    f"""
+                    SELECT *
+                    FROM observability_exports
+                    WHERE workspace_id = ?
+                      AND export_id IN ({placeholders})
+                      AND status IN ('queued', 'failed')
+                    ORDER BY created_at ASC
+                    LIMIT ?
+                    """,
+                    (workspace_id, *export_ids, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT *
+                    FROM observability_exports
+                    WHERE workspace_id = ?
+                      AND status IN ('queued', 'failed')
+                    ORDER BY created_at ASC
+                    LIMIT ?
+                    """,
+                    (workspace_id, limit),
+                ).fetchall()
+        return [_observability_export_from_row(row) for row in rows]
 
     def _alert_channel_config_map(
         self,
@@ -2805,6 +2935,10 @@ def _observability_export_from_row(row: sqlite3.Row) -> ObservabilityExportRecor
         span_count=data["span_count"],
         quality_score=data["quality_score"],
         payload=json.loads(data["payload_json"]),
+        provider_message=data["provider_message"],
+        retry_count=data["retry_count"],
+        dispatched_at=data["dispatched_at"],
+        next_retry_at=data["next_retry_at"],
         created_at=data["created_at"],
     )
 
@@ -3447,6 +3581,44 @@ def _dispatch_status(
     return (
         "sent",
         f"{channel} 채널 outbox가 알림을 접수했습니다: {_mask_target(target)}",
+        None,
+    )
+
+
+def _observability_dispatch_status(
+    export: ObservabilityExportRecord,
+    *,
+    retry_count: int,
+    dry_run: bool,
+    now: str,
+) -> tuple[str, str, str | None]:
+    destination = export.destination.strip().lower()
+    if dry_run:
+        return (
+            "dry_run",
+            f"{destination} observability exporter 리허설을 완료했습니다.",
+            None,
+        )
+    if retry_count > 4:
+        return "failed", f"{destination} exporter 재시도 한도를 초과했습니다.", None
+    if not export.payload:
+        return (
+            "failed",
+            "전송할 observability payload가 없어 export하지 못했습니다.",
+            None,
+        )
+    if destination not in {"opentelemetry", "langsmith"}:
+        return (
+            "failed",
+            f"{destination} exporter가 아직 설정되지 않았습니다.",
+            _retry_at(now, 60),
+        )
+    return (
+        "sent",
+        (
+            f"{destination} exporter outbox가 trace {export.trace_id} "
+            f"span {export.span_count}개를 접수했습니다."
+        ),
         None,
     )
 

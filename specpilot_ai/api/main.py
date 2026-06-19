@@ -36,6 +36,8 @@ from specpilot_ai.core.models import (
     FeedbackRequest,
     IntakeDiagnosisRequest,
     IntakeDiagnosisResponse,
+    ObservabilityDispatchRequest,
+    ObservabilityDispatchResponse,
     ObservabilityExportRecord,
     ObservabilityExportRequest,
     OperationsMetrics,
@@ -523,6 +525,19 @@ def list_observability_exports(
     return _store().list_observability_exports_for_workspace(
         workspace.workspace_id,
         limit=limit,
+    )
+
+
+@app.post("/ops/observability/dispatch", response_model=ObservabilityDispatchResponse)
+def dispatch_observability_exports(
+    request: ObservabilityDispatchRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> ObservabilityDispatchResponse:
+    return _store().dispatch_observability_exports_for_workspace(
+        workspace.workspace_id,
+        export_ids=request.export_ids,
+        dry_run=request.dry_run,
+        limit=request.limit,
     )
 
 

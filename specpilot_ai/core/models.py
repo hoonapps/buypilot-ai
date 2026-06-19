@@ -528,7 +528,26 @@ class ObservabilityExportRecord(BaseModel):
     span_count: int = 0
     quality_score: float = 0
     payload: dict = Field(default_factory=dict)
+    provider_message: str = ""
+    retry_count: int = 0
+    dispatched_at: str | None = None
+    next_retry_at: str | None = None
     created_at: str
+
+
+class ObservabilityDispatchRequest(BaseModel):
+    export_ids: list[str] = Field(default_factory=list)
+    dry_run: bool = False
+    limit: int = Field(default=50, ge=1, le=200)
+
+
+class ObservabilityDispatchResponse(BaseModel):
+    workspace_id: str
+    selected_count: int
+    sent_count: int
+    failed_count: int
+    dry_run: bool
+    exports: list[ObservabilityExportRecord] = Field(default_factory=list)
 
 
 class FeedbackRequest(BaseModel):

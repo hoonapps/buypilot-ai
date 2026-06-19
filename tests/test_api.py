@@ -73,6 +73,7 @@ def test_admin_page_exposes_review_console() -> None:
     assert "Trace 저장소" in response.text
     assert "Observability export outbox" in response.text
     assert "export 큐 적재" in response.text
+    assert "observability dispatch" in response.text
     assert "품질/비용 감사" in response.text
     assert "품질 회귀 모니터" in response.text
     assert "사용자 피드백" in response.text
@@ -469,6 +470,9 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     assert observability_payload["trace_id"] == trace_id
     assert observability_payload["workspace_id"] == saved_payload["workspace_id"]
     assert observability_payload["status"] == "queued"
+    assert observability_payload["provider_message"]
+    assert observability_payload["retry_count"] == 0
+    assert observability_payload["dispatched_at"] is None
     assert observability_payload["span_count"] == len(analysis["trace_events"])
     assert observability_payload["quality_score"] > 0
     assert observability_payload["payload"]["schema_version"] == "specpilot.observability.v1"
@@ -485,6 +489,43 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
         for item in observability_exports.json()
     )
 
+    observability_dry_run = client.post(
+        "/ops/observability/dispatch",
+        headers=WORKSPACE_A,
+        json={
+            "export_ids": [observability_payload["export_id"]],
+            "dry_run": True,
+        },
+    )
+    assert observability_dry_run.status_code == 200
+    assert observability_dry_run.json()["selected_count"] == 1
+    assert observability_dry_run.json()["dry_run"] is True
+    assert observability_dry_run.json()["exports"][0]["status"] == "dry_run"
+
+    observability_dispatch = client.post(
+        "/ops/observability/dispatch",
+        headers=WORKSPACE_A,
+        json={"export_ids": [observability_payload["export_id"]]},
+    )
+    assert observability_dispatch.status_code == 200
+    dispatch_payload = observability_dispatch.json()
+    assert dispatch_payload["selected_count"] == 1
+    assert dispatch_payload["sent_count"] == 1
+    assert dispatch_payload["failed_count"] == 0
+    assert dispatch_payload["exports"][0]["status"] == "sent"
+    assert dispatch_payload["exports"][0]["retry_count"] == 1
+    assert dispatch_payload["exports"][0]["dispatched_at"] is not None
+    assert "opentelemetry exporter outbox" in dispatch_payload["exports"][0]["provider_message"]
+
+    observability_exports_after_dispatch = client.get(
+        "/ops/observability/exports",
+        headers=WORKSPACE_A,
+    ).json()
+    assert any(
+        item["export_id"] == observability_payload["export_id"] and item["status"] == "sent"
+        for item in observability_exports_after_dispatch
+    )
+
     isolated_observability_exports = client.get(
         "/ops/observability/exports",
         headers=WORKSPACE_B,
@@ -494,12 +535,40 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
         for item in isolated_observability_exports.json()
     )
 
+    isolated_observability_dispatch = client.post(
+        "/ops/observability/dispatch",
+        headers=WORKSPACE_B,
+        json={"export_ids": [observability_payload["export_id"]]},
+    )
+    assert isolated_observability_dispatch.status_code == 200
+    assert isolated_observability_dispatch.json()["selected_count"] == 0
+
     blocked_observability_export = client.post(
         "/ops/observability/exports",
         headers=WORKSPACE_B,
         json={"trace_id": trace_id, "destination": "opentelemetry"},
     )
     assert blocked_observability_export.status_code == 404
+
+    metadata_only_export = client.post(
+        "/ops/observability/exports",
+        headers=WORKSPACE_A,
+        json={
+            "trace_id": trace_id,
+            "destination": "langsmith",
+            "include_payload": False,
+        },
+    )
+    assert metadata_only_export.status_code == 200
+    metadata_only_dispatch = client.post(
+        "/ops/observability/dispatch",
+        headers=WORKSPACE_A,
+        json={"export_ids": [metadata_only_export.json()["export_id"]]},
+    )
+    assert metadata_only_dispatch.status_code == 200
+    assert metadata_only_dispatch.json()["failed_count"] == 1
+    assert metadata_only_dispatch.json()["exports"][0]["status"] == "failed"
+    assert "payload" in metadata_only_dispatch.json()["exports"][0]["provider_message"]
 
     feedback = client.post(
         "/feedback",

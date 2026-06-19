@@ -172,6 +172,9 @@ def admin_page_html() -> str:
     <section class="panel" style="margin-top:14px">
       <h2>Observability export outbox</h2>
       <p>trace span과 품질 감사 payload를 LangSmith/OpenTelemetry 연동 전 큐 형태로 보존합니다.</p>
+      <div class="actions">
+        <button class="secondary" id="dispatch-observability">observability dispatch</button>
+      </div>
       <div class="quality-list" id="observability-exports"></div>
     </section>
     <section class="grid top-grid" style="margin-top:14px">
@@ -537,14 +540,18 @@ def admin_page_html() -> str:
         root.innerHTML = '<p>아직 observability export outbox 항목이 없습니다.</p>';
         return;
       }
-      root.innerHTML = items.map((item) => `
-        <article class="review-item quality-item">
+      root.innerHTML = items.map((item) => {
+        const tone = item.status === 'failed' ? 'danger' : item.status === 'queued' ? 'warn' : '';
+        return `
+        <article class="review-item quality-item ${tone}">
           <span class="kicker">${item.destination} · ${item.status}</span>
           <h3>${item.trace_id} · span ${item.span_count}개 · 품질 ${item.quality_score}점</h3>
-          <p>export id: ${item.export_id} / 생성: ${new Date(item.created_at).toLocaleString()}</p>
+          <p>export id: ${item.export_id} / 생성: ${new Date(item.created_at).toLocaleString()} / 시도 ${item.retry_count || 0}회</p>
+          <p>${item.provider_message || 'provider 처리 전'}${item.next_retry_at ? ' / 재시도: ' + new Date(item.next_retry_at).toLocaleString() : ''}</p>
           <p>payload: ${item.payload?.schema_version || 'payload 제외'}</p>
         </article>
-      `).join('');
+      `;
+      }).join('');
     }
 
     function renderFeedback(items) {
@@ -811,6 +818,14 @@ def admin_page_html() -> str:
       await loadDashboard();
     });
     document.querySelector('#refresh').addEventListener('click', loadDashboard);
+    document.querySelector('#dispatch-observability').addEventListener('click', async () => {
+      await fetch('/ops/observability/dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dry_run: false, limit: 50 })
+      });
+      await loadDashboard();
+    });
     loadDashboard();
   </script>
 </body>
