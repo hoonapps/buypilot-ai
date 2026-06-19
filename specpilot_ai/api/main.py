@@ -3,6 +3,7 @@ from fastapi.responses import HTMLResponse
 
 from specpilot_ai.core.config import get_settings
 from specpilot_ai.core.models import (
+    AdminReviewDashboard,
     AlertSubscription,
     AlertSubscriptionRequest,
     AnalyzeRequest,
@@ -11,14 +12,23 @@ from specpilot_ai.core.models import (
     OperationsMetrics,
     PriceAlertPlan,
     ProductBrief,
+    ReviewDecision,
+    ReviewDecisionRequest,
+    ReviewQueueItem,
+    ReviewStatus,
     SavedReportDetail,
     SavedReportSummary,
     SaveReportRequest,
+    SourceAdapterStatus,
+    SourceCollectionRequest,
+    SourceCollectionResponse,
     TraceEvent,
 )
 from specpilot_ai.graph.neo4j_client import Neo4jRepository
 from specpilot_ai.graph.product_graph import pc_purchase_graph_schema
+from specpilot_ai.sources.collector import SourceCollector
 from specpilot_ai.storage.sqlite_store import SpecPilotStore
+from specpilot_ai.web.admin_page import admin_page_html
 from specpilot_ai.web.launch_page import launch_page_html
 from specpilot_ai.workflows.purchase_agent import run_analysis
 
@@ -35,9 +45,18 @@ def _store() -> SpecPilotStore:
     return SpecPilotStore(get_settings())
 
 
+def _collector() -> SourceCollector:
+    return SourceCollector()
+
+
 @app.get("/", response_class=HTMLResponse)
 def launch_page() -> str:
     return launch_page_html()
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_page() -> str:
+    return admin_page_html()
 
 
 @app.get("/health")
@@ -214,6 +233,52 @@ def list_alert_subscriptions(limit: int = 50) -> list[AlertSubscription]:
 @app.get("/ops/metrics", response_model=OperationsMetrics)
 def operations_metrics() -> OperationsMetrics:
     return _store().metrics()
+
+
+@app.get("/sources/status", response_model=list[SourceAdapterStatus])
+def source_adapter_statuses() -> list[SourceAdapterStatus]:
+    return _collector().statuses()
+
+
+@app.post("/sources/collect", response_model=SourceCollectionResponse)
+def collect_sources(request: SourceCollectionRequest) -> SourceCollectionResponse:
+    response = _collector().collect(request)
+    review_items = _collector().build_review_items(response.review_queue)
+    _store().add_review_items(review_items)
+    return response
+
+
+@app.get("/admin/reviews", response_model=list[ReviewQueueItem])
+def list_admin_reviews(
+    status: ReviewStatus | None = ReviewStatus.pending,
+    limit: int = 50,
+) -> list[ReviewQueueItem]:
+    return _store().list_review_items(status=status, limit=limit)
+
+
+@app.post("/admin/reviews/{review_id}/decision", response_model=ReviewDecision)
+def decide_admin_review(
+    review_id: str,
+    request: ReviewDecisionRequest,
+) -> ReviewDecision:
+    decision = _store().decide_review(
+        review_id,
+        status=request.status,
+        reviewer=request.reviewer,
+        note=request.note,
+    )
+    if decision is None:
+        raise HTTPException(status_code=404, detail="검수 항목을 찾을 수 없습니다.")
+    return decision
+
+
+@app.get("/admin/dashboard", response_model=AdminReviewDashboard)
+def admin_dashboard() -> AdminReviewDashboard:
+    return AdminReviewDashboard(
+        adapter_statuses=_collector().statuses(),
+        pending_reviews=_store().list_review_items(status=ReviewStatus.pending, limit=25),
+        metrics=_store().metrics(),
+    )
 
 
 def _default_report_title(response: AnalyzeResponse) -> str:

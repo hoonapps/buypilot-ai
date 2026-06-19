@@ -9,8 +9,12 @@ from specpilot_ai.core.models import (
     AlertSubscription,
     AnalyzeResponse,
     OperationsMetrics,
+    ReviewDecision,
+    ReviewQueueItem,
+    ReviewStatus,
     SavedReportDetail,
     SavedReportSummary,
+    SourceCandidate,
 )
 
 
@@ -239,6 +243,83 @@ class SpecPilotStore:
             ).fetchall()
         return [_alert_from_row(row) for row in rows]
 
+    def add_review_items(self, items: list[ReviewQueueItem]) -> list[ReviewQueueItem]:
+        with self._connect() as conn:
+            for item in items:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO source_review_queue (
+                        review_id, source_id, source_json, status, reason,
+                        created_at, resolved_at, reviewer, note
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        item.review_id,
+                        item.source.source_id,
+                        item.source.model_dump_json(),
+                        item.status.value,
+                        item.reason,
+                        item.created_at,
+                        item.resolved_at,
+                        item.reviewer,
+                        "",
+                    ),
+                )
+        return items
+
+    def list_review_items(
+        self,
+        *,
+        status: ReviewStatus | None = ReviewStatus.pending,
+        limit: int = 50,
+    ) -> list[ReviewQueueItem]:
+        query = """
+            SELECT *
+            FROM source_review_queue
+        """
+        params: list[str | int] = []
+        if status is not None:
+            query += " WHERE status = ?"
+            params.append(status.value)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [_review_item_from_row(row) for row in rows]
+
+    def decide_review(
+        self,
+        review_id: str,
+        *,
+        status: ReviewStatus,
+        reviewer: str,
+        note: str,
+    ) -> ReviewDecision | None:
+        now = _now()
+        with self._connect() as conn:
+            existing = conn.execute(
+                "SELECT review_id FROM source_review_queue WHERE review_id = ?",
+                (review_id,),
+            ).fetchone()
+            if existing is None:
+                return None
+            conn.execute(
+                """
+                UPDATE source_review_queue
+                SET status = ?, reviewer = ?, note = ?, resolved_at = ?
+                WHERE review_id = ?
+                """,
+                (status.value, reviewer, note, now, review_id),
+            )
+        return ReviewDecision(
+            review_id=review_id,
+            status=status,
+            reviewer=reviewer,
+            note=note,
+            resolved_at=now,
+        )
+
     def metrics(self) -> OperationsMetrics:
         with self._connect() as conn:
             analysis_runs = conn.execute("SELECT COUNT(*) FROM analysis_runs").fetchone()[0]
@@ -311,10 +392,24 @@ class SpecPilotStore:
                     FOREIGN KEY(trace_id) REFERENCES analysis_runs(trace_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS source_review_queue (
+                    review_id TEXT PRIMARY KEY,
+                    source_id TEXT NOT NULL,
+                    source_json TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    resolved_at TEXT,
+                    reviewer TEXT,
+                    note TEXT NOT NULL DEFAULT ''
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_saved_reports_trace
                     ON saved_reports(trace_id);
                 CREATE INDEX IF NOT EXISTS idx_alerts_trace
                     ON alert_subscriptions(trace_id);
+                CREATE INDEX IF NOT EXISTS idx_source_review_status
+                    ON source_review_queue(status);
                 """
             )
 
@@ -338,6 +433,19 @@ def _alert_from_row(row: sqlite3.Row) -> AlertSubscription:
         owner_label=data["owner_label"],
         status=data["status"],
         created_at=data["created_at"],
+    )
+
+
+def _review_item_from_row(row: sqlite3.Row) -> ReviewQueueItem:
+    data = dict(row)
+    return ReviewQueueItem(
+        review_id=data["review_id"],
+        source=SourceCandidate.model_validate_json(data["source_json"]),
+        status=ReviewStatus(data["status"]),
+        reason=data["reason"],
+        created_at=data["created_at"],
+        resolved_at=data["resolved_at"],
+        reviewer=data["reviewer"],
     )
 
 

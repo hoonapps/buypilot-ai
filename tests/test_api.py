@@ -13,6 +13,14 @@ def test_launch_page_exposes_product_ui() -> None:
     assert "분석 실행" in response.text
 
 
+def test_admin_page_exposes_review_console() -> None:
+    response = client.get("/admin")
+
+    assert response.status_code == 200
+    assert "SpecPilot AI Admin" in response.text
+    assert "소스 수집" in response.text
+
+
 def test_analyze_endpoint_returns_trace_and_alerts() -> None:
     response = client.post(
         "/analyze",
@@ -110,3 +118,42 @@ def test_alert_preview_endpoint_returns_three_targets() -> None:
 
     assert response.status_code == 200
     assert len(response.json()) == 3
+
+
+def test_source_collection_and_admin_review_flow() -> None:
+    status = client.get("/sources/status")
+    assert status.status_code == 200
+    assert len(status.json()) >= 4
+
+    collected = client.post(
+        "/sources/collect",
+        json={
+            "query": "영상 편집과 게임용 데스크톱 200만원 QHD 144Hz",
+            "category": "desktop_pc",
+            "limit": 12,
+        },
+    )
+    assert collected.status_code == 200
+    payload = collected.json()
+    assert payload["candidates"]
+    assert payload["review_queue"]
+
+    reviews = client.get("/admin/reviews")
+    assert reviews.status_code == 200
+    review_items = reviews.json()
+    assert review_items
+
+    decision = client.post(
+        f"/admin/reviews/{review_items[0]['review_id']}/decision",
+        json={
+            "status": "approved",
+            "reviewer": "pytest",
+            "note": "테스트 승인",
+        },
+    )
+    assert decision.status_code == 200
+    assert decision.json()["status"] == "approved"
+
+    dashboard = client.get("/admin/dashboard")
+    assert dashboard.status_code == 200
+    assert dashboard.json()["adapter_statuses"]
