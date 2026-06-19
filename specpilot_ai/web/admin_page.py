@@ -107,6 +107,8 @@ def admin_page_html() -> str:
         <div class="actions">
           <button class="primary" id="collect">소스 수집</button>
           <button class="secondary" id="ingest-url">URL 인입</button>
+          <button class="secondary" id="save-monitor">모니터 등록</button>
+          <button class="secondary" id="refresh-monitors">모니터 refresh</button>
           <button class="secondary" id="refresh">새로고침</button>
         </div>
       </div>
@@ -123,6 +125,18 @@ def admin_page_html() -> str:
       <div class="panel">
         <h2>검수 대기</h2>
         <div class="review-list" id="reviews"></div>
+      </div>
+    </section>
+    <section class="grid top-grid" style="margin-top:14px">
+      <div class="panel">
+        <h2>URL 모니터</h2>
+        <p>실제 상품 URL을 반복 수집 대상으로 등록하고 refresh 상태를 추적합니다.</p>
+        <div class="review-list" id="source-monitors"></div>
+      </div>
+      <div class="panel">
+        <h2>수집 refresh 이력</h2>
+        <p>성공, 실패, live fetch 여부와 검수 큐 연결 상태를 확인합니다.</p>
+        <div class="review-list" id="source-refresh-runs"></div>
       </div>
     </section>
     <section class="panel" style="margin-top:14px">
@@ -175,7 +189,9 @@ def admin_page_html() -> str:
         channelResponse,
         deliveryResponse,
         eventResponse,
-        traceResponse
+        traceResponse,
+        monitorResponse,
+        refreshRunResponse
       ] = await Promise.all([
         fetch('/admin/dashboard'),
         fetch('/ops/quality'),
@@ -184,7 +200,9 @@ def admin_page_html() -> str:
         fetch('/alerts/channels'),
         fetch('/alerts/deliveries'),
         fetch('/alerts/events'),
-        fetch('/ops/traces')
+        fetch('/ops/traces'),
+        fetch('/sources/monitors'),
+        fetch('/sources/refresh-runs')
       ]);
       const data = await response.json();
       const quality = await qualityResponse.json();
@@ -194,9 +212,13 @@ def admin_page_html() -> str:
       const deliveries = await deliveryResponse.json();
       const events = await eventResponse.json();
       const traces = await traceResponse.json();
+      const monitors = await monitorResponse.json();
+      const refreshRuns = await refreshRunResponse.json();
       renderMetrics(data.metrics);
       renderSources(data.adapter_statuses);
       renderReviews(data.pending_reviews);
+      renderSourceMonitors(monitors);
+      renderSourceRefreshRuns(refreshRuns);
       renderQuality(quality);
       renderFeedback(feedback);
       renderBetaLeads(betaLeads);
@@ -215,6 +237,9 @@ def admin_page_html() -> str:
         ['발송 시도', metrics.alert_delivery_attempts],
         ['발송 성공', metrics.sent_alert_deliveries],
         ['발송 실패', metrics.failed_alert_deliveries],
+        ['URL 모니터', metrics.source_monitors],
+        ['소스 refresh', metrics.source_refresh_runs],
+        ['refresh 실패', metrics.source_refresh_failures],
         ['Trace span', metrics.trace_spans],
         ['트리거', metrics.triggered_alerts],
         ['품질', metrics.average_quality_score],
@@ -234,6 +259,38 @@ def admin_page_html() -> str:
           <span>${source.kind} / 신뢰도 ${Math.round(source.confidence * 100)}% / ${source.freshness_minutes}분</span>
           <p>${source.message}</p>
         </div>
+      `).join('');
+    }
+
+    function renderSourceMonitors(monitors) {
+      const root = document.querySelector('#source-monitors');
+      if (!monitors.length) {
+        root.innerHTML = '<p>아직 등록된 URL 모니터가 없습니다.</p>';
+        return;
+      }
+      root.innerHTML = monitors.map((item) => `
+        <article class="review-item ${item.last_status === 'failed' ? 'danger' : ''}">
+          <span class="kicker">${item.kind} · ${item.active ? '활성' : '비활성'} · ${item.cadence_minutes}분</span>
+          <h3>${item.expected_model || item.url}</h3>
+          <p>${item.url}</p>
+          <p>마지막 상태: ${item.last_status} / 실패 ${item.failure_count}회 / 마지막 소스: ${item.last_source_id || '없음'}</p>
+        </article>
+      `).join('');
+    }
+
+    function renderSourceRefreshRuns(items) {
+      const root = document.querySelector('#source-refresh-runs');
+      if (!items.length) {
+        root.innerHTML = '<p>아직 refresh 이력이 없습니다.</p>';
+        return;
+      }
+      root.innerHTML = items.map((item) => `
+        <article class="review-item ${item.status === 'failed' ? 'danger' : ''}">
+          <span class="kicker">${item.status} · ${item.fetched_live ? 'live fetch' : 'snapshot'}</span>
+          <h3>${item.monitor_id}</h3>
+          <p>${item.message}</p>
+          <p>source: ${item.source_id || '없음'} / review: ${item.review_id || '없음'}</p>
+        </article>
       `).join('');
     }
 
@@ -401,6 +458,29 @@ def admin_page_html() -> str:
           expected_model: document.querySelector('#source-model').value,
           source_name: 'admin_console'
         })
+      });
+      await loadDashboard();
+    });
+    document.querySelector('#save-monitor').addEventListener('click', async () => {
+      await fetch('/sources/monitors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          url: document.querySelector('#source-url').value,
+          category: 'desktop_pc',
+          kind: 'price',
+          expected_model: document.querySelector('#source-model').value,
+          source_name: 'admin_console_monitor',
+          cadence_minutes: 180
+        })
+      });
+      await loadDashboard();
+    });
+    document.querySelector('#refresh-monitors').addEventListener('click', async () => {
+      await fetch('/sources/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: 20 })
       });
       await loadDashboard();
     });

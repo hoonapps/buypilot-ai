@@ -32,6 +32,9 @@ from specpilot_ai.core.models import (
     SavedReportDetail,
     SavedReportSummary,
     SourceCandidate,
+    SourceMonitor,
+    SourceMonitorRequest,
+    SourceRefreshRun,
     TraceEvent,
     TraceRunSummary,
     TraceSpanRecord,
@@ -1036,6 +1039,153 @@ class SpecPilotStore:
             resolved_at=now,
         )
 
+    def create_source_monitor_for_workspace(
+        self,
+        workspace_id: str,
+        request: SourceMonitorRequest,
+    ) -> SourceMonitor:
+        now = _now()
+        monitor = SourceMonitor(
+            monitor_id=f"monitor_{uuid4().hex[:12]}",
+            workspace_id=workspace_id,
+            url=request.url,
+            category=request.category,
+            kind=request.kind,
+            expected_model=request.expected_model,
+            source_name=request.source_name,
+            seller=request.seller,
+            cadence_minutes=request.cadence_minutes,
+            active=request.active,
+            created_at=now,
+            updated_at=now,
+            html_snapshot=request.html_snapshot,
+        )
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO source_monitors (
+                    monitor_id, workspace_id, url, category, kind, expected_model,
+                    source_name, seller, cadence_minutes, active, html_snapshot,
+                    last_run_at, last_status, last_source_id, failure_count,
+                    created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    monitor.monitor_id,
+                    monitor.workspace_id,
+                    monitor.url,
+                    monitor.category.value,
+                    monitor.kind.value,
+                    monitor.expected_model,
+                    monitor.source_name,
+                    monitor.seller,
+                    monitor.cadence_minutes,
+                    1 if monitor.active else 0,
+                    monitor.html_snapshot,
+                    monitor.last_run_at,
+                    monitor.last_status,
+                    monitor.last_source_id,
+                    monitor.failure_count,
+                    monitor.created_at,
+                    monitor.updated_at,
+                ),
+            )
+        return monitor
+
+    def list_source_monitors_for_workspace(
+        self,
+        workspace_id: str,
+        *,
+        active: bool | None = None,
+        monitor_ids: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[SourceMonitor]:
+        query = """
+            SELECT *
+            FROM source_monitors
+            WHERE workspace_id = ?
+        """
+        params: list[str | int] = [workspace_id]
+        if active is not None:
+            query += " AND active = ?"
+            params.append(1 if active else 0)
+        if monitor_ids:
+            placeholders = ",".join("?" for _ in monitor_ids)
+            query += f" AND monitor_id IN ({placeholders})"
+            params.extend(monitor_ids)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [_source_monitor_from_row(row) for row in rows]
+
+    def record_source_refresh_run(self, run: SourceRefreshRun) -> SourceRefreshRun:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO source_refresh_runs (
+                    run_id, monitor_id, workspace_id, status, source_id,
+                    review_id, fetched_live, message, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run.run_id,
+                    run.monitor_id,
+                    run.workspace_id,
+                    run.status,
+                    run.source_id,
+                    run.review_id,
+                    1 if run.fetched_live else 0,
+                    run.message,
+                    run.created_at,
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE source_monitors
+                SET last_run_at = ?,
+                    last_status = ?,
+                    last_source_id = ?,
+                    failure_count = CASE
+                        WHEN ? = 'failed' THEN failure_count + 1
+                        ELSE 0
+                    END,
+                    updated_at = ?
+                WHERE monitor_id = ? AND workspace_id = ?
+                """,
+                (
+                    run.created_at,
+                    run.status,
+                    run.source_id,
+                    run.status,
+                    run.created_at,
+                    run.monitor_id,
+                    run.workspace_id,
+                ),
+            )
+        return run
+
+    def list_source_refresh_runs_for_workspace(
+        self,
+        workspace_id: str,
+        *,
+        limit: int = 50,
+    ) -> list[SourceRefreshRun]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM source_refresh_runs
+                WHERE workspace_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (workspace_id, limit),
+            ).fetchall()
+        return [_source_refresh_run_from_row(row) for row in rows]
+
     def metrics(self) -> OperationsMetrics:
         return self.metrics_for_workspace(None)
 
@@ -1077,6 +1227,22 @@ class SpecPilotStore:
             ).fetchone()[0]
             trace_spans = conn.execute(
                 f"SELECT COUNT(*) FROM trace_spans{where}",
+                params,
+            ).fetchone()[0]
+            source_monitors = conn.execute(
+                f"SELECT COUNT(*) FROM source_monitors{where}",
+                params,
+            ).fetchone()[0]
+            source_refresh_runs = conn.execute(
+                f"SELECT COUNT(*) FROM source_refresh_runs{where}",
+                params,
+            ).fetchone()[0]
+            source_refresh_failures = conn.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM source_refresh_runs{where}
+                {' AND ' if where else ' WHERE '}status = 'failed'
+                """,
                 params,
             ).fetchone()[0]
             sent_alert_deliveries = conn.execute(
@@ -1148,6 +1314,9 @@ class SpecPilotStore:
             alert_delivery_attempts=alert_delivery_attempts,
             sent_alert_deliveries=sent_alert_deliveries,
             failed_alert_deliveries=failed_alert_deliveries,
+            source_monitors=source_monitors,
+            source_refresh_runs=source_refresh_runs,
+            source_refresh_failures=source_refresh_failures,
             trace_spans=trace_spans,
             feedback_count=feedback_count,
             beta_leads=beta_leads,
@@ -1225,6 +1394,38 @@ class SpecPilotStore:
                     resolved_at TEXT,
                     reviewer TEXT,
                     note TEXT NOT NULL DEFAULT ''
+                );
+
+                CREATE TABLE IF NOT EXISTS source_monitors (
+                    monitor_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    url TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    expected_model TEXT NOT NULL DEFAULT '',
+                    source_name TEXT NOT NULL DEFAULT 'source_monitor',
+                    seller TEXT,
+                    cadence_minutes INTEGER NOT NULL,
+                    active INTEGER NOT NULL DEFAULT 1,
+                    html_snapshot TEXT NOT NULL DEFAULT '',
+                    last_run_at TEXT,
+                    last_status TEXT NOT NULL DEFAULT 'never_run',
+                    last_source_id TEXT,
+                    failure_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS source_refresh_runs (
+                    run_id TEXT PRIMARY KEY,
+                    monitor_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    status TEXT NOT NULL,
+                    source_id TEXT,
+                    review_id TEXT,
+                    fetched_live INTEGER NOT NULL DEFAULT 0,
+                    message TEXT NOT NULL,
+                    created_at TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS alert_delivery_events (
@@ -1319,6 +1520,10 @@ class SpecPilotStore:
                     ON alert_subscriptions(trace_id);
                 CREATE INDEX IF NOT EXISTS idx_source_review_status
                     ON source_review_queue(status);
+                CREATE INDEX IF NOT EXISTS idx_source_monitors_workspace
+                    ON source_monitors(workspace_id, active);
+                CREATE INDEX IF NOT EXISTS idx_source_refresh_workspace
+                    ON source_refresh_runs(workspace_id, created_at);
                 CREATE INDEX IF NOT EXISTS idx_alert_events_workspace
                     ON alert_delivery_events(workspace_id);
                 CREATE INDEX IF NOT EXISTS idx_alert_events_subscription
@@ -1683,6 +1888,44 @@ def _review_item_from_row(row: sqlite3.Row) -> ReviewQueueItem:
         created_at=data["created_at"],
         resolved_at=data["resolved_at"],
         reviewer=data["reviewer"],
+    )
+
+
+def _source_monitor_from_row(row: sqlite3.Row) -> SourceMonitor:
+    data = dict(row)
+    return SourceMonitor(
+        monitor_id=data["monitor_id"],
+        workspace_id=data["workspace_id"],
+        url=data["url"],
+        category=Category(data["category"]),
+        kind=data["kind"],
+        expected_model=data["expected_model"],
+        source_name=data["source_name"],
+        seller=data["seller"],
+        cadence_minutes=data["cadence_minutes"],
+        active=bool(data["active"]),
+        last_run_at=data["last_run_at"],
+        last_status=data["last_status"],
+        last_source_id=data["last_source_id"],
+        failure_count=data["failure_count"],
+        created_at=data["created_at"],
+        updated_at=data["updated_at"],
+        html_snapshot=data["html_snapshot"],
+    )
+
+
+def _source_refresh_run_from_row(row: sqlite3.Row) -> SourceRefreshRun:
+    data = dict(row)
+    return SourceRefreshRun(
+        run_id=data["run_id"],
+        monitor_id=data["monitor_id"],
+        workspace_id=data["workspace_id"],
+        status=data["status"],
+        source_id=data["source_id"],
+        review_id=data["review_id"],
+        fetched_live=bool(data["fetched_live"]),
+        message=data["message"],
+        created_at=data["created_at"],
     )
 
 

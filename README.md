@@ -55,6 +55,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 분석 품질 감사와 예상 비용 대시보드
 - 가격/리뷰/벤치마크/공식 스토어 소스 어댑터 계약
 - 실제 상품 URL/HTML 스냅샷 인입과 관리자 검수 큐 등록
+- URL 모니터 등록, 수집 refresh 실행, refresh 이력 추적
 - 관리자 검수 콘솔(`/admin`)
 - 공개 신뢰 정책 API(`/policy/trust`)
 - Neo4j 그래프 스키마 미리보기
@@ -407,6 +408,35 @@ curl -X POST http://127.0.0.1:8000/sources/ingest-url \
   }'
 ```
 
+반복 확인이 필요한 상품 URL은 모니터로 등록하고 refresh 실행 이력을 남깁니다.
+
+```bash
+curl -X POST http://127.0.0.1:8000/sources/monitors \
+  -H "Content-Type: application/json" \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY" \
+  -d '{
+    "url": "https://example.com/product/creator-pc",
+    "category": "desktop_pc",
+    "kind": "price",
+    "expected_model": "Creator RTX 4070 PC",
+    "seller": "Example Store",
+    "cadence_minutes": 180,
+    "html_snapshot": "<html><title>Creator RTX 4070 PC</title><body>최종 결제 금액 1,899,000원</body></html>"
+  }'
+```
+
+```bash
+curl -X POST http://127.0.0.1:8000/sources/refresh \
+  -H "Content-Type: application/json" \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY" \
+  -d '{"limit": 20}'
+```
+
+```bash
+curl http://127.0.0.1:8000/sources/refresh-runs \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
 관리자 검수 화면:
 
 ```text
@@ -555,7 +585,7 @@ make docker-build
 - `/ops/traces`, `/ops/traces/{trace_id}/spans`가 저장 trace와 단계별 span을 워크스페이스별로 반환하는지
 - `/feedback`, `/beta/leads`가 만족도와 베타 리드를 저장하고 워크스페이스별로 격리하는지
 - `/ops/quality`가 품질 감사와 예상 비용을 워크스페이스별로 반환하는지
-- `/sources/status`, `/sources/collect`, `/sources/ingest-url`, `/admin/reviews`, `/admin/dashboard`가 동작하는지
+- `/sources/status`, `/sources/collect`, `/sources/ingest-url`, `/sources/monitors`, `/sources/refresh`, `/sources/refresh-runs`, `/admin/reviews`, `/admin/dashboard`가 동작하는지
 - `/policy/trust`가 캐시, 제휴 고지, 공정성 정책을 반환하는지
 - `/health`, `/ready` 운영 엔드포인트가 동작하는지
 
@@ -579,6 +609,7 @@ GitHub Actions는 `main` push와 PR에서 다음을 실행합니다.
 - 공유용 검토 브리프는 공개 리포트를 받은 사람이 긴 리포트 전에 판정, 리스크, 질문을 먼저 확인하게 합니다.
 - 출처 없는 스펙이나 가격은 추천 근거로 사용하지 않습니다.
 - 외부 URL 인입은 내부망/private IP를 차단하고 실제 추천 반영 전에 검수 큐를 거칩니다.
+- URL 모니터 refresh는 성공/실패, live fetch 여부, 연결된 검수 항목을 이력으로 남깁니다.
 - 특정 판매처 편향을 줄이기 위해 가격, 호환성, 리뷰, 안정성 점수를 분리합니다.
 - 제휴 링크를 붙일 경우 추천 기준과 제휴 고지를 분리해서 노출해야 합니다.
 - 신뢰도 0.8 미만 또는 리스크 플래그가 있는 근거는 관리자 검수 큐에 넣습니다.
@@ -596,7 +627,7 @@ GitHub Actions는 `main` push와 PR에서 다음을 실행합니다.
 
 ## 다음 제품화 과제
 
-- 가격 비교/오픈마켓/공식 스토어의 공식 provider 계약, 대량 수집 스케줄러, robots/약관 운영 정책 연결
+- 가격 비교/오픈마켓/공식 스토어의 공식 provider 계약, 자동 실행 스케줄러, robots/약관 운영 정책 연결
 - 실제 이메일/SMS/웹훅 provider credential 연결과 운영 rate limit 적용
 - LangSmith 또는 OpenTelemetry 외부 export 연동
 - 실제 구매 시나리오 베타 테스트

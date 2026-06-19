@@ -665,6 +665,9 @@ class OperationsMetrics(BaseModel):
     alert_delivery_attempts: int = 0
     sent_alert_deliveries: int = 0
     failed_alert_deliveries: int = 0
+    source_monitors: int = 0
+    source_refresh_runs: int = 0
+    source_refresh_failures: int = 0
     trace_spans: int = 0
     feedback_count: int = 0
     beta_leads: int = 0
@@ -744,6 +747,66 @@ class SourceUrlIngestResponse(BaseModel):
     review_item: ReviewQueueItem | None = None
     fetched_live: bool = False
     extraction_notes: list[str] = Field(default_factory=list)
+
+
+class SourceMonitorRequest(BaseModel):
+    url: str = Field(min_length=8)
+    category: Category = Category.desktop_pc
+    kind: SourceKind = SourceKind.price
+    expected_model: str = ""
+    source_name: str = "source_monitor"
+    seller: str | None = None
+    cadence_minutes: int = Field(default=180, ge=15, le=10080)
+    active: bool = True
+    html_snapshot: str = ""
+
+
+class SourceMonitor(BaseModel):
+    monitor_id: str
+    workspace_id: str
+    url: str
+    category: Category
+    kind: SourceKind
+    expected_model: str
+    source_name: str
+    seller: str | None = None
+    cadence_minutes: int
+    active: bool
+    last_run_at: str | None = None
+    last_status: str = "never_run"
+    last_source_id: str | None = None
+    failure_count: int = 0
+    created_at: str
+    updated_at: str
+    html_snapshot: str = Field(default="", exclude=True)
+
+
+class SourceRefreshRequest(BaseModel):
+    monitor_ids: list[str] = Field(default_factory=list)
+    limit: int = Field(default=20, ge=1, le=100)
+    include_inactive: bool = False
+    html_overrides: dict[str, str] = Field(default_factory=dict)
+
+
+class SourceRefreshRun(BaseModel):
+    run_id: str
+    monitor_id: str
+    workspace_id: str
+    status: str
+    source_id: str | None = None
+    review_id: str | None = None
+    fetched_live: bool = False
+    message: str
+    created_at: str
+
+
+class SourceRefreshResponse(BaseModel):
+    selected_count: int
+    succeeded_count: int
+    failed_count: int
+    candidates: list[SourceCandidate] = Field(default_factory=list)
+    review_items: list[ReviewQueueItem] = Field(default_factory=list)
+    runs: list[SourceRefreshRun] = Field(default_factory=list)
 
 
 class ReviewDecisionRequest(BaseModel):

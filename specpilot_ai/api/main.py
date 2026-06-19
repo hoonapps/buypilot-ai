@@ -1,3 +1,6 @@
+from datetime import UTC, datetime
+from uuid import uuid4
+
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 
@@ -40,6 +43,11 @@ from specpilot_ai.core.models import (
     SourceAdapterStatus,
     SourceCollectionRequest,
     SourceCollectionResponse,
+    SourceMonitor,
+    SourceMonitorRequest,
+    SourceRefreshRequest,
+    SourceRefreshResponse,
+    SourceRefreshRun,
     SourceUrlIngestRequest,
     SourceUrlIngestResponse,
     TraceEvent,
@@ -532,6 +540,110 @@ def ingest_url_source(request: SourceUrlIngestRequest) -> SourceUrlIngestRespons
     return response
 
 
+@app.post("/sources/monitors", response_model=SourceMonitor)
+def create_source_monitor(
+    request: SourceMonitorRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> SourceMonitor:
+    try:
+        ingest_source_url(
+            SourceUrlIngestRequest(
+                url=request.url,
+                category=request.category,
+                kind=request.kind,
+                expected_model=request.expected_model,
+                source_name=request.source_name,
+                seller=request.seller,
+                html=request.html_snapshot or "<html><title>SpecPilot URL 검증</title></html>",
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _store().create_source_monitor_for_workspace(workspace.workspace_id, request)
+
+
+@app.get("/sources/monitors", response_model=list[SourceMonitor])
+def list_source_monitors(
+    active: bool | None = None,
+    limit: int = 50,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[SourceMonitor]:
+    return _store().list_source_monitors_for_workspace(
+        workspace.workspace_id,
+        active=active,
+        limit=limit,
+    )
+
+
+@app.post("/sources/refresh", response_model=SourceRefreshResponse)
+def refresh_source_monitors(
+    request: SourceRefreshRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> SourceRefreshResponse:
+    monitors = _store().list_source_monitors_for_workspace(
+        workspace.workspace_id,
+        active=None if request.include_inactive else True,
+        monitor_ids=request.monitor_ids or None,
+        limit=request.limit,
+    )
+    runs: list[SourceRefreshRun] = []
+    candidates = []
+    review_items: list[ReviewQueueItem] = []
+    for monitor in monitors:
+        html = request.html_overrides.get(monitor.monitor_id, monitor.html_snapshot)
+        try:
+            response = ingest_source_url(
+                SourceUrlIngestRequest(
+                    url=monitor.url,
+                    category=monitor.category,
+                    kind=monitor.kind,
+                    expected_model=monitor.expected_model,
+                    source_name=monitor.source_name,
+                    seller=monitor.seller,
+                    html=html,
+                )
+            )
+        except ValueError as exc:
+            run = _source_refresh_run(
+                monitor=monitor,
+                status="failed",
+                message=str(exc),
+            )
+        else:
+            if response.review_item is not None:
+                _store().add_review_items([response.review_item])
+                review_items.append(response.review_item)
+            candidates.append(response.candidate)
+            run = _source_refresh_run(
+                monitor=monitor,
+                status="succeeded",
+                source_id=response.candidate.source_id,
+                review_id=response.review_item.review_id if response.review_item else None,
+                fetched_live=response.fetched_live,
+                message=" / ".join(response.extraction_notes),
+            )
+        runs.append(_store().record_source_refresh_run(run))
+    return SourceRefreshResponse(
+        selected_count=len(monitors),
+        succeeded_count=sum(1 for run in runs if run.status == "succeeded"),
+        failed_count=sum(1 for run in runs if run.status == "failed"),
+        candidates=candidates,
+        review_items=review_items,
+        runs=runs,
+    )
+
+
+@app.get("/sources/refresh-runs", response_model=list[SourceRefreshRun])
+def list_source_refresh_runs(
+    limit: int = 50,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[SourceRefreshRun]:
+    return _store().list_source_refresh_runs_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+
+
 @app.get("/admin/reviews", response_model=list[ReviewQueueItem])
 def list_admin_reviews(
     status: ReviewStatus | None = ReviewStatus.pending,
@@ -562,6 +674,28 @@ def admin_dashboard() -> AdminReviewDashboard:
         adapter_statuses=_collector().statuses(),
         pending_reviews=_store().list_review_items(status=ReviewStatus.pending, limit=25),
         metrics=_store().metrics(),
+    )
+
+
+def _source_refresh_run(
+    *,
+    monitor: SourceMonitor,
+    status: str,
+    message: str,
+    source_id: str | None = None,
+    review_id: str | None = None,
+    fetched_live: bool = False,
+) -> SourceRefreshRun:
+    return SourceRefreshRun(
+        run_id=f"refresh_{uuid4().hex[:12]}",
+        monitor_id=monitor.monitor_id,
+        workspace_id=monitor.workspace_id,
+        status=status,
+        source_id=source_id,
+        review_id=review_id,
+        fetched_live=fetched_live,
+        message=message,
+        created_at=datetime.now(UTC).isoformat(),
     )
 
 

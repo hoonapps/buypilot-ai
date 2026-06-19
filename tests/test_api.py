@@ -62,6 +62,8 @@ def test_admin_page_exposes_review_console() -> None:
     assert "SpecPilot AI Admin" in response.text
     assert "소스 수집" in response.text
     assert "URL 인입" in response.text
+    assert "모니터 등록" in response.text
+    assert "수집 refresh 이력" in response.text
     assert "발송 큐" in response.text
     assert "알림 발송 채널" in response.text
     assert "발송 시도" in response.text
@@ -550,6 +552,58 @@ def test_source_collection_and_admin_review_flow() -> None:
     assert ingested_payload["review_item"]["status"] == "pending"
     assert "HTML 스냅샷" in ingested_payload["extraction_notes"][0]
 
+    monitor = client.post(
+        "/sources/monitors",
+        headers=WORKSPACE_A,
+        json={
+            "url": f"https://example.com/product/monitor-pc-{source_slug}",
+            "category": "desktop_pc",
+            "kind": "price",
+            "expected_model": "Monitor RTX 4070 PC",
+            "seller": "Monitor Store",
+            "cadence_minutes": 120,
+            "html_snapshot": """
+            <html>
+              <head><title>Monitor RTX 4070 PC</title></head>
+              <body>모니터링 기준 가격 1,799,000원</body>
+            </html>
+            """,
+        },
+    )
+    assert monitor.status_code == 200
+    monitor_payload = monitor.json()
+    assert monitor_payload["last_status"] == "never_run"
+    assert "html_snapshot" not in monitor_payload
+
+    refresh = client.post(
+        "/sources/refresh",
+        headers=WORKSPACE_A,
+        json={"monitor_ids": [monitor_payload["monitor_id"]]},
+    )
+    assert refresh.status_code == 200
+    refresh_payload = refresh.json()
+    assert refresh_payload["selected_count"] == 1
+    assert refresh_payload["succeeded_count"] == 1
+    assert refresh_payload["failed_count"] == 0
+    assert refresh_payload["candidates"][0]["extracted_price_krw"] == 1_799_000
+    assert refresh_payload["review_items"][0]["status"] == "pending"
+
+    monitors = client.get("/sources/monitors", headers=WORKSPACE_A)
+    assert monitors.status_code == 200
+    assert monitors.json()[0]["last_status"] == "succeeded"
+    assert monitors.json()[0]["last_source_id"] == refresh_payload["candidates"][0]["source_id"]
+
+    refresh_runs = client.get("/sources/refresh-runs", headers=WORKSPACE_A)
+    assert refresh_runs.status_code == 200
+    assert refresh_runs.json()[0]["status"] == "succeeded"
+
+    isolated_monitors = client.get("/sources/monitors", headers=WORKSPACE_B)
+    assert isolated_monitors.status_code == 200
+    assert not any(
+        item["monitor_id"] == monitor_payload["monitor_id"]
+        for item in isolated_monitors.json()
+    )
+
     blocked_url = client.post(
         "/sources/ingest-url",
         json={
@@ -568,6 +622,10 @@ def test_source_collection_and_admin_review_flow() -> None:
     assert review_items
     assert any(
         item["source"]["source_id"] == ingested_payload["candidate"]["source_id"]
+        for item in review_items
+    )
+    assert any(
+        item["source"]["source_id"] == refresh_payload["candidates"][0]["source_id"]
         for item in review_items
     )
 
