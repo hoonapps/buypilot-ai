@@ -286,6 +286,22 @@ class ProductEvidencePack(BaseModel):
     review_required: bool = False
 
 
+class OptionAuditItem(BaseModel):
+    field: str
+    expected_value: str
+    status: CheckStatus
+    verification_hint: str
+
+
+class ProductOptionAudit(BaseModel):
+    product_id: str
+    model_name: str
+    summary: str
+    critical_items: list[OptionAuditItem] = Field(default_factory=list)
+    mismatch_risks: list[str] = Field(default_factory=list)
+    purchase_blockers: list[str] = Field(default_factory=list)
+
+
 class PurchaseExecutionPlan(BaseModel):
     product_id: str | None = None
     model_name: str | None = None
@@ -319,6 +335,7 @@ class PurchaseReport(BaseModel):
     criteria_matches: list[ProductCriteriaMatch] = Field(default_factory=list)
     stress_tests: list[PurchaseStressTest] = Field(default_factory=list)
     evidence_packs: list[ProductEvidencePack] = Field(default_factory=list)
+    option_audits: list[ProductOptionAudit] = Field(default_factory=list)
     execution_plan: PurchaseExecutionPlan | None = None
     final_pick_id: str | None = None
 

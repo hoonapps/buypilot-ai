@@ -318,6 +318,25 @@ def launch_page_html() -> str:
           </article>
         `;
       }).join('');
+      const optionAuditCards = (report.option_audits || []).map((audit) => {
+        const items = (audit.critical_items || []).map((item) => `
+          <tr><td>${item.field}</td><td>${item.expected_value}</td><td>${item.verification_hint}</td></tr>
+        `).join('');
+        const risks = (audit.mismatch_risks || []).map((risk) => `<li>${risk}</li>`).join('');
+        const blockers = (audit.purchase_blockers || []).map((risk) => `<li>${risk}</li>`).join('');
+        return `
+          <article class="card comparison-card">
+            <div class="rank">옵션 검수</div>
+            <h3>${audit.model_name}</h3>
+            <p>${audit.summary}</p>
+            <table>
+              <thead><tr><th>항목</th><th>기대값</th><th>확인 방법</th></tr></thead>
+              <tbody>${items}</tbody>
+            </table>
+            <ul class="list">${blockers || risks}</ul>
+          </article>
+        `;
+      }).join('');
       const alerts = report.price_alerts.map((alert) => `
         <li>${alert.product_id}: 목표가 ${won(alert.target_price_krw)} / ${alert.recheck_interval_days}일마다 재확인</li>
       `).join('');
@@ -372,6 +391,10 @@ def launch_page_html() -> str:
         <section class="section">
           <h3>후보별 근거 팩</h3>
           <div class="grid cards">${evidenceCards}</div>
+        </section>
+        <section class="section">
+          <h3>옵션/사양 검수표</h3>
+          <div class="grid cards">${optionAuditCards}</div>
         </section>
         <section class="sections">
           <div class="card">

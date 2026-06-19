@@ -17,11 +17,13 @@ from specpilot_ai.core.models import (
     CompatibilityCheck,
     CriterionMatchItem,
     ExcludedProduct,
+    OptionAuditItem,
     PriceAlertPlan,
     PriceSnapshot,
     ProductCandidate,
     ProductCriteriaMatch,
     ProductEvidencePack,
+    ProductOptionAudit,
     PurchaseCriteria,
     PurchaseDecision,
     PurchaseExecutionPlan,
@@ -441,6 +443,7 @@ def report_writer(state: PurchaseState) -> PurchaseState:
         checks_by_product,
         source_trust,
     )
+    option_audits = _option_audits(ranked[:5], products, checks_by_product)
     execution_plan = _execution_plan(
         recommendations,
         purchase_decision,
@@ -477,6 +480,7 @@ def report_writer(state: PurchaseState) -> PurchaseState:
         criteria_matches=criteria_matches,
         stress_tests=stress_tests,
         evidence_packs=evidence_packs,
+        option_audits=option_audits,
         execution_plan=execution_plan,
         final_pick_id=recommendations[0].product.id if recommendations else None,
     )
@@ -1075,6 +1079,129 @@ def _evidence_packs(
             )
         )
     return packs
+
+
+def _option_audits(
+    ranked: list[ScoreCard],
+    products: dict[str, ProductCandidate],
+    checks_by_product: dict[str, list[CompatibilityCheck]],
+) -> list[ProductOptionAudit]:
+    audits: list[ProductOptionAudit] = []
+    for card in ranked:
+        product = products[card.product_id]
+        checks = checks_by_product.get(product.id, [])
+        items = _option_audit_items(product)
+        blockers = [
+            check.message for check in checks if check.status == CheckStatus.blocker
+        ]
+        warnings = [
+            check.message for check in checks if check.status == CheckStatus.warning
+        ]
+        mismatch_risks = _option_mismatch_risks(product, warnings)
+        if blockers:
+            summary = f"구매 차단 가능 항목 {len(blockers)}개를 먼저 해소해야 합니다."
+        elif mismatch_risks:
+            summary = f"옵션명과 구성표 대조가 필요한 항목 {len(mismatch_risks)}개가 있습니다."
+        else:
+            summary = "판매 페이지 옵션명이 검수표와 같으면 결제 가능성이 높습니다."
+        audits.append(
+            ProductOptionAudit(
+                product_id=product.id,
+                model_name=product.model_name,
+                summary=summary,
+                critical_items=items,
+                mismatch_risks=mismatch_risks,
+                purchase_blockers=blockers,
+            )
+        )
+    return audits
+
+
+def _option_audit_items(product: ProductCandidate) -> list[OptionAuditItem]:
+    if product.category == Category.desktop_pc:
+        fields = [
+            ("CPU", "cpu", "CPU 모델명이 리포트와 같은지 확인하세요."),
+            ("GPU", "gpu", "그래픽카드 칩셋과 VRAM 표기가 같은지 확인하세요."),
+            ("메인보드", "motherboard", "보드 칩셋과 폼팩터가 같은지 확인하세요."),
+            ("RAM", "ram_gb", "용량과 DDR 규격을 함께 확인하세요."),
+            ("SSD", "ssd_tb", "저장장치 용량과 NVMe 여부를 확인하세요."),
+            ("파워", "psu_watt", "정격 출력과 인증 등급을 확인하세요."),
+            (
+                "GPU 장착 여유",
+                "case_gpu_clearance_mm",
+                "케이스 장착 가능 길이가 GPU 길이보다 큰지 확인하세요.",
+            ),
+            (
+                "CPU 쿨러 여유",
+                "case_cooler_clearance_mm",
+                "케이스 쿨러 허용 높이가 쿨러 높이보다 큰지 확인하세요.",
+            ),
+        ]
+    else:
+        fields = [
+            ("CPU", "cpu", "프로세서 세대와 모델명이 같은지 확인하세요."),
+            ("GPU", "gpu", "외장 GPU 여부와 모델명을 확인하세요."),
+            ("RAM", "ram_gb", "용량과 온보드/교체 가능 여부를 확인하세요."),
+            ("SSD", "ssd_tb", "저장장치 용량과 추가 슬롯 여부를 확인하세요."),
+            ("디스플레이", "display", "화면 크기, 해상도, 주사율, 패널 종류를 확인하세요."),
+            ("무게", "weight_kg", "본체 무게와 충전기 무게를 구분해 확인하세요."),
+            ("배터리", "battery_wh", "Wh 용량과 실제 사용 시간을 확인하세요."),
+            ("외장 GPU", "external_gpu", "GPU 가속 작업에 필요한 외장 GPU 여부를 확인하세요."),
+        ]
+
+    return [
+        OptionAuditItem(
+            field=label,
+            expected_value=_format_spec_value(product, key),
+            status=CheckStatus.ok,
+            verification_hint=hint,
+        )
+        for label, key, hint in fields
+    ]
+
+
+def _option_mismatch_risks(
+    product: ProductCandidate,
+    compatibility_warnings: list[str],
+) -> list[str]:
+    risks = [
+        "판매 페이지의 옵션명, 장바구니 구성표, 최종 결제 화면의 모델명이 모두 같은지 확인하세요.",
+        "쿠폰 적용 후 대체 부품으로 바뀌는 자동 옵션 변경이 없는지 확인하세요.",
+    ]
+    if product.category == Category.desktop_pc:
+        risks.extend(
+            [
+                "GPU 길이, 케이스 장착 여유, CPU 쿨러 높이는 숫자로 대조하세요.",
+                "파워 정격 출력과 그래픽카드 권장 파워가 맞는지 확인하세요.",
+            ]
+        )
+    else:
+        risks.extend(
+            [
+                "RAM/SSD가 온보드인지 교체 가능한지 판매자 답변으로 남기세요.",
+                "같은 모델명의 디스플레이 패널 옵션이 여러 개인지 확인하세요.",
+            ]
+        )
+    return [*risks, *compatibility_warnings[:2]]
+
+
+def _format_spec_value(product: ProductCandidate, key: str) -> str:
+    value = product.specs.get(key, "확인 필요")
+    if key == "ram_gb":
+        return f"{value}GB {product.specs.get('ram_type', '')}".strip()
+    if key == "ssd_tb":
+        return f"{value}TB"
+    if key == "psu_watt":
+        return f"{value}W"
+    if key.endswith("_mm"):
+        return f"{value}mm"
+    if key == "weight_kg":
+        return f"{value}kg"
+    if key == "battery_wh":
+        return f"{value}Wh"
+    if key in {"external_gpu", "upgradeable_ram"}:
+        return "예" if value else "아니오"
+    return str(value)
 
 
 def _execution_plan(

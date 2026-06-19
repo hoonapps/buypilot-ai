@@ -63,6 +63,14 @@ def test_desktop_pc_analysis_returns_top_three_and_compatibility_notes() -> None
     assert response.report.evidence_packs[0].benchmark_evidence
     assert response.report.evidence_packs[0].compatibility_evidence
     assert response.report.evidence_packs[0].citation_urls
+    assert len(response.report.option_audits) == 5
+    assert response.report.option_audits[0].product_id == response.report.final_pick_id
+    assert response.report.option_audits[0].critical_items
+    assert response.report.option_audits[0].mismatch_risks
+    assert any(
+        item.field == "GPU"
+        for item in response.report.option_audits[0].critical_items
+    )
     assert response.report.execution_plan is not None
     assert response.report.execution_plan.product_id == response.report.final_pick_id
     assert response.report.execution_plan.checkout_steps

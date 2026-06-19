@@ -59,6 +59,23 @@ def public_report_html(report: PublicReport) -> str:
         """
         for item in purchase.evidence_packs
     )
+    option_audit_cards = "\n".join(
+        f"""
+        <article class="card">
+          <span class="rank">옵션 검수</span>
+          <h3>{escape(audit.model_name)}</h3>
+          <p>{escape(audit.summary)}</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>항목</th><th>기대값</th><th>확인 방법</th></tr></thead>
+              <tbody>{_option_audit_rows(audit.critical_items)}</tbody>
+            </table>
+          </div>
+          <ul>{_list_items(audit.purchase_blockers or audit.mismatch_risks)}</ul>
+        </article>
+        """
+        for audit in purchase.option_audits
+    )
     rows = "\n".join(
         f"""
         <tr>
@@ -234,6 +251,10 @@ def public_report_html(report: PublicReport) -> str:
       <h2>후보별 근거 팩</h2>
       <div class="grid cards">{evidence_cards}</div>
     </section>
+    <section class="section">
+      <h2>옵션/사양 검수표</h2>
+      <div class="grid cards">{option_audit_cards}</div>
+    </section>
     <section class="two section">
       <div class="panel">
         <span class="kicker">Purchase decision</span>
@@ -304,3 +325,16 @@ def _won(value: int) -> str:
 
 def _list_items(items: list[str]) -> str:
     return "\n".join(f"<li>{escape(item)}</li>" for item in items)
+
+
+def _option_audit_rows(items) -> str:
+    return "\n".join(
+        f"""
+        <tr>
+          <td>{escape(item.field)}</td>
+          <td>{escape(item.expected_value)}</td>
+          <td>{escape(item.verification_hint)}</td>
+        </tr>
+        """
+        for item in items
+    )
