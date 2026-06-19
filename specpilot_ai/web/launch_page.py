@@ -271,6 +271,21 @@ def launch_page_html() -> str:
       const alerts = report.price_alerts.map((alert) => `
         <li>${alert.product_id}: 목표가 ${won(alert.target_price_krw)} / ${alert.recheck_interval_days}일마다 재확인</li>
       `).join('');
+      const trustRows = (report.source_trust || []).map((source) => `
+        <tr>
+          <td>${source.source_name}</td>
+          <td>${source.trust_grade}</td>
+          <td>${Math.round(source.confidence * 100)}%</td>
+          <td>${source.cache_ttl_minutes}분</td>
+          <td>${source.requires_human_review ? '검수 필요' : '자동 사용'}</td>
+        </tr>
+      `).join('');
+      const policy = report.trust_policy || {};
+      const policyRules = [
+        policy.cache_policy,
+        policy.stale_price_action,
+        policy.affiliate_disclosure
+      ].filter(Boolean).map((item) => `<li>${item}</li>`).join('');
       const traces = data.trace_events.map((event) => `
         <div class="${event.status === 'warning' ? 'warn' : ''}">
           <strong>${event.title}</strong><br />
@@ -304,6 +319,17 @@ def launch_page_html() -> str:
           <div class="card">
             <h3>검증 플래그</h3>
             <ul class="list">${report.verification_flags.map((item) => `<li>${item}</li>`).join('')}</ul>
+          </div>
+          <div class="card comparison-card">
+            <h3>출처 신뢰도</h3>
+            <table>
+              <thead><tr><th>출처</th><th>등급</th><th>신뢰도</th><th>캐시</th><th>처리</th></tr></thead>
+              <tbody>${trustRows}</tbody>
+            </table>
+          </div>
+          <div class="card">
+            <h3>캐시/제휴 정책</h3>
+            <ul class="list">${policyRules}</ul>
           </div>
           <div class="card">
             <h3>Agent Trace</h3>
