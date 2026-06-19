@@ -664,6 +664,8 @@ class OperationsMetrics(BaseModel):
     workspace_id: str | None = None
     analysis_runs: int
     saved_reports: int
+    shared_reports: int = 0
+    public_share_views: int = 0
     alert_subscriptions: int
     alert_events: int = 0
     triggered_alerts: int = 0
@@ -687,6 +689,34 @@ class OperationsMetrics(BaseModel):
     purchase_intent_rate: float = 0
     estimated_cost_krw: float = 0
     conversion_ready_rate: float = 0
+
+
+class BetaReadinessCheck(BaseModel):
+    area: str
+    label: str
+    status: CheckStatus
+    metric: str
+    recommendation: str
+
+
+class BetaReadinessDashboard(BaseModel):
+    workspace_id: str
+    launch_readiness_score: float = Field(ge=0, le=100)
+    readiness_label: str
+    analysis_runs: int
+    saved_reports: int
+    shared_reports: int
+    public_share_views: int
+    alert_subscriptions: int
+    feedback_count: int
+    beta_leads: int
+    average_quality_score: float = 0
+    blocker_count: int = 0
+    average_satisfaction: float = 0
+    purchase_intent_rate: float = 0
+    conversion_ready_rate: float = 0
+    checks: list[BetaReadinessCheck] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 class SourceAdapterStatus(BaseModel):

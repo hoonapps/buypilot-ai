@@ -18,6 +18,8 @@ from specpilot_ai.core.models import (
     AnalyzeResponse,
     BetaLead,
     BetaLeadRequest,
+    BetaReadinessCheck,
+    BetaReadinessDashboard,
     Category,
     CheckStatus,
     FeedbackRecord,
@@ -1319,6 +1321,18 @@ class SpecPilotStore:
                 f"SELECT COUNT(*) FROM saved_reports{where}",
                 params,
             ).fetchone()[0]
+            shared_reports = conn.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM saved_reports{where}
+                {' AND ' if where else ' WHERE '}shared_at IS NOT NULL
+                """,
+                params,
+            ).fetchone()[0]
+            public_share_views = conn.execute(
+                f"SELECT SUM(share_views) FROM saved_reports{where}",
+                params,
+            ).fetchone()[0]
             alert_subscriptions = conn.execute(
                 f"SELECT COUNT(*) FROM alert_subscriptions{where}",
                 params,
@@ -1441,6 +1455,8 @@ class SpecPilotStore:
             workspace_id=workspace_id,
             analysis_runs=analysis_runs,
             saved_reports=saved_reports,
+            shared_reports=shared_reports,
+            public_share_views=int(public_share_views or 0),
             alert_subscriptions=alert_subscriptions,
             alert_events=alert_events,
             triggered_alerts=triggered_alerts,
@@ -1464,6 +1480,91 @@ class SpecPilotStore:
             purchase_intent_rate=round(float(feedback_row["purchase_intent_rate"] or 0), 4),
             estimated_cost_krw=round(float(quality_row[1] or 0), 2),
             conversion_ready_rate=round(float(ready_row[0] or 0), 4),
+        )
+
+    def beta_readiness_for_workspace(self, workspace_id: str) -> BetaReadinessDashboard:
+        metrics = self.metrics_for_workspace(workspace_id)
+        quality = self.quality_dashboard_for_workspace(workspace_id, limit=10)
+        checks = [
+            _readiness_check(
+                area="activation",
+                label="분석 실행",
+                value=metrics.analysis_runs,
+                warning_threshold=3,
+                ok_threshold=10,
+                metric=f"{metrics.analysis_runs}건",
+                recommendation=(
+                    "대표 데스크톱/노트북 요청을 최소 10건 이상 실행해 "
+                    "결과 안정성을 확인하세요."
+                ),
+            ),
+            _readiness_check(
+                area="sharing",
+                label="공유 리포트 확산",
+                value=metrics.shared_reports,
+                warning_threshold=1,
+                ok_threshold=3,
+                metric=f"{metrics.shared_reports}개 공유 / 조회 {metrics.public_share_views}회",
+                recommendation="베타 사용자에게 공유 링크를 보내 실제 검토 흐름을 확인하세요.",
+            ),
+            _readiness_check(
+                area="retention",
+                label="가격 알림 연결",
+                value=metrics.alert_subscriptions,
+                warning_threshold=1,
+                ok_threshold=3,
+                metric=f"{metrics.alert_subscriptions}개 알림",
+                recommendation="가격 대기 판정 사용자가 목표가 알림까지 연결되는지 확인하세요.",
+            ),
+            _readiness_check(
+                area="feedback",
+                label="피드백 신호",
+                value=metrics.feedback_count,
+                warning_threshold=3,
+                ok_threshold=10,
+                metric=(
+                    f"{metrics.feedback_count}건 / 만족도 {metrics.average_satisfaction}점 / "
+                    f"구매 의향 {round(metrics.purchase_intent_rate * 100)}%"
+                ),
+                recommendation="공개 전 실제 구매 예정자 피드백을 10건 이상 확보하세요.",
+            ),
+            _quality_readiness_check(quality),
+            _readiness_check(
+                area="lead",
+                label="베타 리드",
+                value=metrics.beta_leads,
+                warning_threshold=3,
+                ok_threshold=10,
+                metric=f"{metrics.beta_leads}명",
+                recommendation=(
+                    "사용 목적별 베타 신청자를 모아 데스크톱/노트북 "
+                    "시나리오를 분리 검증하세요."
+                ),
+            ),
+        ]
+        score = _launch_readiness_score(metrics, quality)
+        return BetaReadinessDashboard(
+            workspace_id=workspace_id,
+            launch_readiness_score=score,
+            readiness_label=_readiness_label(score),
+            analysis_runs=metrics.analysis_runs,
+            saved_reports=metrics.saved_reports,
+            shared_reports=metrics.shared_reports,
+            public_share_views=metrics.public_share_views,
+            alert_subscriptions=metrics.alert_subscriptions,
+            feedback_count=metrics.feedback_count,
+            beta_leads=metrics.beta_leads,
+            average_quality_score=metrics.average_quality_score,
+            blocker_count=quality.blocker_count,
+            average_satisfaction=metrics.average_satisfaction,
+            purchase_intent_rate=metrics.purchase_intent_rate,
+            conversion_ready_rate=metrics.conversion_ready_rate,
+            checks=checks,
+            next_actions=[
+                check.recommendation
+                for check in checks
+                if check.status != CheckStatus.ok
+            ][:4],
         )
 
     def _ensure_schema(self) -> None:
@@ -2129,6 +2230,110 @@ def _ensure_column(
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _readiness_check(
+    *,
+    area: str,
+    label: str,
+    value: int | float,
+    warning_threshold: int | float,
+    ok_threshold: int | float,
+    metric: str,
+    recommendation: str,
+) -> BetaReadinessCheck:
+    if value >= ok_threshold:
+        status = CheckStatus.ok
+        recommendation = f"{label} 기준은 공개 베타 기준을 충족했습니다."
+    elif value >= warning_threshold:
+        status = CheckStatus.warning
+    else:
+        status = CheckStatus.blocker
+    return BetaReadinessCheck(
+        area=area,
+        label=label,
+        status=status,
+        metric=metric,
+        recommendation=recommendation,
+    )
+
+
+def _quality_readiness_check(quality: QualityDashboard) -> BetaReadinessCheck:
+    if quality.audit_count == 0:
+        return BetaReadinessCheck(
+            area="quality",
+            label="품질 감사",
+            status=CheckStatus.blocker,
+            metric="품질 감사 0건",
+            recommendation="대표 분석을 실행해 품질 점수와 공개 차단 사유를 먼저 저장하세요.",
+        )
+    if quality.blocker_count > 0:
+        return BetaReadinessCheck(
+            area="quality",
+            label="품질 감사",
+            status=CheckStatus.blocker,
+            metric=f"평균 {quality.average_quality_score}점 / 차단 {quality.blocker_count}건",
+            recommendation=(
+                "공개 차단 사유가 있는 분석은 검수하거나 입력 조건을 "
+                "보강한 뒤 다시 실행하세요."
+            ),
+        )
+    if quality.average_quality_score < 80:
+        return BetaReadinessCheck(
+            area="quality",
+            label="품질 감사",
+            status=CheckStatus.warning,
+            metric=f"평균 {quality.average_quality_score}점 / 경고 {quality.warning_count}건",
+            recommendation=(
+                "출처, 옵션 검수, 구매 판정 경고를 줄여 평균 품질 "
+                "80점 이상으로 올리세요."
+            ),
+        )
+    return BetaReadinessCheck(
+        area="quality",
+        label="품질 감사",
+        status=CheckStatus.ok,
+        metric=f"평균 {quality.average_quality_score}점 / 차단 0건",
+        recommendation="품질 감사 기준은 공개 베타 기준을 충족했습니다.",
+    )
+
+
+def _launch_readiness_score(metrics: OperationsMetrics, quality: QualityDashboard) -> float:
+    activation = min(100.0, metrics.analysis_runs * 10 + metrics.saved_reports * 12)
+    sharing = min(100.0, metrics.shared_reports * 22 + metrics.public_share_views * 4)
+    retention = min(100.0, metrics.alert_subscriptions * 25)
+    feedback = min(
+        100.0,
+        metrics.feedback_count * 8
+        + metrics.average_satisfaction * 8
+        + metrics.purchase_intent_rate * 25,
+    )
+    lead = min(100.0, metrics.beta_leads * 10)
+    quality_score = max(
+        0.0,
+        metrics.average_quality_score
+        - quality.blocker_count * 18
+        - quality.warning_count * 1.5,
+    )
+    score = (
+        activation * 0.18
+        + sharing * 0.16
+        + retention * 0.12
+        + feedback * 0.18
+        + lead * 0.12
+        + quality_score * 0.24
+    )
+    return round(min(100.0, max(0.0, score)), 2)
+
+
+def _readiness_label(score: float) -> str:
+    if score >= 85:
+        return "공개 확대 가능"
+    if score >= 70:
+        return "제한 베타 가능"
+    if score >= 45:
+        return "파일럿 보강 필요"
+    return "출시 전 검증 부족"
 
 
 def _default_channel_name(channel: str) -> str:

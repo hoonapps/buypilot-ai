@@ -74,6 +74,7 @@ def test_admin_page_exposes_review_console() -> None:
     assert "품질/비용 감사" in response.text
     assert "사용자 피드백" in response.text
     assert "베타 리드" in response.text
+    assert "베타 출시 준비도" in response.text
 
 
 def test_trust_policy_endpoint_exposes_cache_and_fairness_rules() -> None:
@@ -284,6 +285,10 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     assert report_after_share.json()["share_token"] == share_payload["share_token"]
     assert report_after_share.json()["share_views"] >= 2
 
+    metrics_after_share = client.get("/ops/metrics", headers=WORKSPACE_A).json()
+    assert metrics_after_share["shared_reports"] >= 1
+    assert metrics_after_share["public_share_views"] >= 2
+
     revoked_share = client.delete(
         f"/reports/{saved_payload['report_id']}/share",
         headers=WORKSPACE_A,
@@ -487,6 +492,24 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     assert metrics_after_feedback["beta_leads"] >= 1
     assert metrics_after_feedback["average_satisfaction"] >= 5
     assert metrics_after_feedback["purchase_intent_rate"] > 0
+    assert metrics_after_feedback["public_share_views"] >= 2
+
+    readiness = client.get("/beta/readiness", headers=WORKSPACE_A)
+    assert readiness.status_code == 200
+    readiness_payload = readiness.json()
+    assert readiness_payload["workspace_id"].startswith("workspace_")
+    assert readiness_payload["launch_readiness_score"] > 0
+    assert readiness_payload["readiness_label"]
+    assert readiness_payload["analysis_runs"] >= 1
+    assert readiness_payload["feedback_count"] >= 1
+    assert readiness_payload["beta_leads"] >= 1
+    assert readiness_payload["public_share_views"] >= 2
+    assert len(readiness_payload["checks"]) >= 5
+    assert readiness_payload["next_actions"]
+
+    isolated_readiness = client.get("/beta/readiness", headers=WORKSPACE_B)
+    assert isolated_readiness.status_code == 200
+    assert isolated_readiness.json()["public_share_views"] == 0
 
 
 def test_alert_preview_endpoint_returns_three_targets() -> None:

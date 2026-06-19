@@ -23,6 +23,7 @@ from specpilot_ai.core.models import (
     AnalyzeResponse,
     BetaLead,
     BetaLeadRequest,
+    BetaReadinessDashboard,
     Category,
     FeedbackRecord,
     FeedbackRequest,
@@ -522,6 +523,13 @@ def list_beta_leads(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> list[BetaLead]:
     return _store().list_beta_leads_for_workspace(workspace.workspace_id, limit=limit)
+
+
+@app.get("/beta/readiness", response_model=BetaReadinessDashboard)
+def beta_readiness(
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> BetaReadinessDashboard:
+    return _store().beta_readiness_for_workspace(workspace.workspace_id)
 
 
 @app.get("/sources/status", response_model=list[SourceAdapterStatus])

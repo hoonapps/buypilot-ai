@@ -120,6 +120,12 @@ def admin_page_html() -> str:
         <div class="grid cards" id="metrics"></div>
       </div>
     </section>
+    <section class="panel" style="margin-top:14px">
+      <h2>베타 출시 준비도</h2>
+      <p>분석, 공유, 알림, 피드백, 리드, 품질 차단 사유를 묶어 공개 확대 가능성을 판단합니다.</p>
+      <div class="grid cards" id="beta-readiness-summary"></div>
+      <div class="quality-list" id="beta-readiness-checks" style="margin-top:12px"></div>
+    </section>
     <section class="grid top-grid" style="margin-top:14px">
       <div class="panel">
         <h2>소스 어댑터</h2>
@@ -202,7 +208,8 @@ def admin_page_html() -> str:
         monitorResponse,
         refreshRunResponse,
         providerResponse,
-        scheduleResponse
+        scheduleResponse,
+        readinessResponse
       ] = await Promise.all([
         fetch('/admin/dashboard'),
         fetch('/ops/quality'),
@@ -215,7 +222,8 @@ def admin_page_html() -> str:
         fetch('/sources/monitors'),
         fetch('/sources/refresh-runs'),
         fetch('/sources/providers'),
-        fetch('/sources/schedule')
+        fetch('/sources/schedule'),
+        fetch('/beta/readiness')
       ]);
       const data = await response.json();
       const quality = await qualityResponse.json();
@@ -229,7 +237,9 @@ def admin_page_html() -> str:
       const refreshRuns = await refreshRunResponse.json();
       const providers = await providerResponse.json();
       const schedule = await scheduleResponse.json();
+      const readiness = await readinessResponse.json();
       renderMetrics(data.metrics);
+      renderBetaReadiness(readiness);
       renderSources(data.adapter_statuses);
       renderReviews(data.pending_reviews);
       renderSourceSchedule(schedule);
@@ -248,6 +258,8 @@ def admin_page_html() -> str:
       document.querySelector('#metrics').innerHTML = [
         ['분석', metrics.analysis_runs],
         ['저장', metrics.saved_reports],
+        ['공유', metrics.shared_reports],
+        ['공개 조회', metrics.public_share_views],
         ['알림', metrics.alert_subscriptions],
         ['발송 큐', metrics.alert_events],
         ['채널', metrics.alert_channels],
@@ -270,6 +282,33 @@ def admin_page_html() -> str:
         ['만족도', metrics.average_satisfaction],
         ['구매 의향', Math.round(metrics.purchase_intent_rate * 100) + '%']
       ].map(([label, value]) => `<div class="card"><span class="kicker">${label}</span><div class="metric">${value}</div></div>`).join('');
+    }
+
+    function renderBetaReadiness(readiness) {
+      document.querySelector('#beta-readiness-summary').innerHTML = [
+        ['준비도', Math.round(readiness.launch_readiness_score) + '점'],
+        ['상태', readiness.readiness_label],
+        ['공유 조회', readiness.public_share_views],
+        ['구매 의향', Math.round(readiness.purchase_intent_rate * 100) + '%']
+      ].map(([label, value]) => `<div class="card"><span class="kicker">${label}</span><div class="metric">${value}</div></div>`).join('');
+      const actions = readiness.next_actions || [];
+      document.querySelector('#beta-readiness-checks').innerHTML = `
+        ${(readiness.checks || []).map((check) => {
+          const tone = check.status === 'blocker' ? 'danger' : check.status === 'warning' ? 'warn' : '';
+          return `
+            <article class="review-item quality-item ${tone}">
+              <span class="kicker">${check.area} · ${check.status}</span>
+              <h3>${check.label} · ${check.metric}</h3>
+              <p>${check.recommendation}</p>
+            </article>
+          `;
+        }).join('')}
+        <article class="review-item">
+          <span class="kicker">Next actions</span>
+          <h3>다음 실행 항목</h3>
+          <ul>${actions.length ? actions.map((item) => `<li>${item}</li>`).join('') : '<li>현재 기준으로 추가 차단 항목이 없습니다.</li>'}</ul>
+        </article>
+      `;
     }
 
     function renderSources(sources) {
