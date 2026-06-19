@@ -36,6 +36,7 @@ from specpilot_ai.core.models import (
     IntakeDiagnosisRequest,
     IntakeDiagnosisResponse,
     OperationsMetrics,
+    OpsRegressionDashboard,
     PriceAlertPlan,
     ProductBrief,
     PublicReport,
@@ -465,6 +466,17 @@ def quality_dashboard(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> QualityDashboard:
     return _store().quality_dashboard_for_workspace(workspace.workspace_id, limit=limit)
+
+
+@app.get("/ops/regression", response_model=OpsRegressionDashboard)
+def ops_regression_dashboard(
+    window_size: int = 5,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> OpsRegressionDashboard:
+    return _store().ops_regression_for_workspace(
+        workspace.workspace_id,
+        window_size=window_size,
+    )
 
 
 @app.get("/ops/traces", response_model=list[TraceRunSummary])

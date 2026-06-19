@@ -160,6 +160,11 @@ def admin_page_html() -> str:
       <div class="quality-list" id="quality"></div>
     </section>
     <section class="panel" style="margin-top:14px">
+      <h2>품질 회귀 모니터</h2>
+      <p>최근 분석 품질, 비용 변화, provider 차단율을 비교해 출시 안정성을 확인합니다.</p>
+      <div class="quality-list" id="ops-regression"></div>
+    </section>
+    <section class="panel" style="margin-top:14px">
       <h2>Trace 저장소</h2>
       <p>분석별 LangGraph 단계 span, 품질 점수, 경고/차단 수를 확인합니다.</p>
       <div class="quality-list" id="traces"></div>
@@ -226,7 +231,8 @@ def admin_page_html() -> str:
         scheduleResponse,
         readinessResponse,
         betaCohortResponse,
-        betaBacklogResponse
+        betaBacklogResponse,
+        regressionResponse
       ] = await Promise.all([
         fetch('/admin/dashboard'),
         fetch('/ops/quality'),
@@ -242,7 +248,8 @@ def admin_page_html() -> str:
         fetch('/sources/schedule'),
         fetch('/beta/readiness'),
         fetch('/beta/cohorts'),
-        fetch('/beta/backlog')
+        fetch('/beta/backlog'),
+        fetch('/ops/regression')
       ]);
       const data = await response.json();
       const quality = await qualityResponse.json();
@@ -259,6 +266,7 @@ def admin_page_html() -> str:
       const readiness = await readinessResponse.json();
       const betaCohorts = await betaCohortResponse.json();
       const betaBacklog = await betaBacklogResponse.json();
+      const regression = await regressionResponse.json();
       renderMetrics(data.metrics);
       renderBetaReadiness(readiness);
       renderSources(data.adapter_statuses);
@@ -268,6 +276,7 @@ def admin_page_html() -> str:
       renderSourceRefreshRuns(refreshRuns);
       renderSourceProviders(providers);
       renderQuality(quality);
+      renderOpsRegression(regression);
       renderFeedback(feedback);
       renderBetaLeads(betaLeads);
       renderBetaCohorts(betaCohorts);
@@ -443,6 +452,33 @@ def admin_page_html() -> str:
           </article>
         `;
       }).join('');
+    }
+
+    function renderOpsRegression(regression) {
+      const root = document.querySelector('#ops-regression');
+      const tone = regression.status === 'blocker'
+        ? 'danger'
+        : regression.status === 'warning' ? 'warn' : '';
+      const providerCards = regression.provider_reliability.length
+        ? regression.provider_reliability.map((item) => `
+          <li>${item.provider_name} · 차단 ${Math.round(item.blocked_rate * 100)}% · ${item.recommendation}</li>
+        `).join('')
+        : '<li>아직 provider fetch 이력이 없습니다.</li>';
+      const risks = regression.risk_flags.length
+        ? regression.risk_flags.map((item) => `<li>${item}</li>`).join('')
+        : '<li>현재 회귀 신호 없음</li>';
+      root.innerHTML = `
+        <article class="review-item quality-item ${tone}">
+          <span class="kicker">release health · ${regression.status}</span>
+          <h3>최근 품질 ${regression.recent.average_quality_score}점 · 변화 ${regression.quality_delta}점</h3>
+          <p>${regression.summary}</p>
+          <p>최근 비용 ${Math.round(regression.recent.average_cost_krw)}원 / 이전 비용 ${Math.round(regression.previous.average_cost_krw)}원 / 비용 변화율 ${Math.round(regression.cost_delta_rate * 100)}%</p>
+          <h4>리스크 플래그</h4>
+          <ul>${risks}</ul>
+          <h4>provider 차단율</h4>
+          <ul>${providerCards}</ul>
+        </article>
+      `;
     }
 
     function renderTraces(items) {

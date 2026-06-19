@@ -32,6 +32,9 @@ from specpilot_ai.core.models import (
     FeedbackRecord,
     FeedbackRequest,
     OperationsMetrics,
+    OpsRegressionDashboard,
+    OpsRegressionPeriod,
+    ProviderReliabilityMetric,
     ProviderReviewStatus,
     PublicReport,
     QualityDashboard,
@@ -854,6 +857,85 @@ class SpecPilotStore:
             warning_count=int(summary["warning_count"] or 0),
             blocker_count=int(summary["blocker_count"] or 0),
             recent_audits=audits,
+        )
+
+    def ops_regression_for_workspace(
+        self,
+        workspace_id: str,
+        window_size: int = 5,
+    ) -> OpsRegressionDashboard:
+        window = max(1, min(window_size, 50))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT trace_id, quality_score, estimated_cost_krw,
+                       warning_count, blocker_count, created_at
+                FROM analysis_runs
+                WHERE workspace_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (workspace_id, window * 2),
+            ).fetchall()
+            provider_rows = conn.execute(
+                """
+                SELECT
+                    l.provider_id,
+                    COALESCE(p.provider_name, l.host) AS provider_name,
+                    l.host,
+                    COUNT(*) AS fetch_count,
+                    SUM(CASE WHEN l.status = 'allowed' THEN 1 ELSE 0 END) AS allowed_count,
+                    SUM(CASE WHEN l.status = 'blocked' THEN 1 ELSE 0 END) AS blocked_count
+                FROM source_provider_fetch_log l
+                LEFT JOIN source_provider_policies p
+                  ON p.provider_id = l.provider_id
+                 AND p.workspace_id = l.workspace_id
+                WHERE l.workspace_id = ?
+                GROUP BY l.provider_id, l.host, provider_name
+                ORDER BY fetch_count DESC, blocked_count DESC
+                LIMIT 20
+                """,
+                (workspace_id,),
+            ).fetchall()
+        recent = _ops_regression_period("recent", rows[:window])
+        previous = _ops_regression_period("previous", rows[window : window * 2])
+        quality_delta = round(recent.average_quality_score - previous.average_quality_score, 2)
+        cost_delta = round(recent.average_cost_krw - previous.average_cost_krw, 2)
+        cost_delta_rate = (
+            round(cost_delta / previous.average_cost_krw, 4)
+            if previous.average_cost_krw
+            else 0
+        )
+        provider_reliability = [
+            _provider_reliability_metric(row) for row in provider_rows
+        ]
+        status, risk_flags, next_actions = _ops_regression_status(
+            recent=recent,
+            previous=previous,
+            quality_delta=quality_delta,
+            cost_delta_rate=cost_delta_rate,
+            provider_reliability=provider_reliability,
+        )
+        summary = _ops_regression_summary(
+            status=status,
+            recent=recent,
+            previous=previous,
+            quality_delta=quality_delta,
+            cost_delta_rate=cost_delta_rate,
+        )
+        return OpsRegressionDashboard(
+            workspace_id=workspace_id,
+            status=status,
+            summary=summary,
+            window_size=window,
+            recent=recent,
+            previous=previous,
+            quality_delta=quality_delta,
+            cost_delta_krw=cost_delta,
+            cost_delta_rate=cost_delta_rate,
+            provider_reliability=provider_reliability,
+            risk_flags=risk_flags,
+            next_actions=next_actions,
         )
 
     def create_feedback_for_workspace(
@@ -2681,6 +2763,138 @@ def _cohort_keywords(request: BetaCohortRequest) -> list[str]:
 
 def _like_pattern(value: str) -> str:
     return f"%{value}%"
+
+
+def _ops_regression_period(label: str, rows: list[sqlite3.Row]) -> OpsRegressionPeriod:
+    if not rows:
+        return OpsRegressionPeriod(label=label)
+    run_count = len(rows)
+    quality = sum(float(row["quality_score"] or 0) for row in rows) / run_count
+    cost = sum(float(row["estimated_cost_krw"] or 0) for row in rows) / run_count
+    warnings = sum(int(row["warning_count"] or 0) for row in rows)
+    blockers = sum(int(row["blocker_count"] or 0) for row in rows)
+    created_values = [row["created_at"] for row in rows if row["created_at"]]
+    return OpsRegressionPeriod(
+        label=label,
+        run_count=run_count,
+        average_quality_score=round(quality, 2),
+        average_cost_krw=round(cost, 2),
+        warning_count=warnings,
+        blocker_count=blockers,
+        started_at=min(created_values) if created_values else None,
+        ended_at=max(created_values) if created_values else None,
+    )
+
+
+def _provider_reliability_metric(row: sqlite3.Row) -> ProviderReliabilityMetric:
+    fetch_count = int(row["fetch_count"] or 0)
+    allowed_count = int(row["allowed_count"] or 0)
+    blocked_count = int(row["blocked_count"] or 0)
+    blocked_rate = round(blocked_count / fetch_count, 4) if fetch_count else 0
+    if blocked_rate >= 0.5 and blocked_count >= 2:
+        status = CheckStatus.blocker
+        recommendation = "provider 정책, robots/약관 승인, rate limit을 즉시 재검토하세요."
+    elif blocked_rate >= 0.25:
+        status = CheckStatus.warning
+        recommendation = "차단 사유를 확인하고 host 정책 또는 수집 cadence를 조정하세요."
+    else:
+        status = CheckStatus.ok
+        recommendation = "현재 provider fetch 품질은 안정적입니다."
+    return ProviderReliabilityMetric(
+        provider_id=row["provider_id"],
+        provider_name=row["provider_name"],
+        host=row["host"],
+        fetch_count=fetch_count,
+        allowed_count=allowed_count,
+        blocked_count=blocked_count,
+        blocked_rate=blocked_rate,
+        status=status,
+        recommendation=recommendation,
+    )
+
+
+def _ops_regression_status(
+    *,
+    recent: OpsRegressionPeriod,
+    previous: OpsRegressionPeriod,
+    quality_delta: float,
+    cost_delta_rate: float,
+    provider_reliability: list[ProviderReliabilityMetric],
+) -> tuple[CheckStatus, list[str], list[str]]:
+    risk_flags: list[str] = []
+    next_actions: list[str] = []
+    if recent.run_count == 0:
+        risk_flags.append("최근 분석 실행 데이터가 없습니다.")
+        next_actions.append("대표 구매 시나리오 분석을 먼저 실행해 기준선을 만드세요.")
+        return CheckStatus.warning, risk_flags, next_actions
+    if previous.run_count == 0:
+        risk_flags.append("이전 비교 구간이 없어 회귀 여부를 제한적으로만 판단합니다.")
+        next_actions.append("동일 시나리오를 반복 실행해 품질 기준선을 확보하세요.")
+    if recent.average_quality_score < 75:
+        risk_flags.append(f"최근 평균 품질이 {recent.average_quality_score}점으로 낮습니다.")
+        next_actions.append("공개 차단 사유, 출처 신뢰, 옵션 검수표를 우선 보강하세요.")
+    if previous.run_count and quality_delta <= -8:
+        risk_flags.append(f"품질 점수가 이전 구간 대비 {abs(quality_delta)}점 하락했습니다.")
+        next_actions.append("최근 trace span과 품질 감사 노트를 비교해 하락 원인을 분리하세요.")
+    if recent.blocker_count > previous.blocker_count and recent.blocker_count > 0:
+        risk_flags.append(f"최근 blocker가 {recent.blocker_count}건으로 증가했습니다.")
+        next_actions.append("blocker가 있는 공개 리포트 생성을 중단하고 백로그로 전환하세요.")
+    if cost_delta_rate >= 0.3:
+        risk_flags.append(
+            f"분석당 비용이 이전 구간 대비 {round(cost_delta_rate * 100)}% 증가했습니다."
+        )
+        next_actions.append("source 호출 수와 LLM token 사용량 증가 원인을 확인하세요.")
+    blocked_providers = [
+        item
+        for item in provider_reliability
+        if item.status in {CheckStatus.warning, CheckStatus.blocker}
+    ]
+    if blocked_providers:
+        names = ", ".join(item.provider_name for item in blocked_providers[:3])
+        risk_flags.append(f"provider fetch 차단율 주의: {names}")
+        next_actions.append("provider별 robots/약관 승인과 cadence를 재점검하세요.")
+    if not next_actions:
+        next_actions.append("현재 회귀 신호가 없으므로 베타 cohort 확대를 유지하세요.")
+    status = CheckStatus.ok
+    if any(item.status == CheckStatus.blocker for item in provider_reliability):
+        status = CheckStatus.blocker
+    if recent.average_quality_score < 70 or recent.blocker_count >= 3:
+        status = CheckStatus.blocker
+    elif risk_flags and status != CheckStatus.blocker:
+        status = CheckStatus.warning
+    return status, risk_flags, _dedupe_strings(next_actions)
+
+
+def _ops_regression_summary(
+    *,
+    status: CheckStatus,
+    recent: OpsRegressionPeriod,
+    previous: OpsRegressionPeriod,
+    quality_delta: float,
+    cost_delta_rate: float,
+) -> str:
+    if recent.run_count == 0:
+        return "회귀 모니터링을 위한 분석 실행 데이터가 아직 없습니다."
+    direction = "상승" if quality_delta >= 0 else "하락"
+    if previous.run_count == 0:
+        return (
+            f"최근 {recent.run_count}건 평균 품질은 "
+            f"{recent.average_quality_score}점이며 비교 기준선이 더 필요합니다."
+        )
+    return (
+        f"최근 {recent.run_count}건 평균 품질은 {recent.average_quality_score}점으로 "
+        f"이전 구간 대비 {abs(quality_delta)}점 {direction}했고, "
+        f"분석당 비용 변화율은 {round(cost_delta_rate * 100)}%입니다. "
+        f"현재 상태는 {status.value}입니다."
+    )
+
+
+def _dedupe_strings(items: list[str]) -> list[str]:
+    deduped: list[str] = []
+    for item in items:
+        if item not in deduped:
+            deduped.append(item)
+    return deduped
 
 
 def _cohort_report_recommendations(

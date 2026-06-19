@@ -72,6 +72,7 @@ def test_admin_page_exposes_review_console() -> None:
     assert "발송 시도" in response.text
     assert "Trace 저장소" in response.text
     assert "품질/비용 감사" in response.text
+    assert "품질 회귀 모니터" in response.text
     assert "사용자 피드백" in response.text
     assert "베타 리드" in response.text
     assert "베타 출시 준비도" in response.text
@@ -426,6 +427,15 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     assert quality_payload["total_estimated_cost_krw"] > 0
     assert any(item["trace_id"] == trace_id for item in quality_payload["recent_audits"])
 
+    regression = client.get("/ops/regression", headers=WORKSPACE_A)
+    assert regression.status_code == 200
+    regression_payload = regression.json()
+    assert regression_payload["workspace_id"] == saved_payload["workspace_id"]
+    assert regression_payload["recent"]["run_count"] >= 1
+    assert regression_payload["recent"]["average_quality_score"] > 0
+    assert regression_payload["status"] in {"ok", "warning", "blocker"}
+    assert regression_payload["next_actions"]
+
     trace_runs = client.get("/ops/traces", headers=WORKSPACE_A)
     assert trace_runs.status_code == 200
     assert any(
@@ -757,6 +767,14 @@ def test_source_collection_and_admin_review_flow() -> None:
     )
     assert live_without_policy.status_code == 403
     assert "provider" in live_without_policy.json()["detail"]
+
+    regression_after_block = client.get("/ops/regression", headers=WORKSPACE_A)
+    assert regression_after_block.status_code == 200
+    assert any(
+        item["host"] == f"unapproved-{source_slug}.example.net"
+        and item["blocked_count"] >= 1
+        for item in regression_after_block.json()["provider_reliability"]
+    )
 
     pending_provider = client.post(
         "/sources/providers",

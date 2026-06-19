@@ -475,6 +475,44 @@ class QualityDashboard(BaseModel):
     recent_audits: list[AnalysisQualityAudit] = Field(default_factory=list)
 
 
+class OpsRegressionPeriod(BaseModel):
+    label: str
+    run_count: int = 0
+    average_quality_score: float = 0
+    average_cost_krw: float = 0
+    warning_count: int = 0
+    blocker_count: int = 0
+    started_at: str | None = None
+    ended_at: str | None = None
+
+
+class ProviderReliabilityMetric(BaseModel):
+    provider_id: str | None = None
+    provider_name: str
+    host: str
+    fetch_count: int = 0
+    allowed_count: int = 0
+    blocked_count: int = 0
+    blocked_rate: float = 0
+    status: CheckStatus = CheckStatus.ok
+    recommendation: str = ""
+
+
+class OpsRegressionDashboard(BaseModel):
+    workspace_id: str
+    status: CheckStatus
+    summary: str
+    window_size: int
+    recent: OpsRegressionPeriod
+    previous: OpsRegressionPeriod
+    quality_delta: float = 0
+    cost_delta_krw: float = 0
+    cost_delta_rate: float = 0
+    provider_reliability: list[ProviderReliabilityMetric] = Field(default_factory=list)
+    risk_flags: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class FeedbackRequest(BaseModel):
     trace_id: str
     rating: int = Field(ge=1, le=5)

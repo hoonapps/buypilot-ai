@@ -58,6 +58,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 개선 백로그 운영 상태 관리: 담당자, 진행 상태, 운영 메모를 워크스페이스별로 저장
 - 운영 지표 API
 - 분석 품질 감사와 예상 비용 대시보드
+- 품질 회귀 모니터: 최근/이전 분석 품질, 비용 변화, provider 차단율 비교
 - 가격/리뷰/벤치마크/공식 스토어 소스 어댑터 계약
 - 실제 상품 URL/HTML 스냅샷 인입과 관리자 검수 큐 등록
 - URL 모니터 등록, 수집 refresh 실행, refresh 이력 추적
@@ -428,6 +429,13 @@ curl http://127.0.0.1:8000/ops/quality \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
+출시 후 품질 회귀와 provider 차단율을 확인합니다.
+
+```bash
+curl "http://127.0.0.1:8000/ops/regression?window_size=5" \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
 저장된 trace 목록:
 
 ```bash
@@ -691,6 +699,7 @@ make docker-build
 - `/feedback`, `/beta/leads`, `/beta/readiness`, `/beta/cohorts`, `/beta/backlog`가 만족도, 베타 리드, 출시 준비도, cohort, 개선 백로그를 워크스페이스별로 격리하는지
 - `/beta/backlog/{backlog_id}`, `/beta/cohorts/{cohort_id}/report`, `/beta/cohorts/{cohort_id}/report.md`가 백로그 운영 상태와 cohort export를 워크스페이스별로 처리하는지
 - `/ops/quality`가 품질 감사와 예상 비용을 워크스페이스별로 반환하는지
+- `/ops/regression`이 최근/이전 품질 구간, 비용 변화, provider 차단율을 워크스페이스별로 집계하는지
 - `/sources/status`, `/sources/collect`, `/sources/ingest-url`, `/sources/monitors`, `/sources/schedule`, `/sources/refresh`, `/sources/refresh-due`, `/sources/refresh-runs`, `/sources/providers`, `/sources/providers/check`, `/admin/reviews`, `/admin/dashboard`가 동작하는지
 - `/policy/trust`가 캐시, 제휴 고지, 공정성 정책을 반환하는지
 - `/health`, `/ready` 운영 엔드포인트가 동작하는지
@@ -722,6 +731,7 @@ GitHub Actions는 `main` push와 PR에서 다음을 실행합니다.
 - 제휴 링크를 붙일 경우 추천 기준과 제휴 고지를 분리해서 노출해야 합니다.
 - 신뢰도 0.8 미만 또는 리스크 플래그가 있는 근거는 관리자 검수 큐에 넣습니다.
 - 공개 전 품질 점수, 경고 수, 차단 사유, 예상 비용을 운영 콘솔에서 확인합니다.
+- 품질 회귀 모니터는 최근 분석 구간과 이전 구간을 비교해 품질 하락, 비용 급등, provider 차단율을 함께 봅니다.
 - 각 분석의 LangGraph 단계는 별도 trace span으로 저장해 운영 콘솔에서 품질 점수와 함께 추적합니다.
 - 공개 공유 리포트는 토큰 기반으로 열고, 워크스페이스 소유자만 공유를 생성하거나 해제합니다.
 - 구매 판정은 점수만으로 결정하지 않고 가격 목표가, 호환성 차단, 출처 검수 필요 여부를 함께 봅니다.
@@ -741,4 +751,4 @@ GitHub Actions는 `main` push와 PR에서 다음을 실행합니다.
 - 가격 비교/오픈마켓/공식 스토어의 공식 provider 계약과 외부 cron/Cloud Scheduler 배포 연결
 - 실제 이메일/SMS/웹훅 provider credential 연결과 운영 rate limit 적용
 - LangSmith 또는 OpenTelemetry 외부 export 연동
-- 운영자 액션 SLA, 완료 리포트 자동 요약, provider별 비용/품질 회귀 모니터링
+- 운영자 액션 SLA, 완료 리포트 자동 요약, 외부 observability export
