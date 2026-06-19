@@ -50,7 +50,7 @@
 - cohort JSON/Markdown 리포트 export 확인
 - 개선 백로그 담당자, 상태, SLA, 완료 요약 저장과 워크스페이스 격리 확인
 - 소스 어댑터 상태 진단
-- 실제 상품 URL/HTML 스냅샷 인입과 검수 큐 등록
+- 실제 상품 URL/HTML 스냅샷에서 실구매가, 배송비, 할인, 재고, 모델명 일치도 추출 후 검수 큐 등록
 - URL 모니터 등록, 수집 refresh 실행, refresh 성공/실패 이력 확인
 - Due schedule preview와 due 모니터 refresh 실행
 - Source provider 정책, robots/약관 승인, live fetch rate limit 게이트 확인
@@ -91,7 +91,7 @@
 | 구매 결과 | 저장 리포트 기준 실제 구매, 이탈, 지연, 반품/취소 상태와 최종 결제 금액 차이, 만족도, 학습 신호를 워크스페이스별로 저장해야 한다 |
 | 학습 인사이트 | 구매 결과, 결제 전 검수 차단, 피드백 만족도를 제품별 전환율, 반품률, 가격 차이, 개선 액션으로 집계하고 워크스페이스별로 격리해야 한다 |
 | 출처 신뢰 | 출처별 신뢰도, 캐시 TTL, 검수 필요 여부가 응답과 UI에 노출되어야 한다 |
-| 외부 URL 인입 | 내부망/private IP URL을 차단하고 상품 URL/HTML 스냅샷에서 추출한 가격 근거를 검수 큐에 등록해야 한다 |
+| 외부 URL 인입 | 내부망/private IP/사용자 정보 포함 URL을 차단하고 상품 URL/HTML 스냅샷에서 표시 가격, 배송비, 할인, 실구매가, 재고, 모델명 일치도 근거를 추출해 검수 큐에 등록해야 한다 |
 | URL 모니터 | 반복 수집 대상 URL, refresh 성공/실패, live fetch 여부, 연결된 검수 항목을 운영 콘솔에서 확인할 수 있어야 한다 |
 | Due refresh | cadence와 마지막 실행 시각 기준으로 지금 실행할 URL 모니터만 선별하고 실행할 수 있어야 한다 |
 | Provider 정책 | live fetch는 승인된 host, robots/약관 승인, 시간당 rate limit을 통과해야 실행되어야 한다 |

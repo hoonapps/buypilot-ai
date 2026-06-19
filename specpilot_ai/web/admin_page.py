@@ -706,6 +706,8 @@ def admin_page_html() -> str:
           <span class="kicker">${item.source.kind} · ${item.source.adapter_id}</span>
           <h3>${item.source.title}</h3>
           <p>${item.source.evidence_text}</p>
+          <p>실구매가: ${item.source.effective_price_krw ? item.source.effective_price_krw.toLocaleString() + '원' : '확인 필요'} · 재고: ${item.source.availability_status || 'unknown'} · 모델명: ${item.source.model_match_status || 'warning'}</p>
+          <ul>${(item.source.extraction_signals || []).map((signal) => `<li>${signal}</li>`).join('') || '<li>추출 신호 없음</li>'}</ul>
           <p>사유: ${item.reason}</p>
           <div class="actions">
             <button class="primary" onclick="decide('${item.review_id}', 'approved')">승인</button>

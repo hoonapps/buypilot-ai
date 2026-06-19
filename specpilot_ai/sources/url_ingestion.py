@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from specpilot_ai.core.models import (
+    CheckStatus,
     ReviewQueueItem,
     ReviewStatus,
     SourceCandidate,
@@ -18,7 +19,17 @@ from specpilot_ai.core.models import (
 
 MAX_HTML_BYTES = 220_000
 PRICE_PATTERN = re.compile(r"(?<!\d)(\d{1,3}(?:,\d{3})+|\d{5,8})\s*원")
+FREE_SHIPPING_PATTERN = re.compile(r"(무료\s*배송|배송비\s*무료|무배)")
+SHIPPING_PATTERN = re.compile(
+    r"(?:배송비|배송료|택배비)\s*[:：]?\s*(\d{1,3}(?:,\d{3})+|\d{3,6})\s*원"
+)
+DISCOUNT_PATTERN = re.compile(
+    r"(?:쿠폰|카드\s*할인|즉시\s*할인|청구\s*할인|할인)\s*[:：]?\s*(\d{1,3}(?:,\d{3})+|\d{3,7})\s*원"
+)
 BLOCKED_HOSTS = {"localhost", "metadata.google.internal"}
+SOLD_OUT_KEYWORDS = ("품절", "일시품절", "판매 종료", "판매종료", "재고 없음", "재고없음")
+LOW_STOCK_KEYWORDS = ("재고 부족", "재고부족", "마감 임박", "한정 수량", "품절 임박")
+IN_STOCK_KEYWORDS = ("구매 가능", "판매중", "재고 있음", "재고있음", "바로 구매", "장바구니")
 
 
 class _HtmlSnapshotParser(HTMLParser):
@@ -72,9 +83,39 @@ def ingest_source_url(request: SourceUrlIngestRequest) -> SourceUrlIngestRespons
     title = snapshot.title or request.expected_model or request.url
     model_name = request.expected_model.strip() or _model_from_title(title)
     evidence_text = _evidence_text(snapshot)
-    price = _extract_price(" ".join([title, evidence_text]))
-    risk_flags = _risk_flags(request, price, fetched_live, snapshot)
-    confidence = _confidence(price, snapshot, fetched_live)
+    extraction_text = " ".join([title, evidence_text])
+    price = _extract_price(extraction_text)
+    shipping_fee = _extract_shipping_fee(extraction_text)
+    discount = _extract_discount(extraction_text)
+    effective_price = _effective_price(price, shipping_fee, discount)
+    availability = _availability_status(extraction_text)
+    model_match_status = _model_match_status(request.expected_model, extraction_text)
+    extraction_signals = _extraction_signals(
+        price=price,
+        shipping_fee=shipping_fee,
+        discount=discount,
+        effective_price=effective_price,
+        availability=availability,
+        model_match_status=model_match_status,
+        fetched_live=fetched_live,
+    )
+    risk_flags = _risk_flags(
+        request,
+        price,
+        shipping_fee,
+        availability,
+        model_match_status,
+        fetched_live,
+        snapshot,
+    )
+    confidence = _confidence(
+        price,
+        shipping_fee,
+        availability,
+        model_match_status,
+        snapshot,
+        fetched_live,
+    )
     source_id = _source_id(request.url, request.kind, model_name, evidence_text)
     candidate = SourceCandidate(
         source_id=source_id,
@@ -84,12 +125,18 @@ def ingest_source_url(request: SourceUrlIngestRequest) -> SourceUrlIngestRespons
         url=request.url,
         normalized_model=_normalize_model(model_name),
         extracted_price_krw=price,
+        shipping_fee_krw=shipping_fee,
+        coupon_or_card_benefit_krw=discount,
+        effective_price_krw=effective_price,
+        availability_status=availability,
+        model_match_status=model_match_status,
         seller=request.seller or _seller_from_url(request.url),
         evidence_text=evidence_text[:500],
         confidence=confidence,
         collected_at=_now(),
         needs_review=True,
         risk_flags=risk_flags,
+        extraction_signals=extraction_signals,
     )
     review_item = ReviewQueueItem(
         review_id=f"review_{source_id.removeprefix('source_')}",
@@ -110,6 +157,8 @@ def _validate_public_url(url: str) -> None:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
         raise ValueError("http 또는 https URL만 인입할 수 있습니다.")
+    if parsed.username or parsed.password:
+        raise ValueError("사용자 정보가 포함된 URL은 인입할 수 없습니다.")
     host = (parsed.hostname or "").lower()
     if not host:
         raise ValueError("URL host를 확인할 수 없습니다.")
@@ -154,20 +203,130 @@ def _evidence_text(snapshot: _HtmlSnapshotParser) -> str:
 
 
 def _extract_price(text: str) -> int | None:
-    matches = [int(match.group(1).replace(",", "")) for match in PRICE_PATTERN.finditer(text)]
+    matches = [
+        int(match.group(1).replace(",", ""))
+        for match in PRICE_PATTERN.finditer(text)
+        if not _is_adjustment_price_context(text, match.start())
+    ]
     reasonable = [price for price in matches if 50_000 <= price <= 20_000_000]
     return min(reasonable) if reasonable else None
+
+
+def _is_adjustment_price_context(text: str, start: int) -> bool:
+    context = text[max(0, start - 18) : start]
+    return any(keyword in context for keyword in ("배송비", "배송료", "택배비", "할인", "쿠폰"))
+
+
+def _extract_shipping_fee(text: str) -> int | None:
+    if FREE_SHIPPING_PATTERN.search(text):
+        return 0
+    fees = [int(match.group(1).replace(",", "")) for match in SHIPPING_PATTERN.finditer(text)]
+    reasonable = [fee for fee in fees if 0 <= fee <= 300_000]
+    return min(reasonable) if reasonable else None
+
+
+def _extract_discount(text: str) -> int | None:
+    discounts = [
+        int(match.group(1).replace(",", "")) for match in DISCOUNT_PATTERN.finditer(text)
+    ]
+    reasonable = [discount for discount in discounts if 0 < discount <= 5_000_000]
+    return max(reasonable) if reasonable else None
+
+
+def _effective_price(
+    price: int | None,
+    shipping_fee: int | None,
+    discount: int | None,
+) -> int | None:
+    if price is None:
+        return None
+    return max(0, price + (shipping_fee or 0) - (discount or 0))
+
+
+def _availability_status(text: str) -> str:
+    if any(keyword in text for keyword in SOLD_OUT_KEYWORDS):
+        return "sold_out"
+    if any(keyword in text for keyword in LOW_STOCK_KEYWORDS):
+        return "low_stock"
+    if any(keyword in text for keyword in IN_STOCK_KEYWORDS):
+        return "in_stock"
+    return "unknown"
+
+
+def _model_match_status(expected_model: str, text: str) -> CheckStatus:
+    expected = _model_tokens(expected_model)
+    if not expected:
+        return CheckStatus.warning
+    observed = _model_tokens(text)
+    overlap = len(expected & observed)
+    ratio = overlap / len(expected)
+    if ratio >= 0.72:
+        return CheckStatus.ok
+    if ratio >= 0.38:
+        return CheckStatus.warning
+    return CheckStatus.blocker
+
+
+def _model_tokens(value: str) -> set[str]:
+    normalized = re.sub(r"[^0-9a-zA-Z가-힣]+", " ", value.lower())
+    tokens = {
+        token
+        for token in normalized.split()
+        if len(token) >= 2 and token not in {"pc", "rtx", "intel", "amd", "store", "product"}
+    }
+    return tokens
+
+
+def _extraction_signals(
+    *,
+    price: int | None,
+    shipping_fee: int | None,
+    discount: int | None,
+    effective_price: int | None,
+    availability: str,
+    model_match_status: CheckStatus,
+    fetched_live: bool,
+) -> list[str]:
+    signals: list[str] = []
+    if price is not None:
+        signals.append(f"표시 가격 {price:,}원")
+    if shipping_fee is not None:
+        signals.append("무료배송" if shipping_fee == 0 else f"배송비 {shipping_fee:,}원")
+    if discount is not None:
+        signals.append(f"할인/쿠폰 {discount:,}원")
+    if effective_price is not None:
+        signals.append(f"추정 실구매가 {effective_price:,}원")
+    signals.append(f"재고 상태 {availability}")
+    signals.append(f"모델명 일치도 {model_match_status.value}")
+    if fetched_live:
+        signals.append("라이브 수집")
+    return signals
 
 
 def _risk_flags(
     request: SourceUrlIngestRequest,
     price: int | None,
+    shipping_fee: int | None,
+    availability: str,
+    model_match_status: CheckStatus,
     fetched_live: bool,
     snapshot: _HtmlSnapshotParser,
 ) -> list[str]:
     risks = ["실제 URL 근거 운영자 검수 필요", "이용약관/robots 확인 필요"]
     if price is None and request.kind == SourceKind.price:
         risks.append("가격 추출 실패")
+    if shipping_fee is None and request.kind == SourceKind.price:
+        risks.append("배송비 확인 필요")
+    if availability == "sold_out":
+        risks.append("품절 또는 판매 종료")
+    elif availability == "low_stock":
+        risks.append("재고 부족 신호")
+    elif availability == "unknown":
+        risks.append("재고 상태 미확인")
+    if model_match_status == CheckStatus.blocker:
+        risks.append("기대 모델명과 페이지 내용 불일치")
+    elif model_match_status == CheckStatus.warning:
+        risks.append("모델명 부분 일치 또는 검수 필요")
     if fetched_live:
         risks.append("라이브 HTML 수집")
     if not snapshot.title:
@@ -177,6 +336,9 @@ def _risk_flags(
 
 def _confidence(
     price: int | None,
+    shipping_fee: int | None,
+    availability: str,
+    model_match_status: CheckStatus,
     snapshot: _HtmlSnapshotParser,
     fetched_live: bool,
 ) -> float:
@@ -187,9 +349,17 @@ def _confidence(
         confidence += 0.04
     if price is not None:
         confidence += 0.12
+    if shipping_fee is not None:
+        confidence += 0.04
+    if availability in {"in_stock", "low_stock"}:
+        confidence += 0.04
+    if model_match_status == CheckStatus.ok:
+        confidence += 0.08
+    elif model_match_status == CheckStatus.blocker:
+        confidence -= 0.1
     if fetched_live:
         confidence -= 0.04
-    return max(0.4, min(0.78, round(confidence, 2)))
+    return max(0.35, min(0.9, round(confidence, 2)))
 
 
 def _model_from_title(title: str) -> str:

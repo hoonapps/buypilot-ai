@@ -1600,6 +1600,8 @@ def test_source_collection_and_admin_review_flow() -> None:
               <body>
                 <h1>Creator RTX 4070 PC</h1>
                 <p>최종 결제 금액 1,899,000원</p>
+                <p>무료배송, 카드 할인 50,000원 적용 가능</p>
+                <p>재고 있음, 바로 구매 가능</p>
                 <p>QHD 144Hz 게임과 영상 편집 추천 구성</p>
               </body>
             </html>
@@ -1610,6 +1612,15 @@ def test_source_collection_and_admin_review_flow() -> None:
     ingested_payload = ingested.json()
     assert ingested_payload["candidate"]["adapter_id"] == "operator_url_ingest"
     assert ingested_payload["candidate"]["extracted_price_krw"] == 1_899_000
+    assert ingested_payload["candidate"]["shipping_fee_krw"] == 0
+    assert ingested_payload["candidate"]["coupon_or_card_benefit_krw"] == 50_000
+    assert ingested_payload["candidate"]["effective_price_krw"] == 1_849_000
+    assert ingested_payload["candidate"]["availability_status"] == "in_stock"
+    assert ingested_payload["candidate"]["model_match_status"] == "ok"
+    assert any(
+        "추정 실구매가 1,849,000원" in item
+        for item in ingested_payload["candidate"]["extraction_signals"]
+    )
     assert ingested_payload["candidate"]["needs_review"] is True
     assert ingested_payload["review_item"]["status"] == "pending"
     assert "HTML 스냅샷" in ingested_payload["extraction_notes"][0]
@@ -1786,6 +1797,18 @@ def test_source_collection_and_admin_review_flow() -> None:
         },
     )
     assert blocked_url.status_code == 400
+
+    blocked_userinfo_url = client.post(
+        "/sources/ingest-url",
+        json={
+            "url": "https://user:pass@example.com/product",
+            "category": "desktop_pc",
+            "kind": "price",
+            "expected_model": "blocked",
+            "html": "<html><title>blocked</title></html>",
+        },
+    )
+    assert blocked_userinfo_url.status_code == 400
 
     reviews = client.get("/admin/reviews")
     assert reviews.status_code == 200

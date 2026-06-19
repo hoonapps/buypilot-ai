@@ -1476,12 +1476,18 @@ class SourceCandidate(BaseModel):
     url: str
     normalized_model: str
     extracted_price_krw: int | None = None
+    shipping_fee_krw: int | None = None
+    coupon_or_card_benefit_krw: int | None = None
+    effective_price_krw: int | None = None
+    availability_status: str = "unknown"
+    model_match_status: CheckStatus = CheckStatus.warning
     seller: str | None = None
     evidence_text: str
     confidence: float = Field(ge=0, le=1)
     collected_at: str
     needs_review: bool = False
     risk_flags: list[str] = Field(default_factory=list)
+    extraction_signals: list[str] = Field(default_factory=list)
 
 
 class SourceCollectionRequest(BaseModel):

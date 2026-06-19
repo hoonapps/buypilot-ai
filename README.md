@@ -833,7 +833,7 @@ curl -X POST http://127.0.0.1:8000/sources/collect \
   }'
 ```
 
-실제 상품 페이지 URL 또는 운영자가 보관한 HTML 스냅샷을 후보 근거로 인입합니다. 내부망/private IP URL은 차단하고, 인입된 근거는 항상 관리자 검수 큐에 들어갑니다.
+실제 상품 페이지 URL 또는 운영자가 보관한 HTML 스냅샷을 후보 근거로 인입합니다. 내부망/private IP URL과 사용자 정보가 포함된 URL은 차단하고, 인입된 근거는 항상 관리자 검수 큐에 들어갑니다. 인입 결과에는 표시 가격, 배송비, 쿠폰/카드 할인, 추정 실구매가, 재고 상태, 기대 모델명 일치도, 추출 신호가 포함됩니다.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/sources/ingest-url \
@@ -844,7 +844,7 @@ curl -X POST http://127.0.0.1:8000/sources/ingest-url \
     "kind": "price",
     "expected_model": "Creator RTX 4070 PC",
     "seller": "Example Store",
-    "html": "<html><title>Creator RTX 4070 PC</title><body>최종 결제 금액 1,899,000원</body></html>"
+    "html": "<html><title>Creator RTX 4070 PC</title><body>최종 결제 금액 1,899,000원 무료배송 카드 할인 50,000원 재고 있음</body></html>"
   }'
 ```
 
