@@ -21,6 +21,9 @@ from specpilot_ai.core.models import (
     AlertSubscriptionRequest,
     AnalyzeRequest,
     AnalyzeResponse,
+    BetaBacklogItem,
+    BetaCohort,
+    BetaCohortRequest,
     BetaLead,
     BetaLeadRequest,
     BetaReadinessDashboard,
@@ -530,6 +533,35 @@ def beta_readiness(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> BetaReadinessDashboard:
     return _store().beta_readiness_for_workspace(workspace.workspace_id)
+
+
+@app.post("/beta/cohorts", response_model=BetaCohort)
+def create_beta_cohort(
+    request: BetaCohortRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> BetaCohort:
+    return _store().create_beta_cohort_for_workspace(workspace.workspace_id, request)
+
+
+@app.get("/beta/cohorts", response_model=list[BetaCohort])
+def list_beta_cohorts(
+    active: bool | None = None,
+    limit: int = 50,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[BetaCohort]:
+    return _store().list_beta_cohorts_for_workspace(
+        workspace.workspace_id,
+        active=active,
+        limit=limit,
+    )
+
+
+@app.get("/beta/backlog", response_model=list[BetaBacklogItem])
+def beta_backlog(
+    limit: int = 50,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[BetaBacklogItem]:
+    return _store().beta_backlog_for_workspace(workspace.workspace_id, limit=limit)
 
 
 @app.get("/sources/status", response_model=list[SourceAdapterStatus])

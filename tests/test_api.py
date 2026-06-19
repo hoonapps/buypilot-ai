@@ -75,6 +75,8 @@ def test_admin_page_exposes_review_console() -> None:
     assert "사용자 피드백" in response.text
     assert "베타 리드" in response.text
     assert "베타 출시 준비도" in response.text
+    assert "베타 cohort" in response.text
+    assert "개선 백로그" in response.text
 
 
 def test_trust_policy_endpoint_exposes_cache_and_fairness_rules() -> None:
@@ -510,6 +512,40 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     isolated_readiness = client.get("/beta/readiness", headers=WORKSPACE_B)
     assert isolated_readiness.status_code == 200
     assert isolated_readiness.json()["public_share_views"] == 0
+
+    cohort = client.post(
+        "/beta/cohorts",
+        headers=WORKSPACE_A,
+        json={
+            "name": "영상 편집 QHD 데스크톱 cohort",
+            "scenario": "영상 편집과 QHD 144Hz 게임용 데스크톱",
+            "category": "desktop_pc",
+            "target_persona": "creator",
+            "target_size": 10,
+            "success_metric": "purchase_intent_rate",
+            "keywords": ["영상 편집", "QHD", "데스크톱"],
+            "notes": "pytest cohort",
+        },
+    )
+    assert cohort.status_code == 200
+    cohort_payload = cohort.json()
+    assert cohort_payload["lead_count"] >= 1
+    assert cohort_payload["feedback_count"] >= 1
+    assert cohort_payload["purchase_intent_rate"] > 0
+    assert cohort_payload["readiness_score"] > 0
+
+    cohorts = client.get("/beta/cohorts", headers=WORKSPACE_A)
+    assert any(item["cohort_id"] == cohort_payload["cohort_id"] for item in cohorts.json())
+
+    isolated_cohorts = client.get("/beta/cohorts", headers=WORKSPACE_B)
+    assert all(item["cohort_id"] != cohort_payload["cohort_id"] for item in isolated_cohorts.json())
+
+    backlog = client.get("/beta/backlog", headers=WORKSPACE_A)
+    assert backlog.status_code == 200
+    backlog_items = backlog.json()
+    assert backlog_items
+    assert any(item["source_type"] == "readiness" for item in backlog_items)
+    assert all(item["workspace_id"] == readiness_payload["workspace_id"] for item in backlog_items)
 
 
 def test_alert_preview_endpoint_returns_three_targets() -> None:

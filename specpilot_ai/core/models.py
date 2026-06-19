@@ -512,6 +512,51 @@ class BetaLead(BaseModel):
     created_at: str
 
 
+class BetaCohortRequest(BaseModel):
+    name: str = Field(min_length=2)
+    scenario: str = Field(min_length=2)
+    category: Category = Category.desktop_pc
+    target_persona: str = "individual_buyer"
+    target_size: int = Field(default=10, ge=1, le=10000)
+    success_metric: str = "purchase_intent_rate"
+    keywords: list[str] = Field(default_factory=list)
+    notes: str = ""
+    active: bool = True
+
+
+class BetaCohort(BaseModel):
+    cohort_id: str
+    workspace_id: str = "demo"
+    name: str
+    scenario: str
+    category: Category
+    target_persona: str
+    target_size: int
+    success_metric: str
+    keywords: list[str] = Field(default_factory=list)
+    notes: str = ""
+    active: bool = True
+    lead_count: int = 0
+    feedback_count: int = 0
+    average_satisfaction: float = 0
+    purchase_intent_rate: float = 0
+    readiness_score: float = Field(default=0, ge=0, le=100)
+    created_at: str
+    updated_at: str
+
+
+class BetaBacklogItem(BaseModel):
+    backlog_id: str
+    workspace_id: str = "demo"
+    source_type: str
+    source_id: str
+    severity: CheckStatus
+    title: str
+    evidence: str
+    suggested_action: str
+    created_at: str
+
+
 class SaveReportRequest(BaseModel):
     trace_id: str
     title: str | None = None

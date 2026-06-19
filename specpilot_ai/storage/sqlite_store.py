@@ -16,6 +16,9 @@ from specpilot_ai.core.models import (
     AlertSubscription,
     AnalysisQualityAudit,
     AnalyzeResponse,
+    BetaBacklogItem,
+    BetaCohort,
+    BetaCohortRequest,
     BetaLead,
     BetaLeadRequest,
     BetaReadinessCheck,
@@ -968,6 +971,234 @@ class SpecPilotStore:
             ).fetchall()
         return [_beta_lead_from_row(row) for row in rows]
 
+    def create_beta_cohort_for_workspace(
+        self,
+        workspace_id: str,
+        request: BetaCohortRequest,
+    ) -> BetaCohort:
+        now = _now()
+        keywords = _cohort_keywords(request)
+        cohort_id = f"cohort_{uuid4().hex[:12]}"
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO beta_cohorts (
+                    cohort_id, workspace_id, name, scenario, category, target_persona,
+                    target_size, success_metric, keywords_json, notes, active,
+                    created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    cohort_id,
+                    workspace_id,
+                    request.name,
+                    request.scenario,
+                    request.category.value,
+                    request.target_persona,
+                    request.target_size,
+                    request.success_metric,
+                    json.dumps(keywords, ensure_ascii=False),
+                    request.notes,
+                    1 if request.active else 0,
+                    now,
+                    now,
+                ),
+            )
+        cohort = BetaCohort(
+            cohort_id=cohort_id,
+            workspace_id=workspace_id,
+            name=request.name,
+            scenario=request.scenario,
+            category=request.category,
+            target_persona=request.target_persona,
+            target_size=request.target_size,
+            success_metric=request.success_metric,
+            keywords=keywords,
+            notes=request.notes,
+            active=request.active,
+            created_at=now,
+            updated_at=now,
+        )
+        return self._hydrate_beta_cohort(cohort)
+
+    def list_beta_cohorts_for_workspace(
+        self,
+        workspace_id: str,
+        *,
+        active: bool | None = None,
+        limit: int = 50,
+    ) -> list[BetaCohort]:
+        where = "WHERE workspace_id = ?"
+        params: list[object] = [workspace_id]
+        if active is not None:
+            where += " AND active = ?"
+            params.append(1 if active else 0)
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT *
+                FROM beta_cohorts
+                {where}
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                tuple(params),
+            ).fetchall()
+        return [self._hydrate_beta_cohort(_beta_cohort_from_row(row)) for row in rows]
+
+    def beta_backlog_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 50,
+    ) -> list[BetaBacklogItem]:
+        items: list[BetaBacklogItem] = []
+        readiness = self.beta_readiness_for_workspace(workspace_id)
+        now = _now()
+        for check in readiness.checks:
+            if check.status == CheckStatus.ok:
+                continue
+            items.append(
+                BetaBacklogItem(
+                    backlog_id=f"backlog_readiness_{check.area}",
+                    workspace_id=workspace_id,
+                    source_type="readiness",
+                    source_id=check.area,
+                    severity=check.status,
+                    title=f"{check.label} 보강",
+                    evidence=check.metric,
+                    suggested_action=check.recommendation,
+                    created_at=now,
+                )
+            )
+        with self._connect() as conn:
+            feedback_rows = conn.execute(
+                """
+                SELECT feedback_id, rating, purchase_intent, reason,
+                       improvement_requests_json, created_at
+                FROM user_feedback
+                WHERE workspace_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (workspace_id, limit),
+            ).fetchall()
+            audit_rows = conn.execute(
+                """
+                SELECT trace_id, quality_audit_json, created_at
+                FROM analysis_runs
+                WHERE workspace_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (workspace_id, limit),
+            ).fetchall()
+        for row in feedback_rows:
+            requests = json.loads(row["improvement_requests_json"])
+            if int(row["rating"]) >= 4 and not requests:
+                continue
+            severity = CheckStatus.blocker if int(row["rating"]) <= 2 else CheckStatus.warning
+            action = (
+                requests[0]
+                if requests
+                else "낮은 만족도 사유를 확인해 추천 설명과 근거를 보강하세요."
+            )
+            items.append(
+                BetaBacklogItem(
+                    backlog_id=f"backlog_feedback_{row['feedback_id']}",
+                    workspace_id=workspace_id,
+                    source_type="feedback",
+                    source_id=row["feedback_id"],
+                    severity=severity,
+                    title=f"사용자 피드백 개선: 만족도 {row['rating']}점",
+                    evidence=row["reason"] or "상세 사유 없음",
+                    suggested_action=action,
+                    created_at=row["created_at"],
+                )
+            )
+        for row in audit_rows:
+            if not row["quality_audit_json"] or row["quality_audit_json"] == "{}":
+                continue
+            audit = AnalysisQualityAudit.model_validate_json(row["quality_audit_json"])
+            for index, blocker in enumerate(audit.launch_blockers):
+                items.append(
+                    BetaBacklogItem(
+                        backlog_id=f"backlog_quality_{audit.trace_id}_{index}",
+                        workspace_id=workspace_id,
+                        source_type="quality",
+                        source_id=audit.trace_id,
+                        severity=CheckStatus.blocker,
+                        title="공개 차단 사유 해소",
+                        evidence=blocker,
+                        suggested_action=(
+                            "해당 분석의 입력 조건, 출처, 옵션 검수표를 "
+                            "보강한 뒤 재분석하세요."
+                        ),
+                        created_at=row["created_at"],
+                    )
+                )
+        return items[:limit]
+
+    def _hydrate_beta_cohort(self, cohort: BetaCohort) -> BetaCohort:
+        keywords = cohort.keywords or [cohort.name, cohort.scenario, cohort.target_persona]
+        with self._connect() as conn:
+            lead_count = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM beta_leads
+                WHERE workspace_id = ?
+                  AND (persona = ? OR use_case LIKE ? OR use_case LIKE ?)
+                """,
+                (
+                    cohort.workspace_id,
+                    cohort.target_persona,
+                    _like_pattern(cohort.scenario),
+                    _like_pattern(keywords[0]),
+                ),
+            ).fetchone()[0]
+            feedback_row = conn.execute(
+                """
+                SELECT
+                    COUNT(*) AS feedback_count,
+                    AVG(f.rating) AS average_satisfaction,
+                    AVG(CASE WHEN f.purchase_intent = 1 THEN 1.0 ELSE 0.0 END)
+                        AS purchase_intent_rate
+                FROM user_feedback f
+                JOIN analysis_runs ar
+                  ON ar.trace_id = f.trace_id
+                 AND ar.workspace_id = f.workspace_id
+                WHERE f.workspace_id = ?
+                  AND (
+                    ar.category = ?
+                    OR ar.purpose LIKE ?
+                    OR f.reason LIKE ?
+                    OR f.improvement_requests_json LIKE ?
+                  )
+                """,
+                (
+                    cohort.workspace_id,
+                    cohort.category.value,
+                    _like_pattern(cohort.scenario),
+                    _like_pattern(keywords[0]),
+                    _like_pattern(keywords[0]),
+                ),
+            ).fetchone()
+        lead_score = min(100.0, (int(lead_count or 0) / cohort.target_size) * 100)
+        feedback_count = int(feedback_row["feedback_count"] or 0)
+        satisfaction = round(float(feedback_row["average_satisfaction"] or 0), 2)
+        intent_rate = round(float(feedback_row["purchase_intent_rate"] or 0), 4)
+        feedback_score = min(100.0, feedback_count * 20 + satisfaction * 10 + intent_rate * 30)
+        return cohort.model_copy(
+            update={
+                "lead_count": int(lead_count or 0),
+                "feedback_count": feedback_count,
+                "average_satisfaction": satisfaction,
+                "purchase_intent_rate": intent_rate,
+                "readiness_score": round(lead_score * 0.45 + feedback_score * 0.55, 2),
+            }
+        )
+
     def add_review_items(self, items: list[ReviewQueueItem]) -> list[ReviewQueueItem]:
         with self._connect() as conn:
             for item in items:
@@ -1779,6 +2010,22 @@ class SpecPilotStore:
                     created_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS beta_cohorts (
+                    cohort_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    name TEXT NOT NULL,
+                    scenario TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    target_persona TEXT NOT NULL,
+                    target_size INTEGER NOT NULL,
+                    success_metric TEXT NOT NULL,
+                    keywords_json TEXT NOT NULL DEFAULT '[]',
+                    notes TEXT NOT NULL DEFAULT '',
+                    active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_saved_reports_trace
                     ON saved_reports(trace_id);
                 CREATE INDEX IF NOT EXISTS idx_alerts_trace
@@ -1811,6 +2058,8 @@ class SpecPilotStore:
                     ON user_feedback(trace_id);
                 CREATE INDEX IF NOT EXISTS idx_beta_leads_workspace
                     ON beta_leads(workspace_id);
+                CREATE INDEX IF NOT EXISTS idx_beta_cohorts_workspace
+                    ON beta_cohorts(workspace_id, active);
                 """
             )
             _ensure_column(conn, "analysis_runs", "workspace_id", "TEXT NOT NULL DEFAULT 'demo'")
@@ -2147,6 +2396,25 @@ def _beta_lead_from_row(row: sqlite3.Row) -> BetaLead:
     )
 
 
+def _beta_cohort_from_row(row: sqlite3.Row) -> BetaCohort:
+    data = dict(row)
+    return BetaCohort(
+        cohort_id=data["cohort_id"],
+        workspace_id=data["workspace_id"],
+        name=data["name"],
+        scenario=data["scenario"],
+        category=Category(data["category"]),
+        target_persona=data["target_persona"],
+        target_size=data["target_size"],
+        success_metric=data["success_metric"],
+        keywords=json.loads(data["keywords_json"]),
+        notes=data["notes"],
+        active=bool(data["active"]),
+        created_at=data["created_at"],
+        updated_at=data["updated_at"],
+    )
+
+
 def _review_item_from_row(row: sqlite3.Row) -> ReviewQueueItem:
     data = dict(row)
     return ReviewQueueItem(
@@ -2230,6 +2498,20 @@ def _ensure_column(
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _cohort_keywords(request: BetaCohortRequest) -> list[str]:
+    seeds = [request.name, request.scenario, request.target_persona, *request.keywords]
+    normalized: list[str] = []
+    for seed in seeds:
+        value = seed.strip()
+        if value and value not in normalized:
+            normalized.append(value)
+    return normalized
+
+
+def _like_pattern(value: str) -> str:
+    return f"%{value}%"
 
 
 def _readiness_check(

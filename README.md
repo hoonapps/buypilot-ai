@@ -52,6 +52,8 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 추천 만족도 피드백, 구매 의향, 선택 후보 저장
 - 베타 신청 리드 저장과 개인정보 마스킹
 - 베타 출시 준비도 대시보드: 분석, 공유, 알림, 피드백, 리드, 품질 차단 사유를 launch readiness 점수로 집계
+- 베타 cohort 운영: 구매 시나리오별 리드, 피드백, 만족도, 구매 의향 집계
+- 자동 개선 백로그: readiness 경고, 낮은 만족도, 품질 차단 사유를 개선 항목으로 변환
 - 운영 지표 API
 - 분석 품질 감사와 예상 비용 대시보드
 - 가격/리뷰/벤치마크/공식 스토어 소스 어댑터 계약
@@ -359,6 +361,34 @@ curl http://127.0.0.1:8000/beta/readiness \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
+시나리오별 베타 cohort를 만들고 개선 백로그를 확인합니다.
+
+```bash
+curl -X POST http://127.0.0.1:8000/beta/cohorts \
+  -H "Content-Type: application/json" \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY" \
+  -d '{
+    "name": "영상 편집 QHD 데스크톱 cohort",
+    "scenario": "영상 편집과 QHD 144Hz 게임용 데스크톱",
+    "category": "desktop_pc",
+    "target_persona": "creator",
+    "target_size": 10,
+    "success_metric": "purchase_intent_rate",
+    "keywords": ["영상 편집", "QHD", "데스크톱"],
+    "notes": "공개 베타 검증 cohort"
+  }'
+```
+
+```bash
+curl http://127.0.0.1:8000/beta/cohorts \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
+```bash
+curl http://127.0.0.1:8000/beta/backlog \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
 운영 지표:
 
 ```bash
@@ -633,7 +663,7 @@ make docker-build
 - `/alerts/evaluate`, `/alerts/events`가 목표가 도달 이벤트를 저장하고 격리하는지
 - `/alerts/channels`, `/alerts/dispatch`, `/alerts/deliveries`가 발송 채널 설정, 큐 발송, 발송 시도 기록을 워크스페이스별로 처리하는지
 - `/ops/traces`, `/ops/traces/{trace_id}/spans`가 저장 trace와 단계별 span을 워크스페이스별로 반환하는지
-- `/feedback`, `/beta/leads`, `/beta/readiness`가 만족도, 베타 리드, 출시 준비도 판단을 워크스페이스별로 격리하는지
+- `/feedback`, `/beta/leads`, `/beta/readiness`, `/beta/cohorts`, `/beta/backlog`가 만족도, 베타 리드, 출시 준비도, cohort, 개선 백로그를 워크스페이스별로 격리하는지
 - `/ops/quality`가 품질 감사와 예상 비용을 워크스페이스별로 반환하는지
 - `/sources/status`, `/sources/collect`, `/sources/ingest-url`, `/sources/monitors`, `/sources/schedule`, `/sources/refresh`, `/sources/refresh-due`, `/sources/refresh-runs`, `/sources/providers`, `/sources/providers/check`, `/admin/reviews`, `/admin/dashboard`가 동작하는지
 - `/policy/trust`가 캐시, 제휴 고지, 공정성 정책을 반환하는지
@@ -677,10 +707,11 @@ GitHub Actions는 `main` push와 PR에서 다음을 실행합니다.
 - 연락처와 이메일 원문은 저장하지 않고 마스킹된 값만 운영 콘솔에 노출합니다.
 - 추천 만족도와 구매 의향은 모델 개선 신호로 쓰되 추천 순위에는 즉시 반영하지 않습니다.
 - 베타 출시 준비도는 분석 실행, 공유 리포트 조회, 알림 연결, 피드백, 리드, 품질 차단 사유를 함께 보며 단일 지표만으로 공개 확대를 결정하지 않습니다.
+- 베타 cohort는 시나리오와 persona 기준으로 리드와 피드백을 묶고, 자동 개선 백로그는 readiness/피드백/품질 차단 신호에서 생성합니다.
 
 ## 다음 제품화 과제
 
 - 가격 비교/오픈마켓/공식 스토어의 공식 provider 계약과 외부 cron/Cloud Scheduler 배포 연결
 - 실제 이메일/SMS/웹훅 provider credential 연결과 운영 rate limit 적용
 - LangSmith 또는 OpenTelemetry 외부 export 연동
-- 실제 구매 시나리오별 베타 cohort 운영과 개선 백로그 자동화
+- 실제 구매 시나리오별 cohort 리포트 export와 운영자 액션 상태 관리

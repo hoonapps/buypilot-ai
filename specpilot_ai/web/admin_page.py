@@ -178,6 +178,21 @@ def admin_page_html() -> str:
     </section>
     <section class="grid top-grid" style="margin-top:14px">
       <div class="panel">
+        <h2>베타 cohort</h2>
+        <p>구매 시나리오별 리드, 피드백, 구매 의향을 묶어 실제 테스트군을 운영합니다.</p>
+        <div class="actions">
+          <button class="secondary" id="save-beta-cohort">기본 cohort 생성</button>
+        </div>
+        <div class="review-list" id="beta-cohorts"></div>
+      </div>
+      <div class="panel">
+        <h2>개선 백로그</h2>
+        <p>출시 준비도, 낮은 만족도, 품질 차단 사유에서 자동 생성된 개선 항목입니다.</p>
+        <div class="review-list" id="beta-backlog"></div>
+      </div>
+    </section>
+    <section class="grid top-grid" style="margin-top:14px">
+      <div class="panel">
         <h2>알림 발송 채널</h2>
         <p>목표가 도달 큐를 이메일, 웹훅, 문자 outbox로 발송 처리합니다.</p>
         <input id="channel-target" value="ops@example.com" />
@@ -209,7 +224,9 @@ def admin_page_html() -> str:
         refreshRunResponse,
         providerResponse,
         scheduleResponse,
-        readinessResponse
+        readinessResponse,
+        betaCohortResponse,
+        betaBacklogResponse
       ] = await Promise.all([
         fetch('/admin/dashboard'),
         fetch('/ops/quality'),
@@ -223,7 +240,9 @@ def admin_page_html() -> str:
         fetch('/sources/refresh-runs'),
         fetch('/sources/providers'),
         fetch('/sources/schedule'),
-        fetch('/beta/readiness')
+        fetch('/beta/readiness'),
+        fetch('/beta/cohorts'),
+        fetch('/beta/backlog')
       ]);
       const data = await response.json();
       const quality = await qualityResponse.json();
@@ -238,6 +257,8 @@ def admin_page_html() -> str:
       const providers = await providerResponse.json();
       const schedule = await scheduleResponse.json();
       const readiness = await readinessResponse.json();
+      const betaCohorts = await betaCohortResponse.json();
+      const betaBacklog = await betaBacklogResponse.json();
       renderMetrics(data.metrics);
       renderBetaReadiness(readiness);
       renderSources(data.adapter_statuses);
@@ -249,6 +270,8 @@ def admin_page_html() -> str:
       renderQuality(quality);
       renderFeedback(feedback);
       renderBetaLeads(betaLeads);
+      renderBetaCohorts(betaCohorts);
+      renderBetaBacklog(betaBacklog);
       renderChannels(channels, events);
       renderDeliveries(deliveries);
       renderTraces(traces);
@@ -474,6 +497,41 @@ def admin_page_html() -> str:
       `).join('');
     }
 
+    function renderBetaCohorts(items) {
+      const root = document.querySelector('#beta-cohorts');
+      if (!items.length) {
+        root.innerHTML = '<p>아직 베타 cohort가 없습니다.</p>';
+        return;
+      }
+      root.innerHTML = items.map((item) => `
+        <article class="review-item">
+          <span class="kicker">${item.category} · ${item.target_persona} · ${item.active ? '활성' : '비활성'}</span>
+          <h3>${item.name} · 준비도 ${Math.round(item.readiness_score)}점</h3>
+          <p>${item.scenario}</p>
+          <p>리드 ${item.lead_count}/${item.target_size}명 / 피드백 ${item.feedback_count}건 / 만족도 ${item.average_satisfaction} / 구매 의향 ${Math.round(item.purchase_intent_rate * 100)}%</p>
+        </article>
+      `).join('');
+    }
+
+    function renderBetaBacklog(items) {
+      const root = document.querySelector('#beta-backlog');
+      if (!items.length) {
+        root.innerHTML = '<p>현재 자동 개선 백로그가 없습니다.</p>';
+        return;
+      }
+      root.innerHTML = items.map((item) => {
+        const tone = item.severity === 'blocker' ? 'danger' : item.severity === 'warning' ? 'warn' : '';
+        return `
+          <article class="review-item quality-item ${tone}">
+            <span class="kicker">${item.source_type} · ${item.severity}</span>
+            <h3>${item.title}</h3>
+            <p>${item.evidence}</p>
+            <p>${item.suggested_action}</p>
+          </article>
+        `;
+      }).join('');
+    }
+
     function renderChannels(items, events) {
       const root = document.querySelector('#channels');
       const queuedCount = events.filter((item) => ['queued', 'failed'].includes(item.delivery_status)).length;
@@ -593,6 +651,23 @@ def admin_page_html() -> str:
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ limit: 20 })
+      });
+      await loadDashboard();
+    });
+    document.querySelector('#save-beta-cohort').addEventListener('click', async () => {
+      await fetch('/beta/cohorts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: '영상 편집 QHD 데스크톱 cohort',
+          scenario: document.querySelector('#source-query').value,
+          category: 'desktop_pc',
+          target_persona: 'creator',
+          target_size: 10,
+          success_metric: 'purchase_intent_rate',
+          keywords: ['영상 편집', 'QHD', '데스크톱'],
+          notes: '관리자 콘솔에서 생성한 공개 베타 검증 cohort'
+        })
       });
       await loadDashboard();
     });
