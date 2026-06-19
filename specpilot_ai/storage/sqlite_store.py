@@ -30,6 +30,9 @@ from specpilot_ai.core.models import (
     BetaReadinessDashboard,
     Category,
     CheckStatus,
+    CompletionReportBatch,
+    CompletionReportBatchRequest,
+    CompletionReportDelivery,
     FeedbackRecord,
     FeedbackRequest,
     ObservabilityDispatchResponse,
@@ -250,6 +253,150 @@ class SpecPilotStore:
                 (workspace_id, limit),
             ).fetchall()
         return [_saved_report_summary_from_row(row) for row in rows]
+
+    def create_completion_report_batch_for_workspace(
+        self,
+        workspace_id: str,
+        request: CompletionReportBatchRequest,
+    ) -> CompletionReportBatch:
+        reports = self._select_completion_reports(
+            workspace_id,
+            report_ids=request.report_ids,
+            limit=request.limit,
+        )
+        now = _now()
+        batch_id = f"batch_{uuid4().hex[:12]}"
+        channel = request.channel.strip().lower() or "email"
+        deliveries: list[CompletionReportDelivery] = []
+        for report in reports:
+            retry_count = self._next_completion_retry_count(
+                workspace_id,
+                report.report_id,
+                channel,
+            )
+            status, provider_message, next_retry_at = _completion_dispatch_status(
+                channel=channel,
+                target=request.target,
+                retry_count=retry_count,
+                dry_run=request.dry_run,
+                now=now,
+            )
+            deliveries.append(
+                CompletionReportDelivery(
+                    delivery_id=f"delivery_{uuid4().hex[:12]}",
+                    batch_id=batch_id,
+                    report_id=report.report_id,
+                    workspace_id=workspace_id,
+                    channel=channel,
+                    target_masked=_mask_target(request.target),
+                    status=status,
+                    provider_message=provider_message,
+                    retry_count=retry_count,
+                    next_retry_at=next_retry_at,
+                    sent_at=now if status == "sent" else None,
+                    created_at=now,
+                )
+            )
+        sent_count = sum(1 for delivery in deliveries if delivery.status == "sent")
+        failed_count = sum(1 for delivery in deliveries if delivery.status == "failed")
+        batch_status = _completion_batch_status(
+            selected_count=len(reports),
+            sent_count=sent_count,
+            failed_count=failed_count,
+            dry_run=request.dry_run,
+        )
+        batch = CompletionReportBatch(
+            batch_id=batch_id,
+            workspace_id=workspace_id,
+            status=batch_status,
+            selected_count=len(reports),
+            sent_count=sent_count,
+            failed_count=failed_count,
+            dry_run=request.dry_run,
+            note=request.note,
+            created_at=now,
+            deliveries=deliveries,
+        )
+        if not request.dry_run and reports:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO completion_report_batches (
+                        batch_id, workspace_id, status, selected_count, sent_count,
+                        failed_count, dry_run, note, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        batch.batch_id,
+                        batch.workspace_id,
+                        batch.status,
+                        batch.selected_count,
+                        batch.sent_count,
+                        batch.failed_count,
+                        int(batch.dry_run),
+                        batch.note,
+                        batch.created_at,
+                    ),
+                )
+                for delivery in deliveries:
+                    conn.execute(
+                        """
+                        INSERT INTO completion_report_deliveries (
+                            delivery_id, batch_id, report_id, workspace_id, channel,
+                            target_masked, status, provider_message, retry_count,
+                            next_retry_at, sent_at, created_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            delivery.delivery_id,
+                            delivery.batch_id,
+                            delivery.report_id,
+                            delivery.workspace_id,
+                            delivery.channel,
+                            delivery.target_masked,
+                            delivery.status,
+                            delivery.provider_message,
+                            delivery.retry_count,
+                            delivery.next_retry_at,
+                            delivery.sent_at,
+                            delivery.created_at,
+                        ),
+                    )
+        return batch
+
+    def list_completion_report_batches_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 50,
+    ) -> list[CompletionReportBatch]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM completion_report_batches
+                WHERE workspace_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (workspace_id, limit),
+            ).fetchall()
+            batches = [_completion_batch_from_row(row) for row in rows]
+            for batch in batches:
+                delivery_rows = conn.execute(
+                    """
+                    SELECT *
+                    FROM completion_report_deliveries
+                    WHERE batch_id = ? AND workspace_id = ?
+                    ORDER BY created_at ASC
+                    """,
+                    (batch.batch_id, workspace_id),
+                ).fetchall()
+                batch.deliveries = [
+                    _completion_delivery_from_row(row) for row in delivery_rows
+                ]
+        return batches
 
     def get_report(self, report_id: str) -> SavedReportDetail | None:
         return self.get_report_for_workspace("demo", report_id)
@@ -2452,6 +2599,35 @@ class SpecPilotStore:
                     FOREIGN KEY(event_id) REFERENCES alert_delivery_events(event_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS completion_report_batches (
+                    batch_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    status TEXT NOT NULL,
+                    selected_count INTEGER NOT NULL DEFAULT 0,
+                    sent_count INTEGER NOT NULL DEFAULT 0,
+                    failed_count INTEGER NOT NULL DEFAULT 0,
+                    dry_run INTEGER NOT NULL DEFAULT 0,
+                    note TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS completion_report_deliveries (
+                    delivery_id TEXT PRIMARY KEY,
+                    batch_id TEXT NOT NULL,
+                    report_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    channel TEXT NOT NULL,
+                    target_masked TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL,
+                    provider_message TEXT NOT NULL DEFAULT '',
+                    retry_count INTEGER NOT NULL DEFAULT 0,
+                    next_retry_at TEXT,
+                    sent_at TEXT,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(batch_id) REFERENCES completion_report_batches(batch_id),
+                    FOREIGN KEY(report_id) REFERENCES saved_reports(report_id)
+                );
+
                 CREATE TABLE IF NOT EXISTS trace_spans (
                     span_id TEXT PRIMARY KEY,
                     trace_id TEXT NOT NULL,
@@ -2563,6 +2739,12 @@ class SpecPilotStore:
                     ON alert_delivery_attempts(workspace_id);
                 CREATE INDEX IF NOT EXISTS idx_alert_attempts_event
                     ON alert_delivery_attempts(event_id);
+                CREATE INDEX IF NOT EXISTS idx_completion_batches_workspace
+                    ON completion_report_batches(workspace_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_completion_deliveries_workspace
+                    ON completion_report_deliveries(workspace_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_completion_deliveries_report
+                    ON completion_report_deliveries(report_id);
                 CREATE INDEX IF NOT EXISTS idx_trace_spans_workspace
                     ON trace_spans(workspace_id, trace_id);
                 CREATE INDEX IF NOT EXISTS idx_observability_exports_workspace
@@ -2648,6 +2830,65 @@ class SpecPilotStore:
                 "completion_summary",
                 "TEXT NOT NULL DEFAULT ''",
             )
+
+    def _select_completion_reports(
+        self,
+        workspace_id: str,
+        *,
+        report_ids: list[str],
+        limit: int,
+    ) -> list[SavedReportSummary]:
+        with self._connect() as conn:
+            if report_ids:
+                unique_ids = list(dict.fromkeys(report_ids))
+                placeholders = ", ".join("?" for _ in unique_ids)
+                rows = conn.execute(
+                    f"""
+                    SELECT report_id, trace_id, workspace_id, title, owner_label,
+                           final_pick_id, top_model_name, share_token, shared_at,
+                           share_views, created_at, updated_at
+                    FROM saved_reports
+                    WHERE workspace_id = ?
+                      AND report_id IN ({placeholders})
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (workspace_id, *unique_ids, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT report_id, trace_id, workspace_id, title, owner_label,
+                           final_pick_id, top_model_name, share_token, shared_at,
+                           share_views, created_at, updated_at
+                    FROM saved_reports
+                    WHERE workspace_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (workspace_id, limit),
+                ).fetchall()
+        return [_saved_report_summary_from_row(row) for row in rows]
+
+    def _next_completion_retry_count(
+        self,
+        workspace_id: str,
+        report_id: str,
+        channel: str,
+    ) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS retry_count
+                FROM completion_report_deliveries
+                WHERE workspace_id = ?
+                  AND report_id = ?
+                  AND channel = ?
+                  AND status = 'failed'
+                """,
+                (workspace_id, report_id, channel),
+            ).fetchone()
+        return int(row["retry_count"] or 0) + 1
 
     def _queued_alert_events(
         self,
@@ -2958,6 +3199,40 @@ def _saved_report_summary_from_row(row: sqlite3.Row) -> SavedReportSummary:
         share_views=data["share_views"],
         created_at=data["created_at"],
         updated_at=data["updated_at"],
+    )
+
+
+def _completion_batch_from_row(row: sqlite3.Row) -> CompletionReportBatch:
+    data = dict(row)
+    return CompletionReportBatch(
+        batch_id=data["batch_id"],
+        workspace_id=data["workspace_id"],
+        status=data["status"],
+        selected_count=data["selected_count"],
+        sent_count=data["sent_count"],
+        failed_count=data["failed_count"],
+        dry_run=bool(data["dry_run"]),
+        note=data["note"],
+        created_at=data["created_at"],
+        deliveries=[],
+    )
+
+
+def _completion_delivery_from_row(row: sqlite3.Row) -> CompletionReportDelivery:
+    data = dict(row)
+    return CompletionReportDelivery(
+        delivery_id=data["delivery_id"],
+        batch_id=data["batch_id"],
+        report_id=data["report_id"],
+        workspace_id=data["workspace_id"],
+        channel=data["channel"],
+        target_masked=data["target_masked"],
+        status=data["status"],
+        provider_message=data["provider_message"],
+        retry_count=data["retry_count"],
+        next_retry_at=data["next_retry_at"],
+        sent_at=data["sent_at"],
+        created_at=data["created_at"],
     )
 
 
@@ -3583,6 +3858,54 @@ def _dispatch_status(
         f"{channel} 채널 outbox가 알림을 접수했습니다: {_mask_target(target)}",
         None,
     )
+
+
+def _completion_dispatch_status(
+    *,
+    channel: str,
+    target: str,
+    retry_count: int,
+    dry_run: bool,
+    now: str,
+) -> tuple[str, str, str | None]:
+    normalized_target = target.strip()
+    if dry_run:
+        return "dry_run", f"{channel} 완료 리포트 발송 리허설을 완료했습니다.", None
+    if channel not in SUPPORTED_ALERT_CHANNELS:
+        return (
+            "failed",
+            f"{channel} 완료 리포트 채널은 아직 지원하지 않습니다.",
+            _retry_at(now, 60),
+        )
+    if not normalized_target:
+        return "failed", "완료 리포트를 받을 대상이 비어 있습니다.", _retry_at(now, 30)
+    if retry_count > 4:
+        return "failed", f"{channel} 완료 리포트 재시도 한도를 초과했습니다.", None
+    if channel == "webhook" and not normalized_target.startswith(("http://", "https://")):
+        return "failed", "완료 리포트 웹훅 URL이 올바르지 않습니다.", _retry_at(now, 30)
+    return (
+        "sent",
+        f"{channel} 완료 리포트 outbox가 {_mask_target(normalized_target)} 대상으로 접수했습니다.",
+        None,
+    )
+
+
+def _completion_batch_status(
+    *,
+    selected_count: int,
+    sent_count: int,
+    failed_count: int,
+    dry_run: bool,
+) -> str:
+    if dry_run:
+        return "dry_run"
+    if selected_count == 0:
+        return "empty"
+    if failed_count and not sent_count:
+        return "failed"
+    if failed_count:
+        return "partial"
+    return "sent"
 
 
 def _observability_dispatch_status(

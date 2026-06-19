@@ -74,6 +74,8 @@ def test_admin_page_exposes_review_console() -> None:
     assert "Observability export outbox" in response.text
     assert "export 큐 적재" in response.text
     assert "observability dispatch" in response.text
+    assert "완료 리포트 배치" in response.text
+    assert "완료 리포트 발송" in response.text
     assert "품질/비용 감사" in response.text
     assert "품질 회귀 모니터" in response.text
     assert "사용자 피드백" in response.text
@@ -297,6 +299,56 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     metrics_after_share = client.get("/ops/metrics", headers=WORKSPACE_A).json()
     assert metrics_after_share["shared_reports"] >= 1
     assert metrics_after_share["public_share_views"] >= 2
+
+    completion_dry_run = client.post(
+        "/reports/completion-batches",
+        headers=WORKSPACE_A,
+        json={
+            "report_ids": [saved_payload["report_id"]],
+            "channel": "email",
+            "target": "ops@example.com",
+            "dry_run": True,
+            "note": "pytest 완료 리포트 리허설",
+        },
+    )
+    assert completion_dry_run.status_code == 200
+    assert completion_dry_run.json()["selected_count"] == 1
+    assert completion_dry_run.json()["dry_run"] is True
+    assert completion_dry_run.json()["deliveries"][0]["status"] == "dry_run"
+
+    completion_batch = client.post(
+        "/reports/completion-batches",
+        headers=WORKSPACE_A,
+        json={
+            "report_ids": [saved_payload["report_id"]],
+            "channel": "email",
+            "target": "ops@example.com",
+            "note": "pytest 완료 리포트 발송",
+        },
+    )
+    assert completion_batch.status_code == 200
+    completion_payload = completion_batch.json()
+    assert completion_payload["selected_count"] == 1
+    assert completion_payload["sent_count"] == 1
+    assert completion_payload["status"] == "sent"
+    assert completion_payload["deliveries"][0]["report_id"] == saved_payload["report_id"]
+    assert completion_payload["deliveries"][0]["target_masked"] == "op***@example.com"
+
+    completion_batches = client.get("/reports/completion-batches", headers=WORKSPACE_A)
+    assert completion_batches.status_code == 200
+    assert any(
+        item["batch_id"] == completion_payload["batch_id"]
+        and item["deliveries"][0]["status"] == "sent"
+        for item in completion_batches.json()
+    )
+
+    isolated_completion_batch = client.post(
+        "/reports/completion-batches",
+        headers=WORKSPACE_B,
+        json={"report_ids": [saved_payload["report_id"]], "target": "ops@example.com"},
+    )
+    assert isolated_completion_batch.status_code == 200
+    assert isolated_completion_batch.json()["selected_count"] == 0
 
     revoked_share = client.delete(
         f"/reports/{saved_payload['report_id']}/share",

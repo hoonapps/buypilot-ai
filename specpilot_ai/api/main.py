@@ -32,6 +32,8 @@ from specpilot_ai.core.models import (
     BetaLeadRequest,
     BetaReadinessDashboard,
     Category,
+    CompletionReportBatch,
+    CompletionReportBatchRequest,
     FeedbackRecord,
     FeedbackRequest,
     IntakeDiagnosisRequest,
@@ -307,6 +309,28 @@ def list_reports(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> list[SavedReportSummary]:
     return _store().list_reports_for_workspace(workspace.workspace_id, limit=limit)
+
+
+@app.post("/reports/completion-batches", response_model=CompletionReportBatch)
+def create_completion_report_batch(
+    request: CompletionReportBatchRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> CompletionReportBatch:
+    return _store().create_completion_report_batch_for_workspace(
+        workspace.workspace_id,
+        request,
+    )
+
+
+@app.get("/reports/completion-batches", response_model=list[CompletionReportBatch])
+def list_completion_report_batches(
+    limit: int = 50,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[CompletionReportBatch]:
+    return _store().list_completion_report_batches_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
 
 
 @app.get("/reports/{report_id}", response_model=SavedReportDetail)

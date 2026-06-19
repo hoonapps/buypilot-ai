@@ -48,6 +48,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - SQLite 기반 분석 결과 저장
 - 저장 리포트 조회와 가격 알림 구독
 - 저장 리포트 공개 공유 링크 생성과 공개 리포트 페이지
+- 완료 리포트 배치 발송: 저장 리포트를 이메일/웹훅/SMS outbox로 묶어 발송하고 성공/실패/재시도 상태 추적
 - 목표가 도달 평가와 발송 큐 이벤트 저장
 - 이메일/웹훅/SMS 알림 채널 설정, 발송 큐 dispatch, 발송 시도/재시도 기록
 - 추천 만족도 피드백, 구매 의향, 선택 후보 저장
@@ -240,6 +241,27 @@ http://127.0.0.1:8000/r/share_xxxxxxxxxxxxxxxxxxxx
 
 ```bash
 curl -X DELETE http://127.0.0.1:8000/reports/report_xxxxxxxxxxxx/share \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
+완료 리포트 배치 발송:
+
+```bash
+curl -X POST http://127.0.0.1:8000/reports/completion-batches \
+  -H "Content-Type: application/json" \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY" \
+  -d '{
+    "report_ids": ["report_xxxxxxxxxxxx"],
+    "channel": "email",
+    "target": "ops@example.com",
+    "note": "구매 완료 후보 운영 발송"
+  }'
+```
+
+완료 리포트 batch 조회:
+
+```bash
+curl http://127.0.0.1:8000/reports/completion-batches \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
@@ -673,6 +695,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/ops/observability/exports`: trace span과 품질 감사 payload를 외부 observability 연동 전 outbox로 저장한 이력
 - `/ops/observability/dispatch`: queued/failed observability export를 OpenTelemetry/LangSmith exporter outbox로 dispatch하고 성공/실패/재시도 상태를 저장
 - `share_token`, `shared_at`, `share_views`: 저장 리포트 공개 공유 상태
+- `/reports/completion-batches`: 저장 리포트 묶음 발송 batch와 개별 delivery 성공/실패/재시도 상태
 - `feedback_count`, `average_satisfaction`, `purchase_intent_rate`: 추천 결과가 실제 구매 판단으로 이어지는지 보는 운영 지표
 - `beta_leads`: 베타 신청 리드 수
 - `alert_channels`, `alert_delivery_attempts`, `sent_alert_deliveries`, `failed_alert_deliveries`: 알림 발송 채널과 dispatch 운영 지표
@@ -680,8 +703,8 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 
 ## 로컬 저장소
 
-분석 실행, trace span, observability export outbox, 저장 리포트, 공유 토큰, 가격 알림 구독, 알림 채널, 발송 큐, 발송 시도, 사용자 피드백, 베타 리드는 기본적으로 SQLite에 저장됩니다.
-저장 리포트, 공유 토큰, 알림, 발송 채널, 피드백, 리드는 `X-SpecPilot-Key`에서 계산된 워크스페이스 단위로 분리됩니다. 공개 리포트는 공유 토큰이 발급된 단일 리포트만 조회할 수 있습니다.
+분석 실행, trace span, observability export outbox, 저장 리포트, 공유 토큰, 완료 리포트 batch/delivery, 가격 알림 구독, 알림 채널, 발송 큐, 발송 시도, 사용자 피드백, 베타 리드는 기본적으로 SQLite에 저장됩니다.
+저장 리포트, 공유 토큰, 완료 리포트 batch, 알림, 발송 채널, 피드백, 리드는 `X-SpecPilot-Key`에서 계산된 워크스페이스 단위로 분리됩니다. 공개 리포트는 공유 토큰이 발급된 단일 리포트만 조회할 수 있습니다.
 
 기본 경로:
 
@@ -749,6 +772,7 @@ make docker-build
 - `/analyze`, `/alerts/preview`, `/traces/{trace_id}`가 동작하는지
 - `/reports/save`, `/reports/{report_id}`, `/alerts/subscribe`, `/ops/metrics`가 동작하는지
 - `/reports/{report_id}/share`, `/public/reports/{share_token}`, `/r/{share_token}`이 공개 공유 리포트를 만들고 해제하는지
+- `/reports/completion-batches`가 완료 리포트 batch와 delivery 상태를 저장하고 워크스페이스별로 격리하는지
 - `/alerts/evaluate`, `/alerts/events`가 목표가 도달 이벤트를 저장하고 격리하는지
 - `/alerts/channels`, `/alerts/dispatch`, `/alerts/deliveries`가 발송 채널 설정, 큐 발송, 발송 시도 기록을 워크스페이스별로 처리하는지
 - `/ops/traces`, `/ops/traces/{trace_id}/spans`가 저장 trace와 단계별 span을 워크스페이스별로 반환하는지
@@ -797,6 +821,7 @@ GitHub Actions는 `main` push와 PR에서 다음을 실행합니다.
 - 사용자가 입력한 필수 조건과 제외 조건은 후보별 충족 매트릭스로 다시 검증합니다.
 - 구매 타이밍 윈도우는 현재가, 목표가, 적정가 밴드, 쿠폰/재고 변동 리스크를 묶어 지금 결제할지 기다릴지 판단하게 합니다.
 - 구매 실행 패키지는 결제 전 확인, 판매자 문의, 주변 검토 공유까지 한 흐름으로 제공합니다.
+- 완료 리포트 배치는 저장된 구매 리포트를 운영 채널 outbox로 묶어 전달하고, batch별 성공/실패/재시도 상태를 남깁니다.
 - 목표가 도달 알림은 발송 큐와 채널별 dispatch 시도를 남기고 실패 시 재시도 기준을 함께 저장합니다.
 - 연락처와 이메일 원문은 저장하지 않고 마스킹된 값만 운영 콘솔에 노출합니다.
 - 추천 만족도와 구매 의향은 모델 개선 신호로 쓰되 추천 순위에는 즉시 반영하지 않습니다.
@@ -809,4 +834,4 @@ GitHub Actions는 `main` push와 PR에서 다음을 실행합니다.
 - 가격 비교/오픈마켓/공식 스토어의 공식 provider 계약과 외부 cron/Cloud Scheduler 배포 연결
 - 실제 이메일/SMS/웹훅 provider credential 연결과 운영 rate limit 적용
 - 실제 LangSmith/OpenTelemetry credential을 사용하는 managed exporter 배치 작업
-- 완료 리포트 배치 발송
+- 완료 리포트 provider별 템플릿, 수신자 그룹, unsubscribe 정책

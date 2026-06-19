@@ -207,6 +207,15 @@ def admin_page_html() -> str:
     </section>
     <section class="grid top-grid" style="margin-top:14px">
       <div class="panel">
+        <h2>완료 리포트 배치</h2>
+        <p>저장된 구매 리포트를 운영 이메일, 웹훅, 문자 outbox로 묶어 발송합니다.</p>
+        <input id="completion-target" value="ops@example.com" />
+        <div class="actions">
+          <button class="primary" id="dispatch-completion-reports">완료 리포트 발송</button>
+        </div>
+        <div class="review-list" id="completion-batches"></div>
+      </div>
+      <div class="panel">
         <h2>알림 발송 채널</h2>
         <p>목표가 도달 큐를 이메일, 웹훅, 문자 outbox로 발송 처리합니다.</p>
         <input id="channel-target" value="ops@example.com" />
@@ -243,7 +252,8 @@ def admin_page_html() -> str:
         betaBacklogResponse,
         betaBacklogSummaryResponse,
         regressionResponse,
-        observabilityResponse
+        observabilityResponse,
+        completionBatchResponse
       ] = await Promise.all([
         fetch('/admin/dashboard'),
         fetch('/ops/quality'),
@@ -262,7 +272,8 @@ def admin_page_html() -> str:
         fetch('/beta/backlog'),
         fetch('/beta/backlog/summary'),
         fetch('/ops/regression'),
-        fetch('/ops/observability/exports')
+        fetch('/ops/observability/exports'),
+        fetch('/reports/completion-batches')
       ]);
       const data = await response.json();
       const quality = await qualityResponse.json();
@@ -282,6 +293,7 @@ def admin_page_html() -> str:
       const betaBacklogSummary = await betaBacklogSummaryResponse.json();
       const regression = await regressionResponse.json();
       const observabilityExports = await observabilityResponse.json();
+      const completionBatches = await completionBatchResponse.json();
       renderMetrics(data.metrics);
       renderBetaReadiness(readiness);
       renderSources(data.adapter_statuses);
@@ -299,6 +311,7 @@ def admin_page_html() -> str:
       renderBetaBacklog(betaBacklog);
       renderChannels(channels, events);
       renderDeliveries(deliveries);
+      renderCompletionBatches(completionBatches);
       renderTraces(traces);
       renderObservabilityExports(observabilityExports);
     }
@@ -694,6 +707,30 @@ def admin_page_html() -> str:
       `).join('');
     }
 
+    function renderCompletionBatches(items) {
+      const root = document.querySelector('#completion-batches');
+      if (!items.length) {
+        root.innerHTML = '<p>아직 완료 리포트 batch가 없습니다.</p>';
+        return;
+      }
+      root.innerHTML = items.map((item) => {
+        const tone = item.status === 'failed' ? 'danger' : item.status === 'partial' ? 'warn' : '';
+        const deliveries = item.deliveries.length
+          ? item.deliveries.map((delivery) => `
+            <li>${delivery.report_id} · ${delivery.channel} · ${delivery.status} · ${delivery.target_masked}</li>
+          `).join('')
+          : '<li>개별 발송 기록 없음</li>';
+        return `
+          <article class="review-item quality-item ${tone}">
+            <span class="kicker">${item.status} · ${new Date(item.created_at).toLocaleString()}</span>
+            <h3>선택 ${item.selected_count}건 · 성공 ${item.sent_count}건 · 실패 ${item.failed_count}건</h3>
+            <p>${item.note || '메모 없음'}</p>
+            <ul>${deliveries}</ul>
+          </article>
+        `;
+      }).join('');
+    }
+
     async function decide(reviewId, status) {
       await fetch(`/admin/reviews/${reviewId}/decision`, {
         method: 'POST',
@@ -814,6 +851,20 @@ def admin_page_html() -> str:
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ dry_run: false, limit: 50 })
+      });
+      await loadDashboard();
+    });
+    document.querySelector('#dispatch-completion-reports').addEventListener('click', async () => {
+      await fetch('/reports/completion-batches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channel: 'email',
+          target: document.querySelector('#completion-target').value,
+          dry_run: false,
+          limit: 20,
+          note: '관리자 콘솔 완료 리포트 발송'
+        })
       });
       await loadDashboard();
     });

@@ -718,6 +718,43 @@ class SavedReportDetail(SavedReportSummary):
     notes: str = ""
 
 
+class CompletionReportBatchRequest(BaseModel):
+    report_ids: list[str] = Field(default_factory=list)
+    channel: str = "email"
+    target: str = "ops@example.com"
+    dry_run: bool = False
+    limit: int = Field(default=20, ge=1, le=100)
+    note: str = ""
+
+
+class CompletionReportDelivery(BaseModel):
+    delivery_id: str
+    batch_id: str
+    report_id: str
+    workspace_id: str = "demo"
+    channel: str
+    target_masked: str
+    status: str
+    provider_message: str = ""
+    retry_count: int = 0
+    next_retry_at: str | None = None
+    sent_at: str | None = None
+    created_at: str
+
+
+class CompletionReportBatch(BaseModel):
+    batch_id: str
+    workspace_id: str = "demo"
+    status: str
+    selected_count: int
+    sent_count: int = 0
+    failed_count: int = 0
+    dry_run: bool = False
+    note: str = ""
+    created_at: str
+    deliveries: list[CompletionReportDelivery] = Field(default_factory=list)
+
+
 class ReportShare(BaseModel):
     report_id: str
     share_token: str | None = None
