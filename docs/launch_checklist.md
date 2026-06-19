@@ -33,6 +33,7 @@
 - 제휴 고지와 추천 공정성 정책 API
 - Agent trace 확인
 - LangGraph 단계별 trace span 저장과 운영 콘솔 조회
+- Observability export outbox에 trace span과 품질 감사 payload 적재
 - 운영 지표 확인
 - 품질 점수, 예상 비용, 공개 차단 사유 확인
 - 품질 회귀 모니터에서 최근/이전 품질, 비용 변화, provider 차단율 확인
@@ -95,6 +96,7 @@
 | 품질 감사 | 분석별 품질 점수, 예상 비용, 경고 수, 공개 차단 사유가 운영 콘솔에 표시되어야 한다 |
 | 품질 회귀 | 최근/이전 분석 구간, 비용 변화, provider 차단율을 비교해 release health를 판단해야 한다 |
 | 추적성 | 각 분석은 trace id와 단계별 span을 별도 저장하고 운영 API에서 워크스페이스별로 조회되어야 한다 |
+| Observability | trace span과 품질 감사 payload가 외부 APM 연동 전 outbox에 저장되고 워크스페이스별로 격리되어야 한다 |
 | 데이터 격리 | 다른 API 키의 저장 리포트와 trace는 조회되지 않아야 한다 |
 | UI | 모바일에서 가로 스크롤 없이 분석과 비교표를 확인할 수 있어야 한다 |
 | 배포 | Docker 이미지 빌드와 `/ready` 헬스체크가 통과해야 한다 |

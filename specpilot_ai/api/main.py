@@ -36,6 +36,8 @@ from specpilot_ai.core.models import (
     FeedbackRequest,
     IntakeDiagnosisRequest,
     IntakeDiagnosisResponse,
+    ObservabilityExportRecord,
+    ObservabilityExportRequest,
     OperationsMetrics,
     OpsRegressionDashboard,
     PriceAlertPlan,
@@ -497,6 +499,31 @@ def list_trace_spans(
     if not spans:
         raise HTTPException(status_code=404, detail="trace span을 찾을 수 없습니다.")
     return spans
+
+
+@app.post("/ops/observability/exports", response_model=ObservabilityExportRecord)
+def create_observability_export(
+    request: ObservabilityExportRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> ObservabilityExportRecord:
+    export = _store().create_observability_export_for_workspace(
+        workspace.workspace_id,
+        request,
+    )
+    if export is None:
+        raise HTTPException(status_code=404, detail="export할 trace를 찾을 수 없습니다.")
+    return export
+
+
+@app.get("/ops/observability/exports", response_model=list[ObservabilityExportRecord])
+def list_observability_exports(
+    limit: int = 50,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[ObservabilityExportRecord]:
+    return _store().list_observability_exports_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
 
 
 @app.get("/me", response_model=WorkspaceContext)

@@ -71,6 +71,8 @@ def test_admin_page_exposes_review_console() -> None:
     assert "알림 발송 채널" in response.text
     assert "발송 시도" in response.text
     assert "Trace 저장소" in response.text
+    assert "Observability export outbox" in response.text
+    assert "export 큐 적재" in response.text
     assert "품질/비용 감사" in response.text
     assert "품질 회귀 모니터" in response.text
     assert "사용자 피드백" in response.text
@@ -452,6 +454,52 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
 
     blocked_trace_spans = client.get(f"/ops/traces/{trace_id}/spans", headers=WORKSPACE_B)
     assert blocked_trace_spans.status_code == 404
+
+    observability_export = client.post(
+        "/ops/observability/exports",
+        headers=WORKSPACE_A,
+        json={
+            "trace_id": trace_id,
+            "destination": "opentelemetry",
+            "include_payload": True,
+        },
+    )
+    assert observability_export.status_code == 200
+    observability_payload = observability_export.json()
+    assert observability_payload["trace_id"] == trace_id
+    assert observability_payload["workspace_id"] == saved_payload["workspace_id"]
+    assert observability_payload["status"] == "queued"
+    assert observability_payload["span_count"] == len(analysis["trace_events"])
+    assert observability_payload["quality_score"] > 0
+    assert observability_payload["payload"]["schema_version"] == "specpilot.observability.v1"
+    assert observability_payload["payload"]["quality"]["score"] > 0
+    assert len(observability_payload["payload"]["spans"]) == len(analysis["trace_events"])
+
+    observability_exports = client.get(
+        "/ops/observability/exports",
+        headers=WORKSPACE_A,
+    )
+    assert observability_exports.status_code == 200
+    assert any(
+        item["export_id"] == observability_payload["export_id"]
+        for item in observability_exports.json()
+    )
+
+    isolated_observability_exports = client.get(
+        "/ops/observability/exports",
+        headers=WORKSPACE_B,
+    )
+    assert all(
+        item["export_id"] != observability_payload["export_id"]
+        for item in isolated_observability_exports.json()
+    )
+
+    blocked_observability_export = client.post(
+        "/ops/observability/exports",
+        headers=WORKSPACE_B,
+        json={"trace_id": trace_id, "destination": "opentelemetry"},
+    )
+    assert blocked_observability_export.status_code == 404
 
     feedback = client.post(
         "/feedback",

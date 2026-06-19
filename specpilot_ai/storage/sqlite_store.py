@@ -32,6 +32,8 @@ from specpilot_ai.core.models import (
     CheckStatus,
     FeedbackRecord,
     FeedbackRequest,
+    ObservabilityExportRecord,
+    ObservabilityExportRequest,
     OperationsMetrics,
     OpsRegressionDashboard,
     OpsRegressionPeriod,
@@ -938,6 +940,80 @@ class SpecPilotStore:
             risk_flags=risk_flags,
             next_actions=next_actions,
         )
+
+    def create_observability_export_for_workspace(
+        self,
+        workspace_id: str,
+        request: ObservabilityExportRequest,
+    ) -> ObservabilityExportRecord | None:
+        analysis = self.get_analysis_for_workspace(workspace_id, request.trace_id)
+        if analysis is None:
+            return None
+        spans = self.list_trace_spans_for_workspace(workspace_id, request.trace_id)
+        quality = analysis.quality_audit
+        now = _now()
+        export_id = f"obs_{uuid4().hex[:12]}"
+        payload = (
+            _observability_payload(
+                workspace_id=workspace_id,
+                destination=request.destination,
+                analysis=analysis,
+                spans=spans,
+            )
+            if request.include_payload
+            else {}
+        )
+        record = ObservabilityExportRecord(
+            export_id=export_id,
+            workspace_id=workspace_id,
+            trace_id=request.trace_id,
+            destination=request.destination,
+            status="queued",
+            span_count=len(spans),
+            quality_score=quality.quality_score if quality else 0,
+            payload=payload,
+            created_at=now,
+        )
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO observability_exports (
+                    export_id, workspace_id, trace_id, destination, status,
+                    span_count, quality_score, payload_json, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.export_id,
+                    record.workspace_id,
+                    record.trace_id,
+                    record.destination,
+                    record.status,
+                    record.span_count,
+                    record.quality_score,
+                    json.dumps(record.payload, ensure_ascii=False),
+                    record.created_at,
+                ),
+            )
+        return record
+
+    def list_observability_exports_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 50,
+    ) -> list[ObservabilityExportRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM observability_exports
+                WHERE workspace_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (workspace_id, limit),
+            ).fetchall()
+        return [_observability_export_from_row(row) for row in rows]
 
     def create_feedback_for_workspace(
         self,
@@ -2317,6 +2393,19 @@ class SpecPilotStore:
                     FOREIGN KEY(trace_id) REFERENCES analysis_runs(trace_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS observability_exports (
+                    export_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    trace_id TEXT NOT NULL,
+                    destination TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    span_count INTEGER NOT NULL DEFAULT 0,
+                    quality_score REAL NOT NULL DEFAULT 0,
+                    payload_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(trace_id) REFERENCES analysis_runs(trace_id)
+                );
+
                 CREATE TABLE IF NOT EXISTS user_feedback (
                     feedback_id TEXT PRIMARY KEY,
                     trace_id TEXT NOT NULL,
@@ -2398,6 +2487,8 @@ class SpecPilotStore:
                     ON alert_delivery_attempts(event_id);
                 CREATE INDEX IF NOT EXISTS idx_trace_spans_workspace
                     ON trace_spans(workspace_id, trace_id);
+                CREATE INDEX IF NOT EXISTS idx_observability_exports_workspace
+                    ON observability_exports(workspace_id, created_at);
                 CREATE INDEX IF NOT EXISTS idx_user_feedback_workspace
                     ON user_feedback(workspace_id);
                 CREATE INDEX IF NOT EXISTS idx_user_feedback_trace
@@ -2703,6 +2794,21 @@ def _trace_span_from_row(row: sqlite3.Row) -> TraceSpanRecord:
     )
 
 
+def _observability_export_from_row(row: sqlite3.Row) -> ObservabilityExportRecord:
+    data = dict(row)
+    return ObservabilityExportRecord(
+        export_id=data["export_id"],
+        workspace_id=data["workspace_id"],
+        trace_id=data["trace_id"],
+        destination=data["destination"],
+        status=data["status"],
+        span_count=data["span_count"],
+        quality_score=data["quality_score"],
+        payload=json.loads(data["payload_json"]),
+        created_at=data["created_at"],
+    )
+
+
 def _saved_report_summary_from_row(row: sqlite3.Row) -> SavedReportSummary:
     data = dict(row)
     return SavedReportSummary(
@@ -2883,6 +2989,51 @@ def _cohort_keywords(request: BetaCohortRequest) -> list[str]:
 
 def _like_pattern(value: str) -> str:
     return f"%{value}%"
+
+
+def _observability_payload(
+    *,
+    workspace_id: str,
+    destination: str,
+    analysis: AnalyzeResponse,
+    spans: list[TraceSpanRecord],
+) -> dict:
+    quality = analysis.quality_audit
+    top = (
+        analysis.report.top_recommendations[0]
+        if analysis.report.top_recommendations
+        else None
+    )
+    return {
+        "schema_version": "specpilot.observability.v1",
+        "destination": destination,
+        "workspace_id": workspace_id,
+        "trace_id": analysis.graph_trace_id,
+        "category": analysis.criteria.category.value,
+        "purpose": analysis.criteria.purpose,
+        "budget_krw": analysis.criteria.budget_krw,
+        "final_pick_id": analysis.report.final_pick_id,
+        "top_model_name": top.product.model_name if top else None,
+        "quality": {
+            "score": quality.quality_score if quality else 0,
+            "warning_count": quality.warning_count if quality else 0,
+            "blocker_count": quality.blocker_count if quality else 0,
+            "estimated_cost_krw": quality.estimated_cost_krw if quality else 0,
+            "launch_blockers": quality.launch_blockers if quality else [],
+        },
+        "spans": [
+            {
+                "span_id": span.span_id,
+                "sequence": span.sequence,
+                "step": span.step.value,
+                "title": span.title,
+                "status": span.status.value,
+                "evidence_count": span.evidence_count,
+                "created_at": span.created_at,
+            }
+            for span in spans
+        ],
+    }
 
 
 def _default_sla_due_at(item: BetaBacklogItem) -> str:

@@ -169,6 +169,11 @@ def admin_page_html() -> str:
       <p>분석별 LangGraph 단계 span, 품질 점수, 경고/차단 수를 확인합니다.</p>
       <div class="quality-list" id="traces"></div>
     </section>
+    <section class="panel" style="margin-top:14px">
+      <h2>Observability export outbox</h2>
+      <p>trace span과 품질 감사 payload를 LangSmith/OpenTelemetry 연동 전 큐 형태로 보존합니다.</p>
+      <div class="quality-list" id="observability-exports"></div>
+    </section>
     <section class="grid top-grid" style="margin-top:14px">
       <div class="panel">
         <h2>사용자 피드백</h2>
@@ -234,7 +239,8 @@ def admin_page_html() -> str:
         betaCohortResponse,
         betaBacklogResponse,
         betaBacklogSummaryResponse,
-        regressionResponse
+        regressionResponse,
+        observabilityResponse
       ] = await Promise.all([
         fetch('/admin/dashboard'),
         fetch('/ops/quality'),
@@ -252,7 +258,8 @@ def admin_page_html() -> str:
         fetch('/beta/cohorts'),
         fetch('/beta/backlog'),
         fetch('/beta/backlog/summary'),
-        fetch('/ops/regression')
+        fetch('/ops/regression'),
+        fetch('/ops/observability/exports')
       ]);
       const data = await response.json();
       const quality = await qualityResponse.json();
@@ -271,6 +278,7 @@ def admin_page_html() -> str:
       const betaBacklog = await betaBacklogResponse.json();
       const betaBacklogSummary = await betaBacklogSummaryResponse.json();
       const regression = await regressionResponse.json();
+      const observabilityExports = await observabilityResponse.json();
       renderMetrics(data.metrics);
       renderBetaReadiness(readiness);
       renderSources(data.adapter_statuses);
@@ -289,6 +297,7 @@ def admin_page_html() -> str:
       renderChannels(channels, events);
       renderDeliveries(deliveries);
       renderTraces(traces);
+      renderObservabilityExports(observabilityExports);
     }
 
     function renderMetrics(metrics) {
@@ -500,9 +509,42 @@ def admin_page_html() -> str:
             <h3>${item.top_model_name || item.final_pick_id || '분석 결과'} · span ${item.span_count}개</h3>
             <p>${item.purpose}</p>
             <p>품질 ${item.quality_score}점 / 경고 ${item.warning_count} / 차단 ${item.blocker_count}</p>
+            <div class="actions">
+              <button class="secondary" data-observability-trace="${item.trace_id}">export 큐 적재</button>
+            </div>
           </article>
         `;
       }).join('');
+      root.querySelectorAll('[data-observability-trace]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          await fetch('/ops/observability/exports', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              trace_id: button.dataset.observabilityTrace,
+              destination: 'opentelemetry',
+              include_payload: true
+            })
+          });
+          await loadDashboard();
+        });
+      });
+    }
+
+    function renderObservabilityExports(items) {
+      const root = document.querySelector('#observability-exports');
+      if (!items.length) {
+        root.innerHTML = '<p>아직 observability export outbox 항목이 없습니다.</p>';
+        return;
+      }
+      root.innerHTML = items.map((item) => `
+        <article class="review-item quality-item">
+          <span class="kicker">${item.destination} · ${item.status}</span>
+          <h3>${item.trace_id} · span ${item.span_count}개 · 품질 ${item.quality_score}점</h3>
+          <p>export id: ${item.export_id} / 생성: ${new Date(item.created_at).toLocaleString()}</p>
+          <p>payload: ${item.payload?.schema_version || 'payload 제외'}</p>
+        </article>
+      `).join('');
     }
 
     function renderFeedback(items) {

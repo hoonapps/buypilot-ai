@@ -513,6 +513,24 @@ class OpsRegressionDashboard(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class ObservabilityExportRequest(BaseModel):
+    trace_id: str
+    destination: str = "opentelemetry"
+    include_payload: bool = True
+
+
+class ObservabilityExportRecord(BaseModel):
+    export_id: str
+    workspace_id: str = "demo"
+    trace_id: str
+    destination: str
+    status: str = "queued"
+    span_count: int = 0
+    quality_score: float = 0
+    payload: dict = Field(default_factory=dict)
+    created_at: str
+
+
 class FeedbackRequest(BaseModel):
     trace_id: str
     rating: int = Field(ge=1, le=5)
