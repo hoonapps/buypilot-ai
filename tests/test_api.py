@@ -75,6 +75,8 @@ def test_admin_page_exposes_review_console() -> None:
     assert "export 큐 적재" in response.text
     assert "observability dispatch" in response.text
     assert "완료 리포트 배치" in response.text
+    assert "템플릿 저장" in response.text
+    assert "수신자 그룹 저장" in response.text
     assert "완료 리포트 발송" in response.text
     assert "품질/비용 감사" in response.text
     assert "품질 회귀 모니터" in response.text
@@ -342,6 +344,77 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
         for item in completion_batches.json()
     )
 
+    completion_template = client.post(
+        "/reports/completion-templates",
+        headers=WORKSPACE_A,
+        json={
+            "name": "pytest 완료 리포트",
+            "channel": "email",
+            "subject": "[SpecPilot] {title}",
+            "body": "{title}\n추천 1순위: {top_model_name}\n공개 리포트: {public_path}",
+            "enabled": True,
+        },
+    )
+    assert completion_template.status_code == 200
+    template_payload = completion_template.json()
+    assert template_payload["name"] == "pytest 완료 리포트"
+    assert template_payload["subject"] == "[SpecPilot] {title}"
+
+    completion_templates = client.get("/reports/completion-templates", headers=WORKSPACE_A)
+    assert completion_templates.status_code == 200
+    assert any(
+        item["template_id"] == template_payload["template_id"]
+        for item in completion_templates.json()
+    )
+
+    completion_group = client.post(
+        "/reports/completion-recipient-groups",
+        headers=WORKSPACE_A,
+        json={
+            "name": "pytest 운영 수신자",
+            "channel": "email",
+            "recipients": ["ops@example.com", "blocked@example.com", "ops@example.com"],
+            "unsubscribed_recipients": ["blocked@example.com"],
+            "unsubscribe_policy": "exclude_unsubscribed",
+            "enabled": True,
+            "description": "pytest 수신자 그룹",
+        },
+    )
+    assert completion_group.status_code == 200
+    group_payload = completion_group.json()
+    assert group_payload["recipient_count"] == 2
+    assert group_payload["unsubscribed_count"] == 1
+
+    completion_groups = client.get(
+        "/reports/completion-recipient-groups",
+        headers=WORKSPACE_A,
+    )
+    assert completion_groups.status_code == 200
+    assert any(item["group_id"] == group_payload["group_id"] for item in completion_groups.json())
+
+    templated_batch = client.post(
+        "/reports/completion-batches",
+        headers=WORKSPACE_A,
+        json={
+            "report_ids": [saved_payload["report_id"]],
+            "template_id": template_payload["template_id"],
+            "recipient_group_id": group_payload["group_id"],
+            "respect_unsubscribe": True,
+            "note": "pytest 템플릿 그룹 발송",
+        },
+    )
+    assert templated_batch.status_code == 200
+    templated_payload = templated_batch.json()
+    assert templated_payload["template_id"] == template_payload["template_id"]
+    assert templated_payload["recipient_group_id"] == group_payload["group_id"]
+    assert templated_payload["target_count"] == 2
+    assert templated_payload["sent_count"] == 1
+    assert any(delivery["status"] == "skipped" for delivery in templated_payload["deliveries"])
+    assert any(
+        delivery["subject"] == "[SpecPilot] 테스트 구매 리포트"
+        for delivery in templated_payload["deliveries"]
+    )
+
     isolated_completion_batch = client.post(
         "/reports/completion-batches",
         headers=WORKSPACE_B,
@@ -349,6 +422,24 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     )
     assert isolated_completion_batch.status_code == 200
     assert isolated_completion_batch.json()["selected_count"] == 0
+
+    isolated_completion_templates = client.get(
+        "/reports/completion-templates",
+        headers=WORKSPACE_B,
+    )
+    assert all(
+        item["template_id"] != template_payload["template_id"]
+        for item in isolated_completion_templates.json()
+    )
+
+    isolated_completion_groups = client.get(
+        "/reports/completion-recipient-groups",
+        headers=WORKSPACE_B,
+    )
+    assert all(
+        item["group_id"] != group_payload["group_id"]
+        for item in isolated_completion_groups.json()
+    )
 
     revoked_share = client.delete(
         f"/reports/{saved_payload['report_id']}/share",

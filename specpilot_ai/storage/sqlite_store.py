@@ -30,9 +30,13 @@ from specpilot_ai.core.models import (
     BetaReadinessDashboard,
     Category,
     CheckStatus,
+    CompletionRecipientGroup,
+    CompletionRecipientGroupRequest,
     CompletionReportBatch,
     CompletionReportBatchRequest,
     CompletionReportDelivery,
+    CompletionReportTemplate,
+    CompletionReportTemplateRequest,
     FeedbackRecord,
     FeedbackRequest,
     ObservabilityDispatchResponse,
@@ -254,6 +258,173 @@ class SpecPilotStore:
             ).fetchall()
         return [_saved_report_summary_from_row(row) for row in rows]
 
+    def upsert_completion_report_template_for_workspace(
+        self,
+        workspace_id: str,
+        request: CompletionReportTemplateRequest,
+    ) -> CompletionReportTemplate:
+        now = _now()
+        channel = request.channel.strip().lower() or "email"
+        template_id = f"template_{uuid4().hex[:12]}"
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT template_id, created_at
+                FROM completion_report_templates
+                WHERE workspace_id = ? AND name = ?
+                """,
+                (workspace_id, request.name),
+            ).fetchone()
+            if row is not None:
+                template_id = row["template_id"]
+                created_at = row["created_at"]
+            else:
+                created_at = now
+            conn.execute(
+                """
+                INSERT INTO completion_report_templates (
+                    template_id, workspace_id, name, channel, subject, body,
+                    enabled, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(workspace_id, name) DO UPDATE SET
+                    channel = excluded.channel,
+                    subject = excluded.subject,
+                    body = excluded.body,
+                    enabled = excluded.enabled,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    template_id,
+                    workspace_id,
+                    request.name.strip() or "기본 완료 리포트",
+                    channel,
+                    request.subject,
+                    request.body,
+                    int(request.enabled),
+                    created_at,
+                    now,
+                ),
+            )
+        return CompletionReportTemplate(
+            template_id=template_id,
+            workspace_id=workspace_id,
+            name=request.name.strip() or "기본 완료 리포트",
+            channel=channel,
+            subject=request.subject,
+            body=request.body,
+            enabled=request.enabled,
+            created_at=created_at,
+            updated_at=now,
+        )
+
+    def list_completion_report_templates_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 50,
+    ) -> list[CompletionReportTemplate]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM completion_report_templates
+                WHERE workspace_id = ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (workspace_id, limit),
+            ).fetchall()
+        return [_completion_template_from_row(row) for row in rows]
+
+    def upsert_completion_recipient_group_for_workspace(
+        self,
+        workspace_id: str,
+        request: CompletionRecipientGroupRequest,
+    ) -> CompletionRecipientGroup:
+        now = _now()
+        group_id = f"group_{uuid4().hex[:12]}"
+        channel = request.channel.strip().lower() or "email"
+        recipients = _normalized_recipients(request.recipients)
+        unsubscribed = _normalized_recipients(request.unsubscribed_recipients)
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT group_id, created_at
+                FROM completion_recipient_groups
+                WHERE workspace_id = ? AND name = ?
+                """,
+                (workspace_id, request.name),
+            ).fetchone()
+            if row is not None:
+                group_id = row["group_id"]
+                created_at = row["created_at"]
+            else:
+                created_at = now
+            conn.execute(
+                """
+                INSERT INTO completion_recipient_groups (
+                    group_id, workspace_id, name, channel, recipients_json,
+                    unsubscribed_json, unsubscribe_policy, enabled, description,
+                    created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(workspace_id, name) DO UPDATE SET
+                    channel = excluded.channel,
+                    recipients_json = excluded.recipients_json,
+                    unsubscribed_json = excluded.unsubscribed_json,
+                    unsubscribe_policy = excluded.unsubscribe_policy,
+                    enabled = excluded.enabled,
+                    description = excluded.description,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    group_id,
+                    workspace_id,
+                    request.name.strip() or "운영 수신자 그룹",
+                    channel,
+                    json.dumps(recipients, ensure_ascii=False),
+                    json.dumps(unsubscribed, ensure_ascii=False),
+                    request.unsubscribe_policy.strip() or "exclude_unsubscribed",
+                    int(request.enabled),
+                    request.description,
+                    created_at,
+                    now,
+                ),
+            )
+        return CompletionRecipientGroup(
+            group_id=group_id,
+            workspace_id=workspace_id,
+            name=request.name.strip() or "운영 수신자 그룹",
+            channel=channel,
+            recipients_masked=[_mask_target(item) for item in recipients],
+            recipient_count=len(recipients),
+            unsubscribed_count=len(unsubscribed),
+            unsubscribe_policy=request.unsubscribe_policy.strip()
+            or "exclude_unsubscribed",
+            enabled=request.enabled,
+            description=request.description,
+            created_at=created_at,
+            updated_at=now,
+        )
+
+    def list_completion_recipient_groups_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 50,
+    ) -> list[CompletionRecipientGroup]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM completion_recipient_groups
+                WHERE workspace_id = ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (workspace_id, limit),
+            ).fetchall()
+        return [_completion_recipient_group_from_row(row) for row in rows]
+
     def create_completion_report_batch_for_workspace(
         self,
         workspace_id: str,
@@ -266,41 +437,55 @@ class SpecPilotStore:
         )
         now = _now()
         batch_id = f"batch_{uuid4().hex[:12]}"
-        channel = request.channel.strip().lower() or "email"
+        template = self._completion_template(workspace_id, request.template_id)
+        group = self._completion_recipient_group(workspace_id, request.recipient_group_id)
+        channel = _completion_channel(request.channel, template=template, group=group)
+        subject = _completion_subject(template)
+        targets = _completion_targets(request, group)
         deliveries: list[CompletionReportDelivery] = []
         for report in reports:
-            retry_count = self._next_completion_retry_count(
-                workspace_id,
-                report.report_id,
-                channel,
-            )
-            status, provider_message, next_retry_at = _completion_dispatch_status(
-                channel=channel,
-                target=request.target,
-                retry_count=retry_count,
-                dry_run=request.dry_run,
-                now=now,
-            )
-            deliveries.append(
-                CompletionReportDelivery(
-                    delivery_id=f"delivery_{uuid4().hex[:12]}",
-                    batch_id=batch_id,
-                    report_id=report.report_id,
-                    workspace_id=workspace_id,
-                    channel=channel,
-                    target_masked=_mask_target(request.target),
-                    status=status,
-                    provider_message=provider_message,
-                    retry_count=retry_count,
-                    next_retry_at=next_retry_at,
-                    sent_at=now if status == "sent" else None,
-                    created_at=now,
+            for target, is_unsubscribed in targets:
+                retry_count = self._next_completion_retry_count(
+                    workspace_id,
+                    report.report_id,
+                    channel,
                 )
-            )
+                if is_unsubscribed and request.respect_unsubscribe:
+                    status = "skipped"
+                    provider_message = "unsubscribe 정책에 따라 완료 리포트 발송을 제외했습니다."
+                    next_retry_at = None
+                else:
+                    status, provider_message, next_retry_at = _completion_dispatch_status(
+                        channel=channel,
+                        target=target,
+                        retry_count=retry_count,
+                        dry_run=request.dry_run,
+                        now=now,
+                    )
+                deliveries.append(
+                    CompletionReportDelivery(
+                        delivery_id=f"delivery_{uuid4().hex[:12]}",
+                        batch_id=batch_id,
+                        report_id=report.report_id,
+                        workspace_id=workspace_id,
+                        channel=channel,
+                        target_masked=_mask_target(target),
+                        template_id=template["template_id"] if template else None,
+                        recipient_group_id=group["group_id"] if group else None,
+                        subject=_render_completion_text(subject, report),
+                        status=status,
+                        provider_message=provider_message,
+                        retry_count=retry_count,
+                        next_retry_at=next_retry_at,
+                        sent_at=now if status == "sent" else None,
+                        created_at=now,
+                    )
+                )
         sent_count = sum(1 for delivery in deliveries if delivery.status == "sent")
         failed_count = sum(1 for delivery in deliveries if delivery.status == "failed")
         batch_status = _completion_batch_status(
             selected_count=len(reports),
+            target_count=len(targets),
             sent_count=sent_count,
             failed_count=failed_count,
             dry_run=request.dry_run,
@@ -309,6 +494,9 @@ class SpecPilotStore:
             batch_id=batch_id,
             workspace_id=workspace_id,
             status=batch_status,
+            template_id=template["template_id"] if template else None,
+            recipient_group_id=group["group_id"] if group else None,
+            target_count=len(targets),
             selected_count=len(reports),
             sent_count=sent_count,
             failed_count=failed_count,
@@ -323,9 +511,10 @@ class SpecPilotStore:
                     """
                     INSERT INTO completion_report_batches (
                         batch_id, workspace_id, status, selected_count, sent_count,
-                        failed_count, dry_run, note, created_at
+                        failed_count, dry_run, note, template_id, recipient_group_id,
+                        target_count, created_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         batch.batch_id,
@@ -336,6 +525,9 @@ class SpecPilotStore:
                         batch.failed_count,
                         int(batch.dry_run),
                         batch.note,
+                        batch.template_id,
+                        batch.recipient_group_id,
+                        batch.target_count,
                         batch.created_at,
                     ),
                 )
@@ -344,10 +536,11 @@ class SpecPilotStore:
                         """
                         INSERT INTO completion_report_deliveries (
                             delivery_id, batch_id, report_id, workspace_id, channel,
-                            target_masked, status, provider_message, retry_count,
-                            next_retry_at, sent_at, created_at
+                            target_masked, template_id, recipient_group_id, subject,
+                            status, provider_message, retry_count, next_retry_at,
+                            sent_at, created_at
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             delivery.delivery_id,
@@ -356,6 +549,9 @@ class SpecPilotStore:
                             delivery.workspace_id,
                             delivery.channel,
                             delivery.target_masked,
+                            delivery.template_id,
+                            delivery.recipient_group_id,
+                            delivery.subject,
                             delivery.status,
                             delivery.provider_message,
                             delivery.retry_count,
@@ -2599,10 +2795,41 @@ class SpecPilotStore:
                     FOREIGN KEY(event_id) REFERENCES alert_delivery_events(event_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS completion_report_templates (
+                    template_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    name TEXT NOT NULL,
+                    channel TEXT NOT NULL,
+                    subject TEXT NOT NULL DEFAULT '',
+                    body TEXT NOT NULL DEFAULT '',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(workspace_id, name)
+                );
+
+                CREATE TABLE IF NOT EXISTS completion_recipient_groups (
+                    group_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    name TEXT NOT NULL,
+                    channel TEXT NOT NULL,
+                    recipients_json TEXT NOT NULL DEFAULT '[]',
+                    unsubscribed_json TEXT NOT NULL DEFAULT '[]',
+                    unsubscribe_policy TEXT NOT NULL DEFAULT 'exclude_unsubscribed',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    description TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(workspace_id, name)
+                );
+
                 CREATE TABLE IF NOT EXISTS completion_report_batches (
                     batch_id TEXT PRIMARY KEY,
                     workspace_id TEXT NOT NULL DEFAULT 'demo',
                     status TEXT NOT NULL,
+                    template_id TEXT,
+                    recipient_group_id TEXT,
+                    target_count INTEGER NOT NULL DEFAULT 0,
                     selected_count INTEGER NOT NULL DEFAULT 0,
                     sent_count INTEGER NOT NULL DEFAULT 0,
                     failed_count INTEGER NOT NULL DEFAULT 0,
@@ -2618,6 +2845,9 @@ class SpecPilotStore:
                     workspace_id TEXT NOT NULL DEFAULT 'demo',
                     channel TEXT NOT NULL,
                     target_masked TEXT NOT NULL DEFAULT '',
+                    template_id TEXT,
+                    recipient_group_id TEXT,
+                    subject TEXT NOT NULL DEFAULT '',
                     status TEXT NOT NULL,
                     provider_message TEXT NOT NULL DEFAULT '',
                     retry_count INTEGER NOT NULL DEFAULT 0,
@@ -2739,6 +2969,10 @@ class SpecPilotStore:
                     ON alert_delivery_attempts(workspace_id);
                 CREATE INDEX IF NOT EXISTS idx_alert_attempts_event
                     ON alert_delivery_attempts(event_id);
+                CREATE INDEX IF NOT EXISTS idx_completion_templates_workspace
+                    ON completion_report_templates(workspace_id, updated_at);
+                CREATE INDEX IF NOT EXISTS idx_completion_groups_workspace
+                    ON completion_recipient_groups(workspace_id, updated_at);
                 CREATE INDEX IF NOT EXISTS idx_completion_batches_workspace
                     ON completion_report_batches(workspace_id, created_at);
                 CREATE INDEX IF NOT EXISTS idx_completion_deliveries_workspace
@@ -2792,6 +3026,22 @@ class SpecPilotStore:
             _ensure_column(conn, "saved_reports", "share_token", "TEXT")
             _ensure_column(conn, "saved_reports", "shared_at", "TEXT")
             _ensure_column(conn, "saved_reports", "share_views", "INTEGER NOT NULL DEFAULT 0")
+            _ensure_column(conn, "completion_report_batches", "template_id", "TEXT")
+            _ensure_column(conn, "completion_report_batches", "recipient_group_id", "TEXT")
+            _ensure_column(
+                conn,
+                "completion_report_batches",
+                "target_count",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+            _ensure_column(conn, "completion_report_deliveries", "template_id", "TEXT")
+            _ensure_column(conn, "completion_report_deliveries", "recipient_group_id", "TEXT")
+            _ensure_column(
+                conn,
+                "completion_report_deliveries",
+                "subject",
+                "TEXT NOT NULL DEFAULT ''",
+            )
             _ensure_column(
                 conn,
                 "alert_subscriptions",
@@ -2889,6 +3139,40 @@ class SpecPilotStore:
                 (workspace_id, report_id, channel),
             ).fetchone()
         return int(row["retry_count"] or 0) + 1
+
+    def _completion_template(
+        self,
+        workspace_id: str,
+        template_id: str | None,
+    ) -> sqlite3.Row | None:
+        if not template_id:
+            return None
+        with self._connect() as conn:
+            return conn.execute(
+                """
+                SELECT *
+                FROM completion_report_templates
+                WHERE workspace_id = ? AND template_id = ? AND enabled = 1
+                """,
+                (workspace_id, template_id),
+            ).fetchone()
+
+    def _completion_recipient_group(
+        self,
+        workspace_id: str,
+        group_id: str | None,
+    ) -> sqlite3.Row | None:
+        if not group_id:
+            return None
+        with self._connect() as conn:
+            return conn.execute(
+                """
+                SELECT *
+                FROM completion_recipient_groups
+                WHERE workspace_id = ? AND group_id = ? AND enabled = 1
+                """,
+                (workspace_id, group_id),
+            ).fetchone()
 
     def _queued_alert_events(
         self,
@@ -3202,12 +3486,50 @@ def _saved_report_summary_from_row(row: sqlite3.Row) -> SavedReportSummary:
     )
 
 
+def _completion_template_from_row(row: sqlite3.Row) -> CompletionReportTemplate:
+    data = dict(row)
+    return CompletionReportTemplate(
+        template_id=data["template_id"],
+        workspace_id=data["workspace_id"],
+        name=data["name"],
+        channel=data["channel"],
+        subject=data["subject"],
+        body=data["body"],
+        enabled=bool(data["enabled"]),
+        created_at=data["created_at"],
+        updated_at=data["updated_at"],
+    )
+
+
+def _completion_recipient_group_from_row(row: sqlite3.Row) -> CompletionRecipientGroup:
+    data = dict(row)
+    recipients = json.loads(data["recipients_json"])
+    unsubscribed = json.loads(data["unsubscribed_json"])
+    return CompletionRecipientGroup(
+        group_id=data["group_id"],
+        workspace_id=data["workspace_id"],
+        name=data["name"],
+        channel=data["channel"],
+        recipients_masked=[_mask_target(item) for item in recipients],
+        recipient_count=len(recipients),
+        unsubscribed_count=len(unsubscribed),
+        unsubscribe_policy=data["unsubscribe_policy"],
+        enabled=bool(data["enabled"]),
+        description=data["description"],
+        created_at=data["created_at"],
+        updated_at=data["updated_at"],
+    )
+
+
 def _completion_batch_from_row(row: sqlite3.Row) -> CompletionReportBatch:
     data = dict(row)
     return CompletionReportBatch(
         batch_id=data["batch_id"],
         workspace_id=data["workspace_id"],
         status=data["status"],
+        template_id=data["template_id"],
+        recipient_group_id=data["recipient_group_id"],
+        target_count=data["target_count"],
         selected_count=data["selected_count"],
         sent_count=data["sent_count"],
         failed_count=data["failed_count"],
@@ -3227,6 +3549,9 @@ def _completion_delivery_from_row(row: sqlite3.Row) -> CompletionReportDelivery:
         workspace_id=data["workspace_id"],
         channel=data["channel"],
         target_masked=data["target_masked"],
+        template_id=data["template_id"],
+        recipient_group_id=data["recipient_group_id"],
+        subject=data["subject"],
         status=data["status"],
         provider_message=data["provider_message"],
         retry_count=data["retry_count"],
@@ -3860,6 +4185,67 @@ def _dispatch_status(
     )
 
 
+def _normalized_recipients(recipients: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for recipient in recipients:
+        value = recipient.strip()
+        key = value.lower()
+        if value and key not in seen:
+            normalized.append(value)
+            seen.add(key)
+    return normalized
+
+
+def _completion_channel(
+    requested_channel: str,
+    *,
+    template: sqlite3.Row | None,
+    group: sqlite3.Row | None,
+) -> str:
+    if group is not None:
+        return str(group["channel"]).strip().lower() or "email"
+    if template is not None:
+        return str(template["channel"]).strip().lower() or "email"
+    return requested_channel.strip().lower() or "email"
+
+
+def _completion_subject(template: sqlite3.Row | None) -> str:
+    if template is None:
+        return "SpecPilot AI 구매 리포트"
+    return str(template["subject"]).strip() or "SpecPilot AI 구매 리포트"
+
+
+def _completion_targets(
+    request: CompletionReportBatchRequest,
+    group: sqlite3.Row | None,
+) -> list[tuple[str, bool]]:
+    if group is None:
+        return [(request.target.strip(), False)]
+    recipients = _normalized_recipients(json.loads(group["recipients_json"]))
+    unsubscribed = {
+        item.lower()
+        for item in _normalized_recipients(json.loads(group["unsubscribed_json"]))
+    }
+    return [(recipient, recipient.lower() in unsubscribed) for recipient in recipients]
+
+
+def _render_completion_text(template: str, report: SavedReportSummary) -> str:
+    public_path = f"/r/{report.share_token}" if report.share_token else "비공개 리포트"
+    values = {
+        "title": report.title,
+        "top_model_name": report.top_model_name or "추천 후보 확인 필요",
+        "final_pick_id": report.final_pick_id or "미정",
+        "report_id": report.report_id,
+        "trace_id": report.trace_id,
+        "public_path": public_path,
+    }
+    rendered = template
+    for key, value in values.items():
+        rendered = rendered.replace("{" + key + "}", value)
+    return rendered
+
+
 def _completion_dispatch_status(
     *,
     channel: str,
@@ -3893,6 +4279,7 @@ def _completion_dispatch_status(
 def _completion_batch_status(
     *,
     selected_count: int,
+    target_count: int,
     sent_count: int,
     failed_count: int,
     dry_run: bool,
@@ -3901,10 +4288,14 @@ def _completion_batch_status(
         return "dry_run"
     if selected_count == 0:
         return "empty"
+    if target_count == 0:
+        return "failed"
     if failed_count and not sent_count:
         return "failed"
     if failed_count:
         return "partial"
+    if sent_count == 0:
+        return "skipped"
     return "sent"
 
 

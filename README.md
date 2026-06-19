@@ -265,6 +265,51 @@ curl http://127.0.0.1:8000/reports/completion-batches \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
+완료 리포트 템플릿 저장:
+
+```bash
+curl -X POST http://127.0.0.1:8000/reports/completion-templates \
+  -H "Content-Type: application/json" \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY" \
+  -d '{
+    "name": "운영 완료 리포트",
+    "channel": "email",
+    "subject": "[SpecPilot] {title}",
+    "body": "{title}\n추천 1순위: {top_model_name}\n공개 리포트: {public_path}",
+    "enabled": true
+  }'
+```
+
+완료 리포트 수신자 그룹 저장:
+
+```bash
+curl -X POST http://127.0.0.1:8000/reports/completion-recipient-groups \
+  -H "Content-Type: application/json" \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY" \
+  -d '{
+    "name": "운영 수신자",
+    "channel": "email",
+    "recipients": ["ops@example.com", "buyer@example.com"],
+    "unsubscribed_recipients": ["buyer@example.com"],
+    "unsubscribe_policy": "exclude_unsubscribed"
+  }'
+```
+
+템플릿과 수신자 그룹을 사용하는 batch 발송:
+
+```bash
+curl -X POST http://127.0.0.1:8000/reports/completion-batches \
+  -H "Content-Type: application/json" \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY" \
+  -d '{
+    "report_ids": ["report_xxxxxxxxxxxx"],
+    "template_id": "template_xxxxxxxxxxxx",
+    "recipient_group_id": "group_xxxxxxxxxxxx",
+    "respect_unsubscribe": true,
+    "note": "운영 수신자 그룹 발송"
+  }'
+```
+
 ### 가격 알림 구독
 
 ```bash
@@ -695,7 +740,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/ops/observability/exports`: trace span과 품질 감사 payload를 외부 observability 연동 전 outbox로 저장한 이력
 - `/ops/observability/dispatch`: queued/failed observability export를 OpenTelemetry/LangSmith exporter outbox로 dispatch하고 성공/실패/재시도 상태를 저장
 - `share_token`, `shared_at`, `share_views`: 저장 리포트 공개 공유 상태
-- `/reports/completion-batches`: 저장 리포트 묶음 발송 batch와 개별 delivery 성공/실패/재시도 상태
+- `/reports/completion-templates`, `/reports/completion-recipient-groups`, `/reports/completion-batches`: 완료 리포트 템플릿, 수신자 그룹, unsubscribe 제외, batch와 개별 delivery 성공/실패/재시도 상태
 - `feedback_count`, `average_satisfaction`, `purchase_intent_rate`: 추천 결과가 실제 구매 판단으로 이어지는지 보는 운영 지표
 - `beta_leads`: 베타 신청 리드 수
 - `alert_channels`, `alert_delivery_attempts`, `sent_alert_deliveries`, `failed_alert_deliveries`: 알림 발송 채널과 dispatch 운영 지표
@@ -703,8 +748,8 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 
 ## 로컬 저장소
 
-분석 실행, trace span, observability export outbox, 저장 리포트, 공유 토큰, 완료 리포트 batch/delivery, 가격 알림 구독, 알림 채널, 발송 큐, 발송 시도, 사용자 피드백, 베타 리드는 기본적으로 SQLite에 저장됩니다.
-저장 리포트, 공유 토큰, 완료 리포트 batch, 알림, 발송 채널, 피드백, 리드는 `X-SpecPilot-Key`에서 계산된 워크스페이스 단위로 분리됩니다. 공개 리포트는 공유 토큰이 발급된 단일 리포트만 조회할 수 있습니다.
+분석 실행, trace span, observability export outbox, 저장 리포트, 공유 토큰, 완료 리포트 템플릿/수신자 그룹/batch/delivery, 가격 알림 구독, 알림 채널, 발송 큐, 발송 시도, 사용자 피드백, 베타 리드는 기본적으로 SQLite에 저장됩니다.
+저장 리포트, 공유 토큰, 완료 리포트 템플릿/수신자 그룹/batch, 알림, 발송 채널, 피드백, 리드는 `X-SpecPilot-Key`에서 계산된 워크스페이스 단위로 분리됩니다. 공개 리포트는 공유 토큰이 발급된 단일 리포트만 조회할 수 있습니다.
 
 기본 경로:
 
@@ -821,7 +866,7 @@ GitHub Actions는 `main` push와 PR에서 다음을 실행합니다.
 - 사용자가 입력한 필수 조건과 제외 조건은 후보별 충족 매트릭스로 다시 검증합니다.
 - 구매 타이밍 윈도우는 현재가, 목표가, 적정가 밴드, 쿠폰/재고 변동 리스크를 묶어 지금 결제할지 기다릴지 판단하게 합니다.
 - 구매 실행 패키지는 결제 전 확인, 판매자 문의, 주변 검토 공유까지 한 흐름으로 제공합니다.
-- 완료 리포트 배치는 저장된 구매 리포트를 운영 채널 outbox로 묶어 전달하고, batch별 성공/실패/재시도 상태를 남깁니다.
+- 완료 리포트 배치는 저장된 구매 리포트를 운영 채널 outbox로 묶어 전달하고, 템플릿, 수신자 그룹, unsubscribe 제외, batch별 성공/실패/재시도 상태를 남깁니다.
 - 목표가 도달 알림은 발송 큐와 채널별 dispatch 시도를 남기고 실패 시 재시도 기준을 함께 저장합니다.
 - 연락처와 이메일 원문은 저장하지 않고 마스킹된 값만 운영 콘솔에 노출합니다.
 - 추천 만족도와 구매 의향은 모델 개선 신호로 쓰되 추천 순위에는 즉시 반영하지 않습니다.
@@ -834,4 +879,4 @@ GitHub Actions는 `main` push와 PR에서 다음을 실행합니다.
 - 가격 비교/오픈마켓/공식 스토어의 공식 provider 계약과 외부 cron/Cloud Scheduler 배포 연결
 - 실제 이메일/SMS/웹훅 provider credential 연결과 운영 rate limit 적용
 - 실제 LangSmith/OpenTelemetry credential을 사용하는 managed exporter 배치 작업
-- 완료 리포트 provider별 템플릿, 수신자 그룹, unsubscribe 정책
+- 완료 리포트 provider별 렌더링 미리보기와 수신자별 클릭/열람 추적

@@ -722,9 +722,62 @@ class CompletionReportBatchRequest(BaseModel):
     report_ids: list[str] = Field(default_factory=list)
     channel: str = "email"
     target: str = "ops@example.com"
+    template_id: str | None = None
+    recipient_group_id: str | None = None
+    respect_unsubscribe: bool = True
     dry_run: bool = False
     limit: int = Field(default=20, ge=1, le=100)
     note: str = ""
+
+
+class CompletionReportTemplateRequest(BaseModel):
+    name: str
+    channel: str = "email"
+    subject: str = "SpecPilot AI 구매 리포트"
+    body: str = (
+        "{title}\n"
+        "추천 1순위: {top_model_name}\n"
+        "공개 리포트: {public_path}\n"
+        "결제 전 옵션명, 배송비, 카드 혜택을 다시 확인해 주세요."
+    )
+    enabled: bool = True
+
+
+class CompletionReportTemplate(BaseModel):
+    template_id: str
+    workspace_id: str = "demo"
+    name: str
+    channel: str
+    subject: str
+    body: str
+    enabled: bool = True
+    created_at: str
+    updated_at: str
+
+
+class CompletionRecipientGroupRequest(BaseModel):
+    name: str
+    channel: str = "email"
+    recipients: list[str] = Field(default_factory=list)
+    unsubscribed_recipients: list[str] = Field(default_factory=list)
+    unsubscribe_policy: str = "exclude_unsubscribed"
+    enabled: bool = True
+    description: str = ""
+
+
+class CompletionRecipientGroup(BaseModel):
+    group_id: str
+    workspace_id: str = "demo"
+    name: str
+    channel: str
+    recipients_masked: list[str] = Field(default_factory=list)
+    recipient_count: int = 0
+    unsubscribed_count: int = 0
+    unsubscribe_policy: str = "exclude_unsubscribed"
+    enabled: bool = True
+    description: str = ""
+    created_at: str
+    updated_at: str
 
 
 class CompletionReportDelivery(BaseModel):
@@ -734,6 +787,9 @@ class CompletionReportDelivery(BaseModel):
     workspace_id: str = "demo"
     channel: str
     target_masked: str
+    template_id: str | None = None
+    recipient_group_id: str | None = None
+    subject: str = ""
     status: str
     provider_message: str = ""
     retry_count: int = 0
@@ -746,6 +802,9 @@ class CompletionReportBatch(BaseModel):
     batch_id: str
     workspace_id: str = "demo"
     status: str
+    template_id: str | None = None
+    recipient_group_id: str | None = None
+    target_count: int = 0
     selected_count: int
     sent_count: int = 0
     failed_count: int = 0

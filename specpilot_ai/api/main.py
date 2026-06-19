@@ -32,8 +32,12 @@ from specpilot_ai.core.models import (
     BetaLeadRequest,
     BetaReadinessDashboard,
     Category,
+    CompletionRecipientGroup,
+    CompletionRecipientGroupRequest,
     CompletionReportBatch,
     CompletionReportBatchRequest,
+    CompletionReportTemplate,
+    CompletionReportTemplateRequest,
     FeedbackRecord,
     FeedbackRequest,
     IntakeDiagnosisRequest,
@@ -309,6 +313,53 @@ def list_reports(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> list[SavedReportSummary]:
     return _store().list_reports_for_workspace(workspace.workspace_id, limit=limit)
+
+
+@app.post("/reports/completion-templates", response_model=CompletionReportTemplate)
+def upsert_completion_template(
+    request: CompletionReportTemplateRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> CompletionReportTemplate:
+    return _store().upsert_completion_report_template_for_workspace(
+        workspace.workspace_id,
+        request,
+    )
+
+
+@app.get("/reports/completion-templates", response_model=list[CompletionReportTemplate])
+def list_completion_templates(
+    limit: int = 50,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[CompletionReportTemplate]:
+    return _store().list_completion_report_templates_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+
+
+@app.post("/reports/completion-recipient-groups", response_model=CompletionRecipientGroup)
+def upsert_completion_recipient_group(
+    request: CompletionRecipientGroupRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> CompletionRecipientGroup:
+    return _store().upsert_completion_recipient_group_for_workspace(
+        workspace.workspace_id,
+        request,
+    )
+
+
+@app.get(
+    "/reports/completion-recipient-groups",
+    response_model=list[CompletionRecipientGroup],
+)
+def list_completion_recipient_groups(
+    limit: int = 50,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[CompletionRecipientGroup]:
+    return _store().list_completion_recipient_groups_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
 
 
 @app.post("/reports/completion-batches", response_model=CompletionReportBatch)

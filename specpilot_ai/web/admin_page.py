@@ -208,11 +208,16 @@ def admin_page_html() -> str:
     <section class="grid top-grid" style="margin-top:14px">
       <div class="panel">
         <h2>완료 리포트 배치</h2>
-        <p>저장된 구매 리포트를 운영 이메일, 웹훅, 문자 outbox로 묶어 발송합니다.</p>
+        <p>저장된 구매 리포트를 템플릿과 수신자 그룹 기준으로 운영 outbox에 발송합니다.</p>
         <input id="completion-target" value="ops@example.com" />
+        <input id="completion-group" value="ops@example.com, buyer@example.com" />
         <div class="actions">
+          <button class="secondary" id="save-completion-template">템플릿 저장</button>
+          <button class="secondary" id="save-completion-group">수신자 그룹 저장</button>
           <button class="primary" id="dispatch-completion-reports">완료 리포트 발송</button>
         </div>
+        <div class="review-list" id="completion-templates"></div>
+        <div class="review-list" id="completion-groups"></div>
         <div class="review-list" id="completion-batches"></div>
       </div>
       <div class="panel">
@@ -233,6 +238,9 @@ def admin_page_html() -> str:
     </section>
   </main>
   <script>
+    let latestCompletionTemplates = [];
+    let latestCompletionGroups = [];
+
     async function loadDashboard() {
       const [
         response,
@@ -253,7 +261,9 @@ def admin_page_html() -> str:
         betaBacklogSummaryResponse,
         regressionResponse,
         observabilityResponse,
-        completionBatchResponse
+        completionBatchResponse,
+        completionTemplateResponse,
+        completionGroupResponse
       ] = await Promise.all([
         fetch('/admin/dashboard'),
         fetch('/ops/quality'),
@@ -273,7 +283,9 @@ def admin_page_html() -> str:
         fetch('/beta/backlog/summary'),
         fetch('/ops/regression'),
         fetch('/ops/observability/exports'),
-        fetch('/reports/completion-batches')
+        fetch('/reports/completion-batches'),
+        fetch('/reports/completion-templates'),
+        fetch('/reports/completion-recipient-groups')
       ]);
       const data = await response.json();
       const quality = await qualityResponse.json();
@@ -294,6 +306,10 @@ def admin_page_html() -> str:
       const regression = await regressionResponse.json();
       const observabilityExports = await observabilityResponse.json();
       const completionBatches = await completionBatchResponse.json();
+      const completionTemplates = await completionTemplateResponse.json();
+      const completionGroups = await completionGroupResponse.json();
+      latestCompletionTemplates = completionTemplates;
+      latestCompletionGroups = completionGroups;
       renderMetrics(data.metrics);
       renderBetaReadiness(readiness);
       renderSources(data.adapter_statuses);
@@ -311,6 +327,8 @@ def admin_page_html() -> str:
       renderBetaBacklog(betaBacklog);
       renderChannels(channels, events);
       renderDeliveries(deliveries);
+      renderCompletionTemplates(completionTemplates);
+      renderCompletionGroups(completionGroups);
       renderCompletionBatches(completionBatches);
       renderTraces(traces);
       renderObservabilityExports(observabilityExports);
@@ -731,6 +749,36 @@ def admin_page_html() -> str:
       }).join('');
     }
 
+    function renderCompletionTemplates(items) {
+      const root = document.querySelector('#completion-templates');
+      if (!items.length) {
+        root.innerHTML = '<p>아직 완료 리포트 템플릿이 없습니다.</p>';
+        return;
+      }
+      root.innerHTML = items.map((item) => `
+        <article class="review-item">
+          <span class="kicker">${item.channel} · ${item.enabled ? '활성' : '비활성'}</span>
+          <h3>${item.name}</h3>
+          <p>${item.subject}</p>
+        </article>
+      `).join('');
+    }
+
+    function renderCompletionGroups(items) {
+      const root = document.querySelector('#completion-groups');
+      if (!items.length) {
+        root.innerHTML = '<p>아직 완료 리포트 수신자 그룹이 없습니다.</p>';
+        return;
+      }
+      root.innerHTML = items.map((item) => `
+        <article class="review-item">
+          <span class="kicker">${item.channel} · ${item.enabled ? '활성' : '비활성'} · ${item.unsubscribe_policy}</span>
+          <h3>${item.name} · 수신 ${item.recipient_count}명 · 제외 ${item.unsubscribed_count}명</h3>
+          <p>${item.recipients_masked.join(', ') || '수신자 없음'}</p>
+        </article>
+      `).join('');
+    }
+
     async function decide(reviewId, status) {
       await fetch(`/admin/reviews/${reviewId}/decision`, {
         method: 'POST',
@@ -854,13 +902,52 @@ def admin_page_html() -> str:
       });
       await loadDashboard();
     });
+    document.querySelector('#save-completion-template').addEventListener('click', async () => {
+      await fetch('/reports/completion-templates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: '운영 완료 리포트',
+          channel: 'email',
+          subject: '[SpecPilot] {title}',
+          body: '{title}\\n추천 1순위: {top_model_name}\\n공개 리포트: {public_path}\\n결제 전 옵션명과 최종 금액을 확인해 주세요.',
+          enabled: true
+        })
+      });
+      await loadDashboard();
+    });
+    document.querySelector('#save-completion-group').addEventListener('click', async () => {
+      const recipients = document.querySelector('#completion-group').value
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+      await fetch('/reports/completion-recipient-groups', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: '운영 완료 리포트 수신자',
+          channel: 'email',
+          recipients,
+          unsubscribed_recipients: [],
+          unsubscribe_policy: 'exclude_unsubscribed',
+          enabled: true,
+          description: '관리자 콘솔 기본 수신자 그룹'
+        })
+      });
+      await loadDashboard();
+    });
     document.querySelector('#dispatch-completion-reports').addEventListener('click', async () => {
+      const template = latestCompletionTemplates[0];
+      const group = latestCompletionGroups[0];
       await fetch('/reports/completion-batches', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           channel: 'email',
           target: document.querySelector('#completion-target').value,
+          template_id: template ? template.template_id : null,
+          recipient_group_id: group ? group.group_id : null,
+          respect_unsubscribe: true,
           dry_run: false,
           limit: 20,
           note: '관리자 콘솔 완료 리포트 발송'
