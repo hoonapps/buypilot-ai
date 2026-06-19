@@ -1,5 +1,7 @@
 from typing import TypedDict
 
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnableLambda
 from langgraph.graph import END, StateGraph
 
 from ontology_studio.core.models import QueryRequest, QueryResponse, RetrievalMode
@@ -76,10 +78,32 @@ def generate_answer(state: GraphRagState) -> GraphRagState:
         RetrievalMode.enhanced_graphrag: "Enhanced GraphRAG",
     }[mode]
 
-    state["answer"] = (
-        f"'{request.question}' 질문은 {mode_label} 경로가 적합합니다. "
-        "Ontology Studio는 먼저 질문 유형을 분류하고, 필요한 근거를 검색한 뒤 "
-        "LLM 답변에 그래프 관계와 문서 근거를 함께 넣습니다."
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                "You are the deterministic demo answer writer for Ontology Studio.",
+            ),
+            (
+                "human",
+                "Question: {question}\nMode: {mode_label}\nEvidence:\n{evidence}",
+            ),
+        ]
+    )
+    demo_writer = RunnableLambda(
+        lambda prompt_value: (
+            f"'{request.question}' 질문은 {mode_label} 경로가 적합합니다. "
+            "Ontology Studio는 먼저 질문 유형을 분류하고, 필요한 근거를 검색한 뒤 "
+            "LLM 답변에 그래프 관계와 문서 근거를 함께 넣습니다."
+        )
+    )
+    chain = prompt | demo_writer
+    state["answer"] = chain.invoke(
+        {
+            "question": request.question,
+            "mode_label": mode_label,
+            "evidence": "\n".join(f"- {item}" for item in state["evidence"]),
+        }
     )
     state["next_actions"] = [
         "도메인 온톨로지의 노드와 관계를 검토한다.",
