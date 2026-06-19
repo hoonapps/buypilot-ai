@@ -104,9 +104,11 @@ def admin_page_html() -> str:
         <input id="source-query" value="영상 편집과 게임용 데스크톱 200만원 QHD 144Hz" />
         <input id="source-url" value="https://example.com/product/specpilot" />
         <input id="source-model" value="RTX 4070 영상 편집 PC" />
+        <input id="source-provider-host" value="example.com" />
         <div class="actions">
           <button class="primary" id="collect">소스 수집</button>
           <button class="secondary" id="ingest-url">URL 인입</button>
+          <button class="secondary" id="save-provider">provider 정책 저장</button>
           <button class="secondary" id="save-monitor">모니터 등록</button>
           <button class="secondary" id="refresh-monitors">모니터 refresh</button>
           <button class="secondary" id="refresh">새로고침</button>
@@ -138,6 +140,11 @@ def admin_page_html() -> str:
         <p>성공, 실패, live fetch 여부와 검수 큐 연결 상태를 확인합니다.</p>
         <div class="review-list" id="source-refresh-runs"></div>
       </div>
+    </section>
+    <section class="panel" style="margin-top:14px">
+      <h2>Source Provider 정책</h2>
+      <p>live fetch 허용 host, robots/약관 검토, 시간당 rate limit 상태를 확인합니다.</p>
+      <div class="review-list" id="source-providers"></div>
     </section>
     <section class="panel" style="margin-top:14px">
       <h2>품질/비용 감사</h2>
@@ -191,7 +198,8 @@ def admin_page_html() -> str:
         eventResponse,
         traceResponse,
         monitorResponse,
-        refreshRunResponse
+        refreshRunResponse,
+        providerResponse
       ] = await Promise.all([
         fetch('/admin/dashboard'),
         fetch('/ops/quality'),
@@ -202,7 +210,8 @@ def admin_page_html() -> str:
         fetch('/alerts/events'),
         fetch('/ops/traces'),
         fetch('/sources/monitors'),
-        fetch('/sources/refresh-runs')
+        fetch('/sources/refresh-runs'),
+        fetch('/sources/providers')
       ]);
       const data = await response.json();
       const quality = await qualityResponse.json();
@@ -214,11 +223,13 @@ def admin_page_html() -> str:
       const traces = await traceResponse.json();
       const monitors = await monitorResponse.json();
       const refreshRuns = await refreshRunResponse.json();
+      const providers = await providerResponse.json();
       renderMetrics(data.metrics);
       renderSources(data.adapter_statuses);
       renderReviews(data.pending_reviews);
       renderSourceMonitors(monitors);
       renderSourceRefreshRuns(refreshRuns);
+      renderSourceProviders(providers);
       renderQuality(quality);
       renderFeedback(feedback);
       renderBetaLeads(betaLeads);
@@ -240,6 +251,9 @@ def admin_page_html() -> str:
         ['URL 모니터', metrics.source_monitors],
         ['소스 refresh', metrics.source_refresh_runs],
         ['refresh 실패', metrics.source_refresh_failures],
+        ['provider 정책', metrics.source_provider_policies],
+        ['provider fetch', metrics.source_provider_fetches],
+        ['fetch 차단', metrics.source_provider_blocked_fetches],
         ['Trace span', metrics.trace_spans],
         ['트리거', metrics.triggered_alerts],
         ['품질', metrics.average_quality_score],
@@ -292,6 +306,25 @@ def admin_page_html() -> str:
           <p>source: ${item.source_id || '없음'} / review: ${item.review_id || '없음'}</p>
         </article>
       `).join('');
+    }
+
+    function renderSourceProviders(items) {
+      const root = document.querySelector('#source-providers');
+      if (!items.length) {
+        root.innerHTML = '<p>아직 등록된 provider 정책이 없습니다.</p>';
+        return;
+      }
+      root.innerHTML = items.map((item) => {
+        const blocked = !item.live_fetch_allowed || item.robots_status !== 'approved' || item.terms_status !== 'approved';
+        return `
+          <article class="review-item ${blocked ? 'warn' : ''}">
+            <span class="kicker">${item.kind} · ${item.host_pattern} · ${item.live_fetch_allowed ? 'live 허용' : 'live 차단'}</span>
+            <h3>${item.provider_name}</h3>
+            <p>robots ${item.robots_status} / terms ${item.terms_status} / credential ${item.credential_status}</p>
+            <p>시간당 ${item.rate_limit_per_hour}회 / ${item.notes || '운영 메모 없음'}</p>
+          </article>
+        `;
+      }).join('');
     }
 
     function renderReviews(reviews) {
@@ -457,6 +490,24 @@ def admin_page_html() -> str:
           kind: 'price',
           expected_model: document.querySelector('#source-model').value,
           source_name: 'admin_console'
+        })
+      });
+      await loadDashboard();
+    });
+    document.querySelector('#save-provider').addEventListener('click', async () => {
+      await fetch('/sources/providers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider_name: '운영 승인 provider',
+          host_pattern: document.querySelector('#source-provider-host').value,
+          kind: 'price',
+          live_fetch_allowed: true,
+          robots_status: 'approved',
+          terms_status: 'approved',
+          credential_status: 'operator_reviewed',
+          rate_limit_per_hour: 30,
+          notes: '관리자 콘솔에서 등록한 live fetch 정책'
         })
       });
       await loadDashboard();

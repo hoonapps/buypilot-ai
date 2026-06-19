@@ -41,6 +41,12 @@ class ReviewStatus(StrEnum):
     rejected = "rejected"
 
 
+class ProviderReviewStatus(StrEnum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+
+
 class TrustGrade(StrEnum):
     high = "high"
     medium = "medium"
@@ -668,6 +674,9 @@ class OperationsMetrics(BaseModel):
     source_monitors: int = 0
     source_refresh_runs: int = 0
     source_refresh_failures: int = 0
+    source_provider_policies: int = 0
+    source_provider_fetches: int = 0
+    source_provider_blocked_fetches: int = 0
     trace_spans: int = 0
     feedback_count: int = 0
     beta_leads: int = 0
@@ -807,6 +816,57 @@ class SourceRefreshResponse(BaseModel):
     candidates: list[SourceCandidate] = Field(default_factory=list)
     review_items: list[ReviewQueueItem] = Field(default_factory=list)
     runs: list[SourceRefreshRun] = Field(default_factory=list)
+
+
+class SourceProviderPolicyRequest(BaseModel):
+    provider_name: str = Field(min_length=2)
+    host_pattern: str = Field(min_length=3)
+    kind: SourceKind = SourceKind.price
+    live_fetch_allowed: bool = False
+    robots_status: ProviderReviewStatus = ProviderReviewStatus.pending
+    terms_status: ProviderReviewStatus = ProviderReviewStatus.pending
+    credential_status: str = "not_connected"
+    rate_limit_per_hour: int = Field(default=30, ge=1, le=5000)
+    notes: str = ""
+
+
+class SourceProviderPolicy(BaseModel):
+    provider_id: str
+    workspace_id: str
+    provider_name: str
+    host_pattern: str
+    kind: SourceKind
+    live_fetch_allowed: bool
+    robots_status: ProviderReviewStatus
+    terms_status: ProviderReviewStatus
+    credential_status: str
+    rate_limit_per_hour: int
+    notes: str = ""
+    created_at: str
+    updated_at: str
+
+
+class SourceProviderFetchLog(BaseModel):
+    fetch_id: str
+    provider_id: str | None = None
+    workspace_id: str
+    url: str
+    host: str
+    status: str
+    message: str
+    created_at: str
+
+
+class SourceProviderGate(BaseModel):
+    allowed: bool
+    host: str
+    provider: SourceProviderPolicy | None = None
+    remaining_hourly_quota: int = 0
+    message: str
+
+
+class SourceProviderCheckRequest(BaseModel):
+    url: str = Field(min_length=8)
 
 
 class ReviewDecisionRequest(BaseModel):

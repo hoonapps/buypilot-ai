@@ -23,6 +23,7 @@ from specpilot_ai.core.models import (
     FeedbackRecord,
     FeedbackRequest,
     OperationsMetrics,
+    ProviderReviewStatus,
     PublicReport,
     QualityDashboard,
     ReportShare,
@@ -34,6 +35,9 @@ from specpilot_ai.core.models import (
     SourceCandidate,
     SourceMonitor,
     SourceMonitorRequest,
+    SourceProviderFetchLog,
+    SourceProviderPolicy,
+    SourceProviderPolicyRequest,
     SourceRefreshRun,
     TraceEvent,
     TraceRunSummary,
@@ -1186,6 +1190,120 @@ class SpecPilotStore:
             ).fetchall()
         return [_source_refresh_run_from_row(row) for row in rows]
 
+    def create_source_provider_policy_for_workspace(
+        self,
+        workspace_id: str,
+        request: SourceProviderPolicyRequest,
+    ) -> SourceProviderPolicy:
+        now = _now()
+        policy = SourceProviderPolicy(
+            provider_id=f"provider_{uuid4().hex[:12]}",
+            workspace_id=workspace_id,
+            provider_name=request.provider_name,
+            host_pattern=request.host_pattern.strip().lower(),
+            kind=request.kind,
+            live_fetch_allowed=request.live_fetch_allowed,
+            robots_status=request.robots_status,
+            terms_status=request.terms_status,
+            credential_status=request.credential_status.strip() or "not_connected",
+            rate_limit_per_hour=request.rate_limit_per_hour,
+            notes=request.notes,
+            created_at=now,
+            updated_at=now,
+        )
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO source_provider_policies (
+                    provider_id, workspace_id, provider_name, host_pattern, kind,
+                    live_fetch_allowed, robots_status, terms_status, credential_status,
+                    rate_limit_per_hour, notes, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    policy.provider_id,
+                    policy.workspace_id,
+                    policy.provider_name,
+                    policy.host_pattern,
+                    policy.kind.value,
+                    1 if policy.live_fetch_allowed else 0,
+                    policy.robots_status.value,
+                    policy.terms_status.value,
+                    policy.credential_status,
+                    policy.rate_limit_per_hour,
+                    policy.notes,
+                    policy.created_at,
+                    policy.updated_at,
+                ),
+            )
+        return policy
+
+    def list_source_provider_policies_for_workspace(
+        self,
+        workspace_id: str,
+        *,
+        limit: int = 100,
+    ) -> list[SourceProviderPolicy]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM source_provider_policies
+                WHERE workspace_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (workspace_id, limit),
+            ).fetchall()
+        return [_source_provider_policy_from_row(row) for row in rows]
+
+    def record_source_provider_fetch(self, log: SourceProviderFetchLog) -> SourceProviderFetchLog:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO source_provider_fetch_log (
+                    fetch_id, provider_id, workspace_id, url, host, status,
+                    message, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    log.fetch_id,
+                    log.provider_id,
+                    log.workspace_id,
+                    log.url,
+                    log.host,
+                    log.status,
+                    log.message,
+                    log.created_at,
+                ),
+            )
+        return log
+
+    def count_recent_provider_fetches(
+        self,
+        workspace_id: str,
+        provider_id: str,
+        *,
+        since_minutes: int = 60,
+        status: str = "allowed",
+    ) -> int:
+        since = (datetime.now(UTC) - timedelta(minutes=since_minutes)).isoformat()
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM source_provider_fetch_log
+                WHERE workspace_id = ?
+                  AND provider_id = ?
+                  AND status = ?
+                  AND created_at >= ?
+                """,
+                (workspace_id, provider_id, status, since),
+            ).fetchone()
+        return int(row[0])
+
     def metrics(self) -> OperationsMetrics:
         return self.metrics_for_workspace(None)
 
@@ -1242,6 +1360,22 @@ class SpecPilotStore:
                 SELECT COUNT(*)
                 FROM source_refresh_runs{where}
                 {' AND ' if where else ' WHERE '}status = 'failed'
+                """,
+                params,
+            ).fetchone()[0]
+            source_provider_policies = conn.execute(
+                f"SELECT COUNT(*) FROM source_provider_policies{where}",
+                params,
+            ).fetchone()[0]
+            source_provider_fetches = conn.execute(
+                f"SELECT COUNT(*) FROM source_provider_fetch_log{where}",
+                params,
+            ).fetchone()[0]
+            source_provider_blocked_fetches = conn.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM source_provider_fetch_log{where}
+                {' AND ' if where else ' WHERE '}status = 'blocked'
                 """,
                 params,
             ).fetchone()[0]
@@ -1317,6 +1451,9 @@ class SpecPilotStore:
             source_monitors=source_monitors,
             source_refresh_runs=source_refresh_runs,
             source_refresh_failures=source_refresh_failures,
+            source_provider_policies=source_provider_policies,
+            source_provider_fetches=source_provider_fetches,
+            source_provider_blocked_fetches=source_provider_blocked_fetches,
             trace_spans=trace_spans,
             feedback_count=feedback_count,
             beta_leads=beta_leads,
@@ -1428,6 +1565,33 @@ class SpecPilotStore:
                     created_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS source_provider_policies (
+                    provider_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    provider_name TEXT NOT NULL,
+                    host_pattern TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    live_fetch_allowed INTEGER NOT NULL DEFAULT 0,
+                    robots_status TEXT NOT NULL DEFAULT 'pending',
+                    terms_status TEXT NOT NULL DEFAULT 'pending',
+                    credential_status TEXT NOT NULL DEFAULT 'not_connected',
+                    rate_limit_per_hour INTEGER NOT NULL DEFAULT 30,
+                    notes TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS source_provider_fetch_log (
+                    fetch_id TEXT PRIMARY KEY,
+                    provider_id TEXT,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    url TEXT NOT NULL,
+                    host TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS alert_delivery_events (
                     event_id TEXT PRIMARY KEY,
                     subscription_id TEXT NOT NULL,
@@ -1524,6 +1688,10 @@ class SpecPilotStore:
                     ON source_monitors(workspace_id, active);
                 CREATE INDEX IF NOT EXISTS idx_source_refresh_workspace
                     ON source_refresh_runs(workspace_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_source_provider_workspace
+                    ON source_provider_policies(workspace_id, host_pattern);
+                CREATE INDEX IF NOT EXISTS idx_source_provider_fetch_workspace
+                    ON source_provider_fetch_log(workspace_id, provider_id, created_at);
                 CREATE INDEX IF NOT EXISTS idx_alert_events_workspace
                     ON alert_delivery_events(workspace_id);
                 CREATE INDEX IF NOT EXISTS idx_alert_events_subscription
@@ -1926,6 +2094,25 @@ def _source_refresh_run_from_row(row: sqlite3.Row) -> SourceRefreshRun:
         fetched_live=bool(data["fetched_live"]),
         message=data["message"],
         created_at=data["created_at"],
+    )
+
+
+def _source_provider_policy_from_row(row: sqlite3.Row) -> SourceProviderPolicy:
+    data = dict(row)
+    return SourceProviderPolicy(
+        provider_id=data["provider_id"],
+        workspace_id=data["workspace_id"],
+        provider_name=data["provider_name"],
+        host_pattern=data["host_pattern"],
+        kind=data["kind"],
+        live_fetch_allowed=bool(data["live_fetch_allowed"]),
+        robots_status=ProviderReviewStatus(data["robots_status"]),
+        terms_status=ProviderReviewStatus(data["terms_status"]),
+        credential_status=data["credential_status"],
+        rate_limit_per_hour=data["rate_limit_per_hour"],
+        notes=data["notes"],
+        created_at=data["created_at"],
+        updated_at=data["updated_at"],
     )
 
 

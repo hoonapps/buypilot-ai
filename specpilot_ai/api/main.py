@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -45,6 +46,11 @@ from specpilot_ai.core.models import (
     SourceCollectionResponse,
     SourceMonitor,
     SourceMonitorRequest,
+    SourceProviderCheckRequest,
+    SourceProviderFetchLog,
+    SourceProviderGate,
+    SourceProviderPolicy,
+    SourceProviderPolicyRequest,
     SourceRefreshRequest,
     SourceRefreshResponse,
     SourceRefreshRun,
@@ -521,6 +527,33 @@ def source_adapter_statuses() -> list[SourceAdapterStatus]:
     return _collector().statuses()
 
 
+@app.post("/sources/providers", response_model=SourceProviderPolicy)
+def create_source_provider_policy(
+    request: SourceProviderPolicyRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> SourceProviderPolicy:
+    return _store().create_source_provider_policy_for_workspace(workspace.workspace_id, request)
+
+
+@app.get("/sources/providers", response_model=list[SourceProviderPolicy])
+def list_source_provider_policies(
+    limit: int = 100,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[SourceProviderPolicy]:
+    return _store().list_source_provider_policies_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+
+
+@app.post("/sources/providers/check", response_model=SourceProviderGate)
+def check_source_provider_policy(
+    request: SourceProviderCheckRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> SourceProviderGate:
+    return _source_provider_gate(request.url, workspace.workspace_id)
+
+
 @app.post("/sources/collect", response_model=SourceCollectionResponse)
 def collect_sources(request: SourceCollectionRequest) -> SourceCollectionResponse:
     response = _collector().collect(request)
@@ -530,7 +563,14 @@ def collect_sources(request: SourceCollectionRequest) -> SourceCollectionRespons
 
 
 @app.post("/sources/ingest-url", response_model=SourceUrlIngestResponse)
-def ingest_url_source(request: SourceUrlIngestRequest) -> SourceUrlIngestResponse:
+def ingest_url_source(
+    request: SourceUrlIngestRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> SourceUrlIngestResponse:
+    if not request.html.strip():
+        gate = _source_provider_gate(request.url, workspace.workspace_id, record=True)
+        if not gate.allowed:
+            raise HTTPException(status_code=403, detail=gate.message)
     try:
         response = ingest_source_url(request)
     except ValueError as exc:
@@ -591,6 +631,16 @@ def refresh_source_monitors(
     review_items: list[ReviewQueueItem] = []
     for monitor in monitors:
         html = request.html_overrides.get(monitor.monitor_id, monitor.html_snapshot)
+        if not html.strip():
+            gate = _source_provider_gate(monitor.url, workspace.workspace_id, record=True)
+            if not gate.allowed:
+                run = _source_refresh_run(
+                    monitor=monitor,
+                    status="failed",
+                    message=gate.message,
+                )
+                runs.append(_store().record_source_refresh_run(run))
+                continue
         try:
             response = ingest_source_url(
                 SourceUrlIngestRequest(
@@ -675,6 +725,102 @@ def admin_dashboard() -> AdminReviewDashboard:
         pending_reviews=_store().list_review_items(status=ReviewStatus.pending, limit=25),
         metrics=_store().metrics(),
     )
+
+
+def _source_provider_gate(
+    url: str,
+    workspace_id: str,
+    *,
+    record: bool = False,
+) -> SourceProviderGate:
+    host = _host_from_url(url)
+    provider = _matching_source_provider(host, workspace_id)
+    status = "blocked"
+    if provider is None:
+        gate = SourceProviderGate(
+            allowed=False,
+            host=host,
+            provider=None,
+            remaining_hourly_quota=0,
+            message="승인된 source provider 정책이 없어 live fetch를 차단했습니다.",
+        )
+    elif not provider.live_fetch_allowed:
+        gate = SourceProviderGate(
+            allowed=False,
+            host=host,
+            provider=provider,
+            remaining_hourly_quota=0,
+            message="source provider live fetch 허용이 꺼져 있습니다.",
+        )
+    elif provider.robots_status.value != "approved" or provider.terms_status.value != "approved":
+        gate = SourceProviderGate(
+            allowed=False,
+            host=host,
+            provider=provider,
+            remaining_hourly_quota=0,
+            message="robots 또는 이용약관 검토가 승인되지 않아 live fetch를 차단했습니다.",
+        )
+    else:
+        used = _store().count_recent_provider_fetches(
+            workspace_id,
+            provider.provider_id,
+            since_minutes=60,
+            status="allowed",
+        )
+        remaining = max(0, provider.rate_limit_per_hour - used)
+        if remaining <= 0:
+            gate = SourceProviderGate(
+                allowed=False,
+                host=host,
+                provider=provider,
+                remaining_hourly_quota=0,
+                message="source provider 시간당 rate limit을 초과했습니다.",
+            )
+        else:
+            status = "allowed"
+            gate = SourceProviderGate(
+                allowed=True,
+                host=host,
+                provider=provider,
+                remaining_hourly_quota=remaining - 1,
+                message="source provider 정책과 rate limit을 통과했습니다.",
+            )
+    if record:
+        _store().record_source_provider_fetch(
+            SourceProviderFetchLog(
+                fetch_id=f"fetch_{uuid4().hex[:12]}",
+                provider_id=provider.provider_id if provider else None,
+                workspace_id=workspace_id,
+                url=url,
+                host=host,
+                status=status,
+                message=gate.message,
+                created_at=datetime.now(UTC).isoformat(),
+            )
+        )
+    return gate
+
+
+def _host_from_url(url: str) -> str:
+    host = (urlparse(url).hostname or "").lower()
+    if not host:
+        raise HTTPException(status_code=400, detail="URL host를 확인할 수 없습니다.")
+    return host
+
+
+def _matching_source_provider(
+    host: str,
+    workspace_id: str,
+) -> SourceProviderPolicy | None:
+    policies = _store().list_source_provider_policies_for_workspace(workspace_id, limit=500)
+    matches = [
+        policy
+        for policy in policies
+        if host == policy.host_pattern or host.endswith(f".{policy.host_pattern}")
+    ]
+    if not matches:
+        return None
+    return sorted(matches, key=lambda item: len(item.host_pattern), reverse=True)[0]
 
 
 def _source_refresh_run(

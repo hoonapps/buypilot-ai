@@ -64,6 +64,8 @@ def test_admin_page_exposes_review_console() -> None:
     assert "URL 인입" in response.text
     assert "모니터 등록" in response.text
     assert "수집 refresh 이력" in response.text
+    assert "provider 정책 저장" in response.text
+    assert "Source Provider 정책" in response.text
     assert "발송 큐" in response.text
     assert "알림 발송 채널" in response.text
     assert "발송 시도" in response.text
@@ -597,11 +599,84 @@ def test_source_collection_and_admin_review_flow() -> None:
     assert refresh_runs.status_code == 200
     assert refresh_runs.json()[0]["status"] == "succeeded"
 
+    live_without_policy = client.post(
+        "/sources/ingest-url",
+        headers=WORKSPACE_A,
+        json={
+            "url": f"https://unapproved-{source_slug}.example.net/product",
+            "category": "desktop_pc",
+            "kind": "price",
+            "expected_model": "blocked live fetch",
+        },
+    )
+    assert live_without_policy.status_code == 403
+    assert "provider" in live_without_policy.json()["detail"]
+
+    pending_provider = client.post(
+        "/sources/providers",
+        headers=WORKSPACE_A,
+        json={
+            "provider_name": "Pending Provider",
+            "host_pattern": f"pending-{source_slug}.example.com",
+            "kind": "price",
+            "live_fetch_allowed": True,
+            "robots_status": "pending",
+            "terms_status": "approved",
+            "credential_status": "operator_reviewed",
+            "rate_limit_per_hour": 10,
+        },
+    )
+    assert pending_provider.status_code == 200
+    pending_check = client.post(
+        "/sources/providers/check",
+        headers=WORKSPACE_A,
+        json={"url": f"https://pending-{source_slug}.example.com/product"},
+    )
+    assert pending_check.status_code == 200
+    assert pending_check.json()["allowed"] is False
+
+    approved_provider = client.post(
+        "/sources/providers",
+        headers=WORKSPACE_A,
+        json={
+            "provider_name": "Approved Provider",
+            "host_pattern": f"approved-{source_slug}.example.com",
+            "kind": "price",
+            "live_fetch_allowed": True,
+            "robots_status": "approved",
+            "terms_status": "approved",
+            "credential_status": "operator_reviewed",
+            "rate_limit_per_hour": 1,
+        },
+    )
+    assert approved_provider.status_code == 200
+    provider_check = client.post(
+        "/sources/providers/check",
+        headers=WORKSPACE_A,
+        json={"url": f"https://shop.approved-{source_slug}.example.com/product"},
+    )
+    assert provider_check.status_code == 200
+    assert provider_check.json()["allowed"] is True
+    assert provider_check.json()["remaining_hourly_quota"] == 0
+
+    providers = client.get("/sources/providers", headers=WORKSPACE_A)
+    assert providers.status_code == 200
+    assert any(
+        item["provider_id"] == approved_provider.json()["provider_id"]
+        for item in providers.json()
+    )
+
     isolated_monitors = client.get("/sources/monitors", headers=WORKSPACE_B)
     assert isolated_monitors.status_code == 200
     assert not any(
         item["monitor_id"] == monitor_payload["monitor_id"]
         for item in isolated_monitors.json()
+    )
+    isolated_providers = client.get("/sources/providers", headers=WORKSPACE_B)
+    assert isolated_providers.status_code == 200
+    assert not any(
+        item["provider_id"] == approved_provider.json()["provider_id"]
+        for item in isolated_providers.json()
     )
 
     blocked_url = client.post(
