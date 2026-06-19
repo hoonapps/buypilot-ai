@@ -50,6 +50,9 @@ from specpilot_ai.core.models import (
     FeedbackRequest,
     IntakeDiagnosisRequest,
     IntakeDiagnosisResponse,
+    IntegrationProvider,
+    IntegrationProviderRequest,
+    IntegrationReadinessDashboard,
     LaunchGateDashboard,
     ObservabilityDispatchRequest,
     ObservabilityDispatchResponse,
@@ -1028,6 +1031,32 @@ def check_source_provider_policy(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> SourceProviderGate:
     return _source_provider_gate(request.url, workspace.workspace_id)
+
+
+@app.post("/ops/integrations", response_model=IntegrationProvider)
+def create_integration_provider(
+    request: IntegrationProviderRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> IntegrationProvider:
+    return _store().create_integration_provider_for_workspace(workspace.workspace_id, request)
+
+
+@app.get("/ops/integrations", response_model=list[IntegrationProvider])
+def list_integration_providers(
+    limit: int = 100,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[IntegrationProvider]:
+    return _store().list_integration_providers_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+
+
+@app.get("/ops/integration-readiness", response_model=IntegrationReadinessDashboard)
+def integration_readiness(
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> IntegrationReadinessDashboard:
+    return _store().integration_readiness_for_workspace(workspace.workspace_id)
 
 
 @app.post("/sources/collect", response_model=SourceCollectionResponse)

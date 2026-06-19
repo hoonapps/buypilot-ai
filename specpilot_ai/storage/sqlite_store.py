@@ -48,6 +48,12 @@ from specpilot_ai.core.models import (
     CompletionReportTemplateRequest,
     FeedbackRecord,
     FeedbackRequest,
+    IntegrationCategory,
+    IntegrationProvider,
+    IntegrationProviderRequest,
+    IntegrationReadinessCheck,
+    IntegrationReadinessDashboard,
+    IntegrationStatus,
     LaunchGateCheck,
     LaunchGateDashboard,
     ObservabilityDispatchResponse,
@@ -2811,6 +2817,138 @@ class SpecPilotStore:
             ).fetchall()
         return [_source_refresh_run_from_row(row) for row in rows]
 
+    def create_integration_provider_for_workspace(
+        self,
+        workspace_id: str,
+        request: IntegrationProviderRequest,
+    ) -> IntegrationProvider:
+        now = _now()
+        last_verified_at = now if request.status == IntegrationStatus.verified else None
+        provider = IntegrationProvider(
+            integration_id=f"integration_{uuid4().hex[:12]}",
+            workspace_id=workspace_id,
+            provider_name=request.provider_name.strip(),
+            category=request.category,
+            status=request.status,
+            credential_status=request.credential_status.strip() or "not_connected",
+            rate_limit_per_hour=request.rate_limit_per_hour,
+            retention_days=request.retention_days,
+            endpoint=request.endpoint.strip(),
+            evidence=request.evidence.strip(),
+            notes=request.notes.strip(),
+            created_at=now,
+            updated_at=now,
+            last_verified_at=last_verified_at,
+        )
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO integration_providers (
+                    integration_id, workspace_id, provider_name, category, status,
+                    credential_status, rate_limit_per_hour, retention_days,
+                    endpoint, evidence, notes, created_at, updated_at, last_verified_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    provider.integration_id,
+                    provider.workspace_id,
+                    provider.provider_name,
+                    provider.category.value,
+                    provider.status.value,
+                    provider.credential_status,
+                    provider.rate_limit_per_hour,
+                    provider.retention_days,
+                    provider.endpoint,
+                    provider.evidence,
+                    provider.notes,
+                    provider.created_at,
+                    provider.updated_at,
+                    provider.last_verified_at,
+                ),
+            )
+        return provider
+
+    def list_integration_providers_for_workspace(
+        self,
+        workspace_id: str,
+        *,
+        limit: int = 100,
+    ) -> list[IntegrationProvider]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM integration_providers
+                WHERE workspace_id = ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (workspace_id, limit),
+            ).fetchall()
+        return [_integration_provider_from_row(row) for row in rows]
+
+    def integration_readiness_for_workspace(
+        self,
+        workspace_id: str,
+    ) -> IntegrationReadinessDashboard:
+        providers = self.list_integration_providers_for_workspace(workspace_id, limit=500)
+        by_category: dict[IntegrationCategory, IntegrationProvider] = {}
+        for provider in providers:
+            current = by_category.get(provider.category)
+            current_weight = (
+                _integration_status_weight(current.status) if current is not None else -1
+            )
+            if _integration_status_weight(provider.status) > current_weight:
+                by_category[provider.category] = provider
+
+        checks = [
+            _integration_readiness_check(category, by_category.get(category), critical)
+            for category, critical in REQUIRED_INTEGRATION_CATEGORIES
+        ]
+        blocker_count = sum(1 for check in checks if check.status == CheckStatus.blocker)
+        warning_count = sum(1 for check in checks if check.status == CheckStatus.warning)
+        verified_count = sum(
+            1
+            for provider in by_category.values()
+            if provider.status == IntegrationStatus.verified
+        )
+        configured_count = sum(
+            1
+            for provider in by_category.values()
+            if provider.status in {IntegrationStatus.configured, IntegrationStatus.verified}
+        )
+        mock_count = sum(
+            1
+            for provider in by_category.values()
+            if provider.status == IntegrationStatus.mock
+        )
+        score = _integration_readiness_score(checks)
+        if blocker_count:
+            status = CheckStatus.blocker
+        elif warning_count:
+            status = CheckStatus.warning
+        else:
+            status = CheckStatus.ok
+        required_actions = [
+            check.recommendation for check in checks if check.status != CheckStatus.ok
+        ][:5]
+        return IntegrationReadinessDashboard(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            readiness_score=score,
+            status=status,
+            verified_count=verified_count,
+            configured_count=configured_count,
+            blocker_count=blocker_count,
+            mock_count=mock_count,
+            required_count=len(REQUIRED_INTEGRATION_CATEGORIES),
+            summary=_integration_readiness_summary(status, score, blocker_count, warning_count),
+            required_actions=required_actions,
+            providers=providers,
+            checks=checks,
+        )
+
     def create_source_provider_policy_for_workspace(
         self,
         workspace_id: str,
@@ -3334,6 +3472,7 @@ class SpecPilotStore:
         regression = self.ops_regression_for_workspace(workspace_id, window_size=5)
         learning = self.learning_insights_for_workspace(workspace_id, limit=20)
         backlog = self.beta_backlog_action_summary_for_workspace(workspace_id, limit=200)
+        integrations = self.integration_readiness_for_workspace(workspace_id)
         checks = [
             _launch_gate_check(
                 area="readiness",
@@ -3405,6 +3544,19 @@ class SpecPilotStore:
                     "실제 운영 흐름으로 검증하세요."
                 ),
             ),
+            _launch_gate_check(
+                area="integration",
+                label="외부 연동 준비도",
+                status=integrations.status,
+                metric=(
+                    f"{integrations.readiness_score}점 / "
+                    f"verified {integrations.verified_count}개 / "
+                    f"blocker {integrations.blocker_count}개"
+                ),
+                recommendation=integrations.required_actions[0]
+                if integrations.required_actions
+                else "핵심 외부 연동의 credential, rate limit, 보존 정책을 유지하세요.",
+            ),
         ]
         status, decision = _launch_gate_status_and_decision(
             checks,
@@ -3436,6 +3588,8 @@ class SpecPilotStore:
                 "open_backlog": backlog.open_count,
                 "overdue_backlog": backlog.overdue_count,
                 "learning_insights": learning.insight_count,
+                "integration_score": integrations.readiness_score,
+                "integration_blockers": integrations.blocker_count,
             },
         )
 
@@ -3610,6 +3764,23 @@ class SpecPilotStore:
                     status TEXT NOT NULL,
                     message TEXT NOT NULL,
                     created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS integration_providers (
+                    integration_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    provider_name TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'mock',
+                    credential_status TEXT NOT NULL DEFAULT 'not_connected',
+                    rate_limit_per_hour INTEGER NOT NULL DEFAULT 0,
+                    retention_days INTEGER NOT NULL DEFAULT 0,
+                    endpoint TEXT NOT NULL DEFAULT '',
+                    evidence TEXT NOT NULL DEFAULT '',
+                    notes TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    last_verified_at TEXT
                 );
 
                 CREATE TABLE IF NOT EXISTS alert_delivery_events (
@@ -3860,6 +4031,8 @@ class SpecPilotStore:
                     ON source_provider_policies(workspace_id, host_pattern);
                 CREATE INDEX IF NOT EXISTS idx_source_provider_fetch_workspace
                     ON source_provider_fetch_log(workspace_id, provider_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_integration_providers_workspace
+                    ON integration_providers(workspace_id, category, status);
                 CREATE INDEX IF NOT EXISTS idx_alert_events_workspace
                     ON alert_delivery_events(workspace_id);
                 CREATE INDEX IF NOT EXISTS idx_alert_events_subscription
@@ -5052,6 +5225,151 @@ def _source_provider_policy_from_row(row: sqlite3.Row) -> SourceProviderPolicy:
         created_at=data["created_at"],
         updated_at=data["updated_at"],
     )
+
+
+REQUIRED_INTEGRATION_CATEGORIES: list[tuple[IntegrationCategory, bool]] = [
+    (IntegrationCategory.price_api, True),
+    (IntegrationCategory.marketplace, True),
+    (IntegrationCategory.official_store, True),
+    (IntegrationCategory.review_feed, False),
+    (IntegrationCategory.benchmark, False),
+    (IntegrationCategory.email, True),
+    (IntegrationCategory.webhook, False),
+    (IntegrationCategory.observability, True),
+    (IntegrationCategory.affiliate, False),
+    (IntegrationCategory.scheduler, True),
+]
+
+INTEGRATION_CATEGORY_LABELS = {
+    IntegrationCategory.price_api: "가격 비교 공식 API",
+    IntegrationCategory.marketplace: "오픈마켓 provider",
+    IntegrationCategory.official_store: "공식 스토어 provider",
+    IntegrationCategory.review_feed: "리뷰 수집 feed",
+    IntegrationCategory.benchmark: "벤치마크 수집",
+    IntegrationCategory.email: "이메일 발송 provider",
+    IntegrationCategory.sms: "SMS 발송 provider",
+    IntegrationCategory.webhook: "외부 webhook",
+    IntegrationCategory.observability: "LangSmith/OpenTelemetry export",
+    IntegrationCategory.affiliate: "제휴 링크/비제휴 대안",
+    IntegrationCategory.scheduler: "외부 scheduler",
+}
+
+
+def _integration_provider_from_row(row: sqlite3.Row) -> IntegrationProvider:
+    data = dict(row)
+    return IntegrationProvider(
+        integration_id=data["integration_id"],
+        workspace_id=data["workspace_id"],
+        provider_name=data["provider_name"],
+        category=IntegrationCategory(data["category"]),
+        status=IntegrationStatus(data["status"]),
+        credential_status=data["credential_status"],
+        rate_limit_per_hour=data["rate_limit_per_hour"],
+        retention_days=data["retention_days"],
+        endpoint=data["endpoint"],
+        evidence=data["evidence"],
+        notes=data["notes"],
+        created_at=data["created_at"],
+        updated_at=data["updated_at"],
+        last_verified_at=data["last_verified_at"],
+    )
+
+
+def _integration_status_weight(status: IntegrationStatus) -> int:
+    return {
+        IntegrationStatus.blocked: 0,
+        IntegrationStatus.mock: 1,
+        IntegrationStatus.configured: 2,
+        IntegrationStatus.verified: 3,
+    }[status]
+
+
+def _integration_readiness_check(
+    category: IntegrationCategory,
+    provider: IntegrationProvider | None,
+    critical: bool,
+) -> IntegrationReadinessCheck:
+    label = INTEGRATION_CATEGORY_LABELS[category]
+    if provider is None:
+        return IntegrationReadinessCheck(
+            category=category,
+            label=label,
+            status=CheckStatus.blocker if critical else CheckStatus.warning,
+            metric="등록된 provider 없음",
+            recommendation=(
+                f"{label} 연동 provider, credential 상태, rate limit, "
+                "보존 정책을 등록하세요."
+            ),
+        )
+    if provider.status == IntegrationStatus.blocked:
+        return IntegrationReadinessCheck(
+            category=category,
+            label=label,
+            status=CheckStatus.blocker,
+            provider_name=provider.provider_name,
+            metric=f"{provider.status.value} · credential {provider.credential_status}",
+            recommendation=f"{label} 차단 사유를 해소하고 검증 증거를 남기세요.",
+        )
+    if provider.status == IntegrationStatus.mock:
+        return IntegrationReadinessCheck(
+            category=category,
+            label=label,
+            status=CheckStatus.blocker if critical else CheckStatus.warning,
+            provider_name=provider.provider_name,
+            metric=f"mock · credential {provider.credential_status}",
+            recommendation=f"{label} mock을 실제 provider configured 이상으로 전환하세요.",
+        )
+    if provider.status == IntegrationStatus.configured:
+        status = CheckStatus.warning if critical else CheckStatus.ok
+        return IntegrationReadinessCheck(
+            category=category,
+            label=label,
+            status=status,
+            provider_name=provider.provider_name,
+            metric=(
+                f"configured · 시간당 {provider.rate_limit_per_hour}회 · "
+                f"보존 {provider.retention_days}일"
+            ),
+            recommendation=f"{label} smoke test와 운영 증거를 남겨 verified 상태로 올리세요.",
+        )
+    return IntegrationReadinessCheck(
+        category=category,
+        label=label,
+        status=CheckStatus.ok,
+        provider_name=provider.provider_name,
+        metric=(
+            f"verified · 시간당 {provider.rate_limit_per_hour}회 · "
+            f"보존 {provider.retention_days}일"
+        ),
+        recommendation=f"{label} 연동 검증 상태를 유지하세요.",
+    )
+
+
+def _integration_readiness_score(checks: list[IntegrationReadinessCheck]) -> float:
+    if not checks:
+        return 0
+    points = {
+        CheckStatus.ok: 100.0,
+        CheckStatus.warning: 55.0,
+        CheckStatus.blocker: 0.0,
+    }
+    return round(sum(points[check.status] for check in checks) / len(checks), 2)
+
+
+def _integration_readiness_summary(
+    status: CheckStatus,
+    score: float,
+    blocker_count: int,
+    warning_count: int,
+) -> str:
+    if status == CheckStatus.ok:
+        return f"외부 연동 준비도 {score}점입니다. 핵심 연동이 verified 기준을 충족했습니다."
+    if status == CheckStatus.blocker:
+        return (
+            f"외부 연동 준비도 {score}점입니다. blocker {blocker_count}건을 "
+            "처리하기 전에는 공개 출시를 막아야 합니다."
+        )
+    return f"외부 연동 준비도 {score}점입니다. warning {warning_count}건을 검증하세요."
 
 
 def _ensure_column(

@@ -89,6 +89,9 @@ def test_admin_page_exposes_review_console() -> None:
     assert "learning-insights" in response.text
     assert "출시 게이트" in response.text
     assert "launch-gate" in response.text
+    assert "외부 연동 준비도" in response.text
+    assert "integration-readiness" in response.text
+    assert "핵심 연동 등록" in response.text
     assert "품질/비용 감사" in response.text
     assert "품질 회귀 모니터" in response.text
     assert "사용자 피드백" in response.text
@@ -1250,7 +1253,7 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     assert launch_payload["status"] in {"ok", "warning", "blocker"}
     assert launch_payload["summary"]
     assert launch_payload["required_actions"]
-    assert len(launch_payload["checks"]) >= 6
+    assert len(launch_payload["checks"]) >= 7
     assert {check["area"] for check in launch_payload["checks"]} >= {
         "readiness",
         "regression",
@@ -1258,9 +1261,12 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
         "backlog",
         "conversion",
         "delivery",
+        "integration",
     }
     assert launch_payload["metric_cards"]["learning_insights"] >= 1
     assert launch_payload["metric_cards"]["purchase_outcomes"] >= 2
+    assert "integration_score" in launch_payload["metric_cards"]
+    assert "integration_blockers" in launch_payload["metric_cards"]
 
     isolated_launch_gate = client.get("/beta/launch-gate", headers=WORKSPACE_B)
     assert isolated_launch_gate.status_code == 200
@@ -1559,3 +1565,59 @@ def test_source_collection_and_admin_review_flow() -> None:
     dashboard = client.get("/admin/dashboard")
     assert dashboard.status_code == 200
     assert dashboard.json()["adapter_statuses"]
+
+
+def test_integration_readiness_tracks_external_provider_state_by_workspace() -> None:
+    initial = client.get("/ops/integration-readiness", headers=WORKSPACE_A)
+    assert initial.status_code == 200
+    initial_payload = initial.json()
+    assert initial_payload["workspace_id"].startswith("workspace_")
+    assert initial_payload["status"] in {"warning", "blocker"}
+    assert initial_payload["required_count"] >= 6
+    assert initial_payload["blocker_count"] >= 1
+    assert any(check["category"] == "price_api" for check in initial_payload["checks"])
+
+    provider = client.post(
+        "/ops/integrations",
+        headers=WORKSPACE_A,
+        json={
+            "provider_name": "Pytest Price API",
+            "category": "price_api",
+            "status": "verified",
+            "credential_status": "vault_connected",
+            "rate_limit_per_hour": 120,
+            "retention_days": 30,
+            "endpoint": "https://api.example.test/prices",
+            "evidence": "pytest smoke test passed",
+            "notes": "credential value is stored outside SpecPilot",
+        },
+    )
+    assert provider.status_code == 200
+    assert provider.json()["last_verified_at"]
+
+    providers = client.get("/ops/integrations", headers=WORKSPACE_A)
+    assert providers.status_code == 200
+    assert any(
+        item["integration_id"] == provider.json()["integration_id"]
+        for item in providers.json()
+    )
+
+    updated = client.get("/ops/integration-readiness", headers=WORKSPACE_A)
+    assert updated.status_code == 200
+    updated_payload = updated.json()
+    price_check = next(
+        check for check in updated_payload["checks"] if check["category"] == "price_api"
+    )
+    assert price_check["status"] == "ok"
+    assert updated_payload["verified_count"] >= 1
+
+    launch_gate = client.get("/beta/launch-gate", headers=WORKSPACE_A)
+    assert launch_gate.status_code == 200
+    assert any(check["area"] == "integration" for check in launch_gate.json()["checks"])
+
+    isolated = client.get("/ops/integrations", headers=WORKSPACE_B)
+    assert isolated.status_code == 200
+    assert not any(
+        item["integration_id"] == provider.json()["integration_id"]
+        for item in isolated.json()
+    )

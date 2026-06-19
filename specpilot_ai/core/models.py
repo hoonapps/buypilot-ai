@@ -54,6 +54,27 @@ class ProviderReviewStatus(StrEnum):
     rejected = "rejected"
 
 
+class IntegrationCategory(StrEnum):
+    price_api = "price_api"
+    marketplace = "marketplace"
+    official_store = "official_store"
+    review_feed = "review_feed"
+    benchmark = "benchmark"
+    email = "email"
+    sms = "sms"
+    webhook = "webhook"
+    observability = "observability"
+    affiliate = "affiliate"
+    scheduler = "scheduler"
+
+
+class IntegrationStatus(StrEnum):
+    mock = "mock"
+    configured = "configured"
+    verified = "verified"
+    blocked = "blocked"
+
+
 class PurchaseOutcomeStatus(StrEnum):
     purchased = "purchased"
     abandoned = "abandoned"
@@ -1212,6 +1233,60 @@ class LaunchGateDashboard(BaseModel):
     required_actions: list[str] = Field(default_factory=list)
     checks: list[LaunchGateCheck] = Field(default_factory=list)
     metric_cards: dict[str, int | float | str] = Field(default_factory=dict)
+
+
+class IntegrationProviderRequest(BaseModel):
+    provider_name: str = Field(min_length=2)
+    category: IntegrationCategory
+    status: IntegrationStatus = IntegrationStatus.configured
+    credential_status: str = "not_connected"
+    rate_limit_per_hour: int = Field(default=60, ge=0, le=100000)
+    retention_days: int = Field(default=30, ge=0, le=3650)
+    endpoint: str = ""
+    evidence: str = ""
+    notes: str = ""
+
+
+class IntegrationProvider(BaseModel):
+    integration_id: str
+    workspace_id: str
+    provider_name: str
+    category: IntegrationCategory
+    status: IntegrationStatus
+    credential_status: str
+    rate_limit_per_hour: int
+    retention_days: int
+    endpoint: str = ""
+    evidence: str = ""
+    notes: str = ""
+    created_at: str
+    updated_at: str
+    last_verified_at: str | None = None
+
+
+class IntegrationReadinessCheck(BaseModel):
+    category: IntegrationCategory
+    label: str
+    status: CheckStatus
+    provider_name: str | None = None
+    metric: str
+    recommendation: str
+
+
+class IntegrationReadinessDashboard(BaseModel):
+    workspace_id: str
+    generated_at: str
+    readiness_score: float = Field(ge=0, le=100)
+    status: CheckStatus
+    verified_count: int = 0
+    configured_count: int = 0
+    blocker_count: int = 0
+    mock_count: int = 0
+    required_count: int = 0
+    summary: str
+    required_actions: list[str] = Field(default_factory=list)
+    providers: list[IntegrationProvider] = Field(default_factory=list)
+    checks: list[IntegrationReadinessCheck] = Field(default_factory=list)
 
 
 class SourceAdapterStatus(BaseModel):

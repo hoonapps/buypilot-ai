@@ -132,6 +132,16 @@ def admin_page_html() -> str:
       <div class="grid cards" id="launch-gate-summary"></div>
       <div class="quality-list" id="launch-gate-checks" style="margin-top:12px"></div>
     </section>
+    <section class="panel" style="margin-top:14px">
+      <h2>외부 연동 준비도</h2>
+      <p>가격 API, 오픈마켓, 공식 스토어, 이메일, 관측성, 스케줄러 등 공개 전 필수 연동의 credential/rate limit/검증 상태를 확인합니다.</p>
+      <div class="actions">
+        <button class="secondary" id="seed-integrations">핵심 연동 등록</button>
+      </div>
+      <div class="grid cards" id="integration-readiness-summary" style="margin-top:12px"></div>
+      <div class="quality-list" id="integration-readiness-checks" style="margin-top:12px"></div>
+      <div class="review-list" id="integration-providers" style="margin-top:12px"></div>
+    </section>
     <section class="grid top-grid" style="margin-top:14px">
       <div class="panel">
         <h2>소스 어댑터</h2>
@@ -281,6 +291,8 @@ def admin_page_html() -> str:
         scheduleResponse,
         readinessResponse,
         launchGateResponse,
+        integrationReadinessResponse,
+        integrationProviderResponse,
         betaCohortResponse,
         betaBacklogResponse,
         betaBacklogSummaryResponse,
@@ -309,6 +321,8 @@ def admin_page_html() -> str:
         fetch('/sources/schedule'),
         fetch('/beta/readiness'),
         fetch('/beta/launch-gate'),
+        fetch('/ops/integration-readiness'),
+        fetch('/ops/integrations'),
         fetch('/beta/cohorts'),
         fetch('/beta/backlog'),
         fetch('/beta/backlog/summary'),
@@ -337,6 +351,8 @@ def admin_page_html() -> str:
       const schedule = await scheduleResponse.json();
       const readiness = await readinessResponse.json();
       const launchGate = await launchGateResponse.json();
+      const integrationReadiness = await integrationReadinessResponse.json();
+      const integrationProviders = await integrationProviderResponse.json();
       const betaCohorts = await betaCohortResponse.json();
       const betaBacklog = await betaBacklogResponse.json();
       const betaBacklogSummary = await betaBacklogSummaryResponse.json();
@@ -355,6 +371,8 @@ def admin_page_html() -> str:
       renderMetrics(data.metrics);
       renderBetaReadiness(readiness);
       renderLaunchGate(launchGate);
+      renderIntegrationReadiness(integrationReadiness);
+      renderIntegrationProviders(integrationProviders);
       renderSources(data.adapter_statuses);
       renderReviews(data.pending_reviews);
       renderSourceSchedule(schedule);
@@ -488,6 +506,58 @@ def admin_page_html() -> str:
           <ul>${requiredActions.length ? requiredActions.map((item) => `<li>${item}</li>`).join('') : '<li>현재 기준으로 공개 전 필수 액션이 없습니다.</li>'}</ul>
         </article>
       `;
+    }
+
+    function renderIntegrationReadiness(readiness) {
+      document.querySelector('#integration-readiness-summary').innerHTML = [
+        ['준비도', Math.round(readiness.readiness_score) + '점'],
+        ['상태', readiness.status],
+        ['verified', readiness.verified_count],
+        ['blocker', readiness.blocker_count]
+      ].map(([label, value]) => `<div class="card"><span class="kicker">${label}</span><div class="metric">${value}</div></div>`).join('');
+      const actions = readiness.required_actions || [];
+      document.querySelector('#integration-readiness-checks').innerHTML = `
+        <article class="review-item quality-item ${readiness.status === 'blocker' ? 'danger' : readiness.status === 'warning' ? 'warn' : ''}">
+          <span class="kicker">integration-readiness · ${readiness.status}</span>
+          <h3>${Math.round(readiness.readiness_score)}점</h3>
+          <p>${readiness.summary}</p>
+        </article>
+        ${(readiness.checks || []).map((check) => {
+          const tone = check.status === 'blocker' ? 'danger' : check.status === 'warning' ? 'warn' : '';
+          return `
+            <article class="review-item quality-item ${tone}">
+              <span class="kicker">${check.category} · ${check.status}</span>
+              <h3>${check.label}${check.provider_name ? ' · ' + check.provider_name : ''}</h3>
+              <p>${check.metric}</p>
+              <p>${check.recommendation}</p>
+            </article>
+          `;
+        }).join('')}
+        <article class="review-item">
+          <span class="kicker">Required actions</span>
+          <h3>외부 연동 필수 액션</h3>
+          <ul>${actions.length ? actions.map((item) => `<li>${item}</li>`).join('') : '<li>현재 기준으로 추가 외부 연동 액션이 없습니다.</li>'}</ul>
+        </article>
+      `;
+    }
+
+    function renderIntegrationProviders(items) {
+      const root = document.querySelector('#integration-providers');
+      if (!items.length) {
+        root.innerHTML = '<p>아직 등록된 외부 연동 provider가 없습니다.</p>';
+        return;
+      }
+      root.innerHTML = items.map((item) => {
+        const tone = item.status === 'blocked' ? 'danger' : item.status === 'mock' || item.status === 'configured' ? 'warn' : '';
+        return `
+          <article class="review-item quality-item ${tone}">
+            <span class="kicker">${item.category} · ${item.status}</span>
+            <h3>${item.provider_name}</h3>
+            <p>credential ${item.credential_status} / 시간당 ${item.rate_limit_per_hour}회 / 보존 ${item.retention_days}일</p>
+            <p>${item.evidence || item.notes || item.endpoint || '운영 증거 없음'}</p>
+          </article>
+        `;
+      }).join('');
     }
 
     function renderSources(sources) {
@@ -1055,6 +1125,34 @@ def admin_page_html() -> str:
           notes: '관리자 콘솔에서 등록한 live fetch 정책'
         })
       });
+      await loadDashboard();
+    });
+    document.querySelector('#seed-integrations').addEventListener('click', async () => {
+      const providers = [
+        ['가격 비교 공식 API', 'price_api', 'configured', 120, 30],
+        ['오픈마켓 provider', 'marketplace', 'configured', 80, 30],
+        ['공식 스토어 provider', 'official_store', 'configured', 60, 30],
+        ['이메일 발송 provider', 'email', 'configured', 500, 90],
+        ['Observability exporter', 'observability', 'configured', 1000, 180],
+        ['외부 scheduler', 'scheduler', 'configured', 24, 30]
+      ];
+      await Promise.all(providers.map(([provider_name, category, status, rate_limit_per_hour, retention_days]) => (
+        fetch('/ops/integrations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            provider_name,
+            category,
+            status,
+            credential_status: 'operator_reviewed',
+            rate_limit_per_hour,
+            retention_days,
+            endpoint: 'managed-by-ops',
+            evidence: '관리자 콘솔에서 공개 전 smoke test 대상으로 등록',
+            notes: '실제 credential 값은 저장하지 않음'
+          })
+        })
+      )));
       await loadDashboard();
     });
     document.querySelector('#save-monitor').addEventListener('click', async () => {

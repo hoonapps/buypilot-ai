@@ -58,14 +58,13 @@
 
 ## 운영 전 반드시 붙일 외부 연동
 
-- 가격 비교/오픈마켓/공식 스토어의 공식 provider 계약과 외부 cron/Cloud Scheduler 배포
-- 오픈마켓/공식 스토어 공식 API credential과 계약별 사용량 한도
-- 벤치마크 출처 크롤링 또는 수동 검수 데이터
-- 리뷰 수집/요약 파이프라인
-- 가격 캐시 만료 정책
-- 실제 이메일/SMS/웹훅 provider credential과 rate limit 정책
-- LangSmith/OpenTelemetry 외부 export와 보존 기간 정책
-- 실제 제휴 링크 연결과 비제휴 대안 노출 정책 검증
+- `/ops/integrations`에 가격 비교 API, 오픈마켓, 공식 스토어, 리뷰 feed, 벤치마크, 이메일, webhook, observability, 제휴, scheduler provider를 등록한다.
+- `/ops/integration-readiness`에서 핵심 연동이 `mock` 또는 미등록이면 출시 게이트가 blocker로 판정한다.
+- 가격 비교/오픈마켓/공식 스토어의 공식 provider 계약과 외부 cron/Cloud Scheduler 배포를 실제 credential vault와 연결한다.
+- 오픈마켓/공식 스토어 공식 API credential과 계약별 사용량 한도를 smoke test 후 `verified` 상태로 승격한다.
+- 실제 이메일/SMS/웹훅 provider credential, rate limit, bounce/suppression 정책을 운영 증거와 함께 남긴다.
+- LangSmith/OpenTelemetry 외부 export와 보존 기간 정책을 검증해 observability 연동을 `verified`로 승격한다.
+- 실제 제휴 링크 연결과 비제휴 대안 노출 정책을 검증하고 추천 순위 계산과 분리한다.
 
 ## 품질 게이트
 
