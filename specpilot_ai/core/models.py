@@ -201,6 +201,60 @@ class AnalyzeResponse(BaseModel):
     trace_events: list[TraceEvent] = Field(default_factory=list)
 
 
+class SaveReportRequest(BaseModel):
+    trace_id: str
+    title: str | None = None
+    owner_label: str = "guest"
+    notes: str = ""
+
+
+class SavedReportSummary(BaseModel):
+    report_id: str
+    trace_id: str
+    title: str
+    owner_label: str
+    final_pick_id: str | None = None
+    top_model_name: str | None = None
+    created_at: str
+    updated_at: str
+
+
+class SavedReportDetail(SavedReportSummary):
+    response: AnalyzeResponse
+    notes: str = ""
+
+
+class AlertSubscriptionRequest(BaseModel):
+    trace_id: str
+    product_id: str
+    target_price_krw: int = Field(gt=0)
+    channels: list[str] = Field(default_factory=lambda: ["email"])
+    contact: str = "guest@example.com"
+    owner_label: str = "guest"
+
+
+class AlertSubscription(BaseModel):
+    subscription_id: str
+    trace_id: str
+    product_id: str
+    target_price_krw: int
+    current_price_krw: int
+    channels: list[str]
+    contact: str
+    owner_label: str
+    status: str
+    created_at: str
+
+
+class OperationsMetrics(BaseModel):
+    analysis_runs: int
+    saved_reports: int
+    alert_subscriptions: int
+    latest_trace_id: str | None = None
+    average_top_score: float = 0
+    conversion_ready_rate: float = 0
+
+
 class ProductBrief(BaseModel):
     name: str
     one_liner: str
