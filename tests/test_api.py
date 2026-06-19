@@ -139,6 +139,47 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     blocked_detail = client.get(f"/reports/{saved_payload['report_id']}", headers=WORKSPACE_B)
     assert blocked_detail.status_code == 404
 
+    share = client.post(
+        f"/reports/{saved_payload['report_id']}/share",
+        headers=WORKSPACE_A,
+    )
+    assert share.status_code == 200
+    share_payload = share.json()
+    assert share_payload["is_public"] is True
+    assert share_payload["share_token"].startswith("share_")
+    assert share_payload["public_path"].startswith("/r/share_")
+
+    blocked_share = client.post(
+        f"/reports/{saved_payload['report_id']}/share",
+        headers=WORKSPACE_B,
+    )
+    assert blocked_share.status_code == 404
+
+    public_report = client.get(f"/public/reports/{share_payload['share_token']}")
+    assert public_report.status_code == 200
+    assert public_report.json()["response"]["graph_trace_id"] == trace_id
+    assert public_report.json()["share_views"] == 1
+
+    public_page = client.get(f"/r/{share_payload['share_token']}")
+    assert public_page.status_code == 200
+    assert "테스트 구매 리포트" in public_page.text
+    assert "후보 비교표" in public_page.text
+
+    report_after_share = client.get(
+        f"/reports/{saved_payload['report_id']}",
+        headers=WORKSPACE_A,
+    )
+    assert report_after_share.json()["share_token"] == share_payload["share_token"]
+    assert report_after_share.json()["share_views"] >= 2
+
+    revoked_share = client.delete(
+        f"/reports/{saved_payload['report_id']}/share",
+        headers=WORKSPACE_A,
+    )
+    assert revoked_share.status_code == 200
+    assert revoked_share.json()["is_public"] is False
+    assert client.get(f"/public/reports/{share_payload['share_token']}").status_code == 404
+
     subscribed = client.post(
         "/alerts/subscribe",
         headers=WORKSPACE_A,

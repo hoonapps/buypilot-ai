@@ -334,6 +334,9 @@ class SavedReportSummary(BaseModel):
     owner_label: str
     final_pick_id: str | None = None
     top_model_name: str | None = None
+    share_token: str | None = None
+    shared_at: str | None = None
+    share_views: int = 0
     created_at: str
     updated_at: str
 
@@ -341,6 +344,25 @@ class SavedReportSummary(BaseModel):
 class SavedReportDetail(SavedReportSummary):
     response: AnalyzeResponse
     notes: str = ""
+
+
+class ReportShare(BaseModel):
+    report_id: str
+    share_token: str | None = None
+    public_path: str | None = None
+    is_public: bool = False
+    shared_at: str | None = None
+    share_views: int = 0
+
+
+class PublicReport(BaseModel):
+    report_id: str
+    title: str
+    top_model_name: str | None = None
+    final_pick_id: str | None = None
+    shared_at: str
+    share_views: int = 0
+    response: AnalyzeResponse
 
 
 class AlertSubscriptionRequest(BaseModel):

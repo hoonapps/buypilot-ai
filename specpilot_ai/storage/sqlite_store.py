@@ -16,7 +16,9 @@ from specpilot_ai.core.models import (
     FeedbackRecord,
     FeedbackRequest,
     OperationsMetrics,
+    PublicReport,
     QualityDashboard,
+    ReportShare,
     ReviewDecision,
     ReviewQueueItem,
     ReviewStatus,
@@ -153,9 +155,10 @@ class SpecPilotStore:
                 """
                 INSERT INTO saved_reports (
                     report_id, trace_id, workspace_id, title, owner_label, notes,
-                    final_pick_id, top_model_name, created_at, updated_at
+                    final_pick_id, top_model_name, share_token, shared_at, share_views,
+                    created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?)
                 """,
                 (
                     report_id,
@@ -178,6 +181,9 @@ class SpecPilotStore:
             owner_label=owner_label,
             final_pick_id=response.report.final_pick_id,
             top_model_name=top_model,
+            share_token=None,
+            shared_at=None,
+            share_views=0,
             created_at=now,
             updated_at=now,
         )
@@ -194,7 +200,7 @@ class SpecPilotStore:
             rows = conn.execute(
                 """
                 SELECT report_id, trace_id, workspace_id, title, owner_label, final_pick_id,
-                       top_model_name, created_at, updated_at
+                       top_model_name, share_token, shared_at, share_views, created_at, updated_at
                 FROM saved_reports
                 WHERE workspace_id = ?
                 ORDER BY created_at DESC
@@ -202,7 +208,7 @@ class SpecPilotStore:
                 """,
                 (workspace_id, limit),
             ).fetchall()
-        return [SavedReportSummary(**dict(row)) for row in rows]
+        return [_saved_report_summary_from_row(row) for row in rows]
 
     def get_report(self, report_id: str) -> SavedReportDetail | None:
         return self.get_report_for_workspace("demo", report_id)
@@ -235,9 +241,117 @@ class SpecPilotStore:
             notes=data["notes"],
             final_pick_id=data["final_pick_id"],
             top_model_name=data["top_model_name"],
+            share_token=data["share_token"],
+            shared_at=data["shared_at"],
+            share_views=data["share_views"],
             created_at=data["created_at"],
             updated_at=data["updated_at"],
             response=response,
+        )
+
+    def share_report_for_workspace(
+        self,
+        workspace_id: str,
+        report_id: str,
+    ) -> ReportShare | None:
+        now = _now()
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT report_id, share_token, shared_at, share_views
+                FROM saved_reports
+                WHERE report_id = ? AND workspace_id = ?
+                """,
+                (report_id, workspace_id),
+            ).fetchone()
+            if row is None:
+                return None
+            token = row["share_token"] or f"share_{uuid4().hex[:20]}"
+            shared_at = row["shared_at"] or now
+            conn.execute(
+                """
+                UPDATE saved_reports
+                SET share_token = ?, shared_at = ?, updated_at = ?
+                WHERE report_id = ? AND workspace_id = ?
+                """,
+                (token, shared_at, now, report_id, workspace_id),
+            )
+        return ReportShare(
+            report_id=report_id,
+            share_token=token,
+            public_path=f"/r/{token}",
+            is_public=True,
+            shared_at=shared_at,
+            share_views=row["share_views"],
+        )
+
+    def revoke_report_share_for_workspace(
+        self,
+        workspace_id: str,
+        report_id: str,
+    ) -> ReportShare | None:
+        now = _now()
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT report_id, share_views
+                FROM saved_reports
+                WHERE report_id = ? AND workspace_id = ?
+                """,
+                (report_id, workspace_id),
+            ).fetchone()
+            if row is None:
+                return None
+            conn.execute(
+                """
+                UPDATE saved_reports
+                SET share_token = NULL, shared_at = NULL, updated_at = ?
+                WHERE report_id = ? AND workspace_id = ?
+                """,
+                (now, report_id, workspace_id),
+            )
+        return ReportShare(
+            report_id=report_id,
+            share_token=None,
+            public_path=None,
+            is_public=False,
+            shared_at=None,
+            share_views=row["share_views"],
+        )
+
+    def get_public_report(self, share_token: str) -> PublicReport | None:
+        now = _now()
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT sr.report_id, sr.title, sr.final_pick_id, sr.top_model_name,
+                       sr.shared_at, sr.share_views, ar.response_json
+                FROM saved_reports sr
+                JOIN analysis_runs ar
+                    ON ar.trace_id = sr.trace_id AND ar.workspace_id = sr.workspace_id
+                WHERE sr.share_token = ? AND sr.shared_at IS NOT NULL
+                """,
+                (share_token,),
+            ).fetchone()
+            if row is None:
+                return None
+            conn.execute(
+                """
+                UPDATE saved_reports
+                SET share_views = share_views + 1, updated_at = ?
+                WHERE share_token = ?
+                """,
+                (now, share_token),
+            )
+        data = dict(row)
+        return PublicReport(
+            report_id=data["report_id"],
+            title=data["title"],
+            top_model_name=data["top_model_name"],
+            final_pick_id=data["final_pick_id"],
+            shared_at=data["shared_at"],
+            share_views=data["share_views"] + 1,
+            response=AnalyzeResponse.model_validate_json(data["response_json"]),
         )
 
     def create_alert_subscription(
@@ -806,6 +920,9 @@ class SpecPilotStore:
                     notes TEXT NOT NULL DEFAULT '',
                     final_pick_id TEXT,
                     top_model_name TEXT,
+                    share_token TEXT UNIQUE,
+                    shared_at TEXT,
+                    share_views INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY(trace_id) REFERENCES analysis_runs(trace_id)
@@ -911,6 +1028,9 @@ class SpecPilotStore:
                 "TEXT NOT NULL DEFAULT '{}'",
             )
             _ensure_column(conn, "saved_reports", "workspace_id", "TEXT NOT NULL DEFAULT 'demo'")
+            _ensure_column(conn, "saved_reports", "share_token", "TEXT")
+            _ensure_column(conn, "saved_reports", "shared_at", "TEXT")
+            _ensure_column(conn, "saved_reports", "share_views", "INTEGER NOT NULL DEFAULT 0")
             _ensure_column(
                 conn,
                 "alert_subscriptions",
@@ -921,6 +1041,12 @@ class SpecPilotStore:
                 """
                 CREATE INDEX IF NOT EXISTS idx_saved_reports_workspace
                 ON saved_reports(workspace_id)
+                """
+            )
+            conn.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_saved_reports_share_token
+                ON saved_reports(share_token)
                 """
             )
             conn.execute(
@@ -970,6 +1096,24 @@ def _alert_event_from_row(row: sqlite3.Row) -> AlertDeliveryEvent:
         delivery_status=data["delivery_status"],
         message=data["message"],
         created_at=data["created_at"],
+    )
+
+
+def _saved_report_summary_from_row(row: sqlite3.Row) -> SavedReportSummary:
+    data = dict(row)
+    return SavedReportSummary(
+        report_id=data["report_id"],
+        trace_id=data["trace_id"],
+        title=data["title"],
+        workspace_id=data["workspace_id"],
+        owner_label=data["owner_label"],
+        final_pick_id=data["final_pick_id"],
+        top_model_name=data["top_model_name"],
+        share_token=data["share_token"],
+        shared_at=data["shared_at"],
+        share_views=data["share_views"],
+        created_at=data["created_at"],
+        updated_at=data["updated_at"],
     )
 
 

@@ -20,7 +20,9 @@ from specpilot_ai.core.models import (
     OperationsMetrics,
     PriceAlertPlan,
     ProductBrief,
+    PublicReport,
     QualityDashboard,
+    ReportShare,
     ReviewDecision,
     ReviewDecisionRequest,
     ReviewQueueItem,
@@ -42,6 +44,7 @@ from specpilot_ai.sources.collector import SourceCollector
 from specpilot_ai.storage.sqlite_store import SpecPilotStore
 from specpilot_ai.web.admin_page import admin_page_html
 from specpilot_ai.web.launch_page import launch_page_html
+from specpilot_ai.web.public_report_page import public_report_html
 from specpilot_ai.workflows.purchase_agent import run_analysis
 
 app = FastAPI(
@@ -268,6 +271,44 @@ def get_report(
     if report is None:
         raise HTTPException(status_code=404, detail="저장 리포트를 찾을 수 없습니다.")
     return report
+
+
+@app.post("/reports/{report_id}/share", response_model=ReportShare)
+def share_report(
+    report_id: str,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> ReportShare:
+    share = _store().share_report_for_workspace(workspace.workspace_id, report_id)
+    if share is None:
+        raise HTTPException(status_code=404, detail="공유할 리포트를 찾을 수 없습니다.")
+    return share
+
+
+@app.delete("/reports/{report_id}/share", response_model=ReportShare)
+def revoke_report_share(
+    report_id: str,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> ReportShare:
+    share = _store().revoke_report_share_for_workspace(workspace.workspace_id, report_id)
+    if share is None:
+        raise HTTPException(status_code=404, detail="공유를 해제할 리포트를 찾을 수 없습니다.")
+    return share
+
+
+@app.get("/public/reports/{share_token}", response_model=PublicReport)
+def get_public_report(share_token: str) -> PublicReport:
+    report = _store().get_public_report(share_token)
+    if report is None:
+        raise HTTPException(status_code=404, detail="공개 리포트를 찾을 수 없습니다.")
+    return report
+
+
+@app.get("/r/{share_token}", response_class=HTMLResponse)
+def public_report_page(share_token: str) -> str:
+    report = _store().get_public_report(share_token)
+    if report is None:
+        raise HTTPException(status_code=404, detail="공개 리포트를 찾을 수 없습니다.")
+    return public_report_html(report)
 
 
 @app.post("/alerts/subscribe", response_model=AlertSubscription)
