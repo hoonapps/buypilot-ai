@@ -127,6 +127,11 @@ def admin_page_html() -> str:
       <p>분석별 품질 점수, 예상 비용, 공개 전 차단 사유를 확인합니다.</p>
       <div class="quality-list" id="quality"></div>
     </section>
+    <section class="panel" style="margin-top:14px">
+      <h2>Trace 저장소</h2>
+      <p>분석별 LangGraph 단계 span, 품질 점수, 경고/차단 수를 확인합니다.</p>
+      <div class="quality-list" id="traces"></div>
+    </section>
     <section class="grid top-grid" style="margin-top:14px">
       <div class="panel">
         <h2>사용자 피드백</h2>
@@ -166,7 +171,8 @@ def admin_page_html() -> str:
         betaLeadResponse,
         channelResponse,
         deliveryResponse,
-        eventResponse
+        eventResponse,
+        traceResponse
       ] = await Promise.all([
         fetch('/admin/dashboard'),
         fetch('/ops/quality'),
@@ -174,7 +180,8 @@ def admin_page_html() -> str:
         fetch('/beta/leads'),
         fetch('/alerts/channels'),
         fetch('/alerts/deliveries'),
-        fetch('/alerts/events')
+        fetch('/alerts/events'),
+        fetch('/ops/traces')
       ]);
       const data = await response.json();
       const quality = await qualityResponse.json();
@@ -183,6 +190,7 @@ def admin_page_html() -> str:
       const channels = await channelResponse.json();
       const deliveries = await deliveryResponse.json();
       const events = await eventResponse.json();
+      const traces = await traceResponse.json();
       renderMetrics(data.metrics);
       renderSources(data.adapter_statuses);
       renderReviews(data.pending_reviews);
@@ -191,6 +199,7 @@ def admin_page_html() -> str:
       renderBetaLeads(betaLeads);
       renderChannels(channels, events);
       renderDeliveries(deliveries);
+      renderTraces(traces);
     }
 
     function renderMetrics(metrics) {
@@ -203,6 +212,7 @@ def admin_page_html() -> str:
         ['발송 시도', metrics.alert_delivery_attempts],
         ['발송 성공', metrics.sent_alert_deliveries],
         ['발송 실패', metrics.failed_alert_deliveries],
+        ['Trace span', metrics.trace_spans],
         ['트리거', metrics.triggered_alerts],
         ['품질', metrics.average_quality_score],
         ['예상비용', Math.round(metrics.estimated_cost_krw) + '원'],
@@ -261,6 +271,25 @@ def admin_page_html() -> str:
             <h3>품질 ${audit.quality_score}점 · 예상 비용 ${Math.round(audit.estimated_cost_krw)}원</h3>
             <p>소스 호출 ${audit.estimated_source_calls}회 / 토큰 ${audit.estimated_llm_tokens} / 경고 ${audit.warning_count} / 검수 필요 출처 ${audit.review_required_sources}</p>
             <ul>${blockers}</ul>
+          </article>
+        `;
+      }).join('');
+    }
+
+    function renderTraces(items) {
+      const root = document.querySelector('#traces');
+      if (!items.length) {
+        root.innerHTML = '<p>아직 저장된 trace가 없습니다.</p>';
+        return;
+      }
+      root.innerHTML = items.map((item) => {
+        const tone = item.blocker_count ? 'danger' : item.warning_count ? 'warn' : '';
+        return `
+          <article class="review-item quality-item ${tone}">
+            <span class="kicker">${item.trace_id} · ${item.category}</span>
+            <h3>${item.top_model_name || item.final_pick_id || '분석 결과'} · span ${item.span_count}개</h3>
+            <p>${item.purpose}</p>
+            <p>품질 ${item.quality_score}점 / 경고 ${item.warning_count} / 차단 ${item.blocker_count}</p>
           </article>
         `;
       }).join('');

@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from specpilot_ai.core.config import Settings
 from specpilot_ai.core.models import (
+    AgentStep,
     AlertDeliveryAttempt,
     AlertDeliveryEvent,
     AlertDispatchResponse,
@@ -17,6 +18,8 @@ from specpilot_ai.core.models import (
     AnalyzeResponse,
     BetaLead,
     BetaLeadRequest,
+    Category,
+    CheckStatus,
     FeedbackRecord,
     FeedbackRequest,
     OperationsMetrics,
@@ -29,6 +32,9 @@ from specpilot_ai.core.models import (
     SavedReportDetail,
     SavedReportSummary,
     SourceCandidate,
+    TraceEvent,
+    TraceRunSummary,
+    TraceSpanRecord,
 )
 
 SUPPORTED_ALERT_CHANNELS = {"email", "webhook", "sms"}
@@ -99,6 +105,12 @@ class SpecPilotStore:
                     now,
                     now,
                 ),
+            )
+            self._replace_trace_spans(
+                conn,
+                workspace_id,
+                response.graph_trace_id,
+                response.trace_events,
             )
 
     def get_analysis(self, trace_id: str) -> AnalyzeResponse | None:
@@ -735,6 +747,55 @@ class SpecPilotStore:
             ).fetchall()
         return [_alert_attempt_from_row(row) for row in rows]
 
+    def list_trace_runs_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 50,
+    ) -> list[TraceRunSummary]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    ar.trace_id,
+                    ar.workspace_id,
+                    ar.category,
+                    ar.purpose,
+                    ar.final_pick_id,
+                    ar.top_model_name,
+                    ar.quality_score,
+                    ar.warning_count,
+                    ar.blocker_count,
+                    ar.created_at,
+                    COUNT(ts.span_id) AS span_count
+                FROM analysis_runs ar
+                LEFT JOIN trace_spans ts
+                    ON ts.trace_id = ar.trace_id AND ts.workspace_id = ar.workspace_id
+                WHERE ar.workspace_id = ?
+                GROUP BY ar.trace_id
+                ORDER BY ar.created_at DESC
+                LIMIT ?
+                """,
+                (workspace_id, limit),
+            ).fetchall()
+        return [_trace_summary_from_row(row) for row in rows]
+
+    def list_trace_spans_for_workspace(
+        self,
+        workspace_id: str,
+        trace_id: str,
+    ) -> list[TraceSpanRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM trace_spans
+                WHERE workspace_id = ? AND trace_id = ?
+                ORDER BY sequence ASC
+                """,
+                (workspace_id, trace_id),
+            ).fetchall()
+        return [_trace_span_from_row(row) for row in rows]
+
     def quality_dashboard_for_workspace(
         self,
         workspace_id: str | None,
@@ -1014,6 +1075,10 @@ class SpecPilotStore:
                 f"SELECT COUNT(*) FROM alert_delivery_attempts{where}",
                 params,
             ).fetchone()[0]
+            trace_spans = conn.execute(
+                f"SELECT COUNT(*) FROM trace_spans{where}",
+                params,
+            ).fetchone()[0]
             sent_alert_deliveries = conn.execute(
                 f"""
                 SELECT COUNT(*)
@@ -1083,6 +1148,7 @@ class SpecPilotStore:
             alert_delivery_attempts=alert_delivery_attempts,
             sent_alert_deliveries=sent_alert_deliveries,
             failed_alert_deliveries=failed_alert_deliveries,
+            trace_spans=trace_spans,
             feedback_count=feedback_count,
             beta_leads=beta_leads,
             latest_trace_id=latest["trace_id"] if latest else None,
@@ -1206,6 +1272,21 @@ class SpecPilotStore:
                     FOREIGN KEY(event_id) REFERENCES alert_delivery_events(event_id)
                 );
 
+                CREATE TABLE IF NOT EXISTS trace_spans (
+                    span_id TEXT PRIMARY KEY,
+                    trace_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    sequence INTEGER NOT NULL,
+                    step TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    detail TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    evidence_count INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(workspace_id, trace_id, sequence),
+                    FOREIGN KEY(trace_id) REFERENCES analysis_runs(trace_id)
+                );
+
                 CREATE TABLE IF NOT EXISTS user_feedback (
                     feedback_id TEXT PRIMARY KEY,
                     trace_id TEXT NOT NULL,
@@ -1248,6 +1329,8 @@ class SpecPilotStore:
                     ON alert_delivery_attempts(workspace_id);
                 CREATE INDEX IF NOT EXISTS idx_alert_attempts_event
                     ON alert_delivery_attempts(event_id);
+                CREATE INDEX IF NOT EXISTS idx_trace_spans_workspace
+                    ON trace_spans(workspace_id, trace_id);
                 CREATE INDEX IF NOT EXISTS idx_user_feedback_workspace
                     ON user_feedback(workspace_id);
                 CREATE INDEX IF NOT EXISTS idx_user_feedback_trace
@@ -1398,6 +1481,41 @@ class SpecPilotStore:
             ),
         )
 
+    def _replace_trace_spans(
+        self,
+        conn: sqlite3.Connection,
+        workspace_id: str,
+        trace_id: str,
+        events: list[TraceEvent],
+    ) -> None:
+        conn.execute(
+            "DELETE FROM trace_spans WHERE workspace_id = ? AND trace_id = ?",
+            (workspace_id, trace_id),
+        )
+        now = _now()
+        for sequence, event in enumerate(events, start=1):
+            conn.execute(
+                """
+                INSERT INTO trace_spans (
+                    span_id, trace_id, workspace_id, sequence, step, title,
+                    detail, status, evidence_count, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"span_{uuid4().hex[:12]}",
+                    trace_id,
+                    workspace_id,
+                    sequence,
+                    event.step.value,
+                    event.title,
+                    event.detail,
+                    event.status.value,
+                    event.evidence_count,
+                    now,
+                ),
+            )
+
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
@@ -1469,6 +1587,39 @@ def _alert_attempt_from_row(row: sqlite3.Row) -> AlertDeliveryAttempt:
         provider_message=data["provider_message"],
         retry_count=data["retry_count"],
         next_retry_at=data["next_retry_at"],
+        created_at=data["created_at"],
+    )
+
+
+def _trace_summary_from_row(row: sqlite3.Row) -> TraceRunSummary:
+    data = dict(row)
+    return TraceRunSummary(
+        trace_id=data["trace_id"],
+        workspace_id=data["workspace_id"],
+        category=Category(data["category"]),
+        purpose=data["purpose"],
+        final_pick_id=data["final_pick_id"],
+        top_model_name=data["top_model_name"],
+        quality_score=data["quality_score"],
+        warning_count=data["warning_count"],
+        blocker_count=data["blocker_count"],
+        span_count=data["span_count"],
+        created_at=data["created_at"],
+    )
+
+
+def _trace_span_from_row(row: sqlite3.Row) -> TraceSpanRecord:
+    data = dict(row)
+    return TraceSpanRecord(
+        span_id=data["span_id"],
+        trace_id=data["trace_id"],
+        workspace_id=data["workspace_id"],
+        sequence=data["sequence"],
+        step=AgentStep(data["step"]),
+        title=data["title"],
+        detail=data["detail"],
+        status=CheckStatus(data["status"]),
+        evidence_count=data["evidence_count"],
         created_at=data["created_at"],
     )
 

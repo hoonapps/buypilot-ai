@@ -41,6 +41,8 @@ from specpilot_ai.core.models import (
     SourceCollectionRequest,
     SourceCollectionResponse,
     TraceEvent,
+    TraceRunSummary,
+    TraceSpanRecord,
     TrustPolicySummary,
     WorkspaceContext,
 )
@@ -437,6 +439,25 @@ def quality_dashboard(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> QualityDashboard:
     return _store().quality_dashboard_for_workspace(workspace.workspace_id, limit=limit)
+
+
+@app.get("/ops/traces", response_model=list[TraceRunSummary])
+def list_trace_runs(
+    limit: int = 50,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[TraceRunSummary]:
+    return _store().list_trace_runs_for_workspace(workspace.workspace_id, limit=limit)
+
+
+@app.get("/ops/traces/{trace_id}/spans", response_model=list[TraceSpanRecord])
+def list_trace_spans(
+    trace_id: str,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[TraceSpanRecord]:
+    spans = _store().list_trace_spans_for_workspace(workspace.workspace_id, trace_id)
+    if not spans:
+        raise HTTPException(status_code=404, detail="trace span을 찾을 수 없습니다.")
+    return spans
 
 
 @app.get("/me", response_model=WorkspaceContext)

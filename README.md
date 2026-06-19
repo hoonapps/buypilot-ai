@@ -43,7 +43,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 구매 타이밍 윈도우: 후보별 적정가 밴드, 목표가, 변동 리스크, 결제 트리거
 - 구매 실행 패키지: 결제 전 실행 단계, 판매자 확인 질문, 공유 검토 문구
 - 출처 신뢰도, 캐시 만료 기준, 제휴 고지 정책
-- Agent trace 조회
+- Agent trace 조회와 SQLite span 저장
 - SQLite 기반 분석 결과 저장
 - 저장 리포트 조회와 가격 알림 구독
 - 저장 리포트 공개 공유 링크 생성과 공개 리포트 페이지
@@ -361,6 +361,20 @@ curl http://127.0.0.1:8000/ops/quality \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
+저장된 trace 목록:
+
+```bash
+curl http://127.0.0.1:8000/ops/traces \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
+trace span 조회:
+
+```bash
+curl http://127.0.0.1:8000/ops/traces/trace_xxxxxxxxxxxx/spans \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
 ### 소스 어댑터 상태와 수집
 
 ```bash
@@ -441,14 +455,17 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `report.trust_policy`: 가격 캐시, 제휴 고지, 공정성, 리뷰 표현 정책
 - `quality_audit`: 분석 품질 점수, 예상 소스 호출, 예상 토큰/비용, 공개 차단 사유
 - `trace_events`: Agent 단계별 실행 로그
+- `/ops/traces`: 워크스페이스별 저장 trace 요약, span 수, 품질 점수
+- `/ops/traces/{trace_id}/spans`: 단계별 trace span 저장 이력
 - `share_token`, `shared_at`, `share_views`: 저장 리포트 공개 공유 상태
 - `feedback_count`, `average_satisfaction`, `purchase_intent_rate`: 추천 결과가 실제 구매 판단으로 이어지는지 보는 운영 지표
 - `beta_leads`: 베타 신청 리드 수
 - `alert_channels`, `alert_delivery_attempts`, `sent_alert_deliveries`, `failed_alert_deliveries`: 알림 발송 채널과 dispatch 운영 지표
+- `trace_spans`: 별도 저장된 LangGraph 단계 span 수
 
 ## 로컬 저장소
 
-분석 실행, 저장 리포트, 공유 토큰, 가격 알림 구독, 알림 채널, 발송 큐, 발송 시도, 사용자 피드백, 베타 리드는 기본적으로 SQLite에 저장됩니다.
+분석 실행, trace span, 저장 리포트, 공유 토큰, 가격 알림 구독, 알림 채널, 발송 큐, 발송 시도, 사용자 피드백, 베타 리드는 기본적으로 SQLite에 저장됩니다.
 저장 리포트, 공유 토큰, 알림, 발송 채널, 피드백, 리드는 `X-SpecPilot-Key`에서 계산된 워크스페이스 단위로 분리됩니다. 공개 리포트는 공유 토큰이 발급된 단일 리포트만 조회할 수 있습니다.
 
 기본 경로:
@@ -519,6 +536,7 @@ make docker-build
 - `/reports/{report_id}/share`, `/public/reports/{share_token}`, `/r/{share_token}`이 공개 공유 리포트를 만들고 해제하는지
 - `/alerts/evaluate`, `/alerts/events`가 목표가 도달 이벤트를 저장하고 격리하는지
 - `/alerts/channels`, `/alerts/dispatch`, `/alerts/deliveries`가 발송 채널 설정, 큐 발송, 발송 시도 기록을 워크스페이스별로 처리하는지
+- `/ops/traces`, `/ops/traces/{trace_id}/spans`가 저장 trace와 단계별 span을 워크스페이스별로 반환하는지
 - `/feedback`, `/beta/leads`가 만족도와 베타 리드를 저장하고 워크스페이스별로 격리하는지
 - `/ops/quality`가 품질 감사와 예상 비용을 워크스페이스별로 반환하는지
 - `/sources/status`, `/sources/collect`, `/admin/reviews`, `/admin/dashboard`가 동작하는지
@@ -548,6 +566,7 @@ GitHub Actions는 `main` push와 PR에서 다음을 실행합니다.
 - 제휴 링크를 붙일 경우 추천 기준과 제휴 고지를 분리해서 노출해야 합니다.
 - 신뢰도 0.8 미만 또는 리스크 플래그가 있는 근거는 관리자 검수 큐에 넣습니다.
 - 공개 전 품질 점수, 경고 수, 차단 사유, 예상 비용을 운영 콘솔에서 확인합니다.
+- 각 분석의 LangGraph 단계는 별도 trace span으로 저장해 운영 콘솔에서 품질 점수와 함께 추적합니다.
 - 공개 공유 리포트는 토큰 기반으로 열고, 워크스페이스 소유자만 공유를 생성하거나 해제합니다.
 - 구매 판정은 점수만으로 결정하지 않고 가격 목표가, 호환성 차단, 출처 검수 필요 여부를 함께 봅니다.
 - 최종 1순위만 강요하지 않고 예산, 성능, 안전 우선 대안을 함께 보여줍니다.
@@ -562,5 +581,5 @@ GitHub Actions는 `main` push와 PR에서 다음을 실행합니다.
 
 - 실제 가격 비교/오픈마켓/공식 스토어 어댑터의 네트워크 커넥터 연결
 - 실제 이메일/SMS/웹훅 provider credential 연결과 운영 rate limit 적용
-- LangSmith 또는 OpenTelemetry trace 저장
+- LangSmith 또는 OpenTelemetry 외부 export 연동
 - 실제 구매 시나리오 베타 테스트

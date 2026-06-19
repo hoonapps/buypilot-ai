@@ -204,6 +204,33 @@ class TraceEvent(BaseModel):
     evidence_count: int = 0
 
 
+class TraceSpanRecord(BaseModel):
+    span_id: str
+    trace_id: str
+    workspace_id: str = "demo"
+    sequence: int
+    step: AgentStep
+    title: str
+    detail: str
+    status: CheckStatus
+    evidence_count: int = 0
+    created_at: str
+
+
+class TraceRunSummary(BaseModel):
+    trace_id: str
+    workspace_id: str = "demo"
+    category: Category
+    purpose: str
+    final_pick_id: str | None = None
+    top_model_name: str | None = None
+    quality_score: float = 0
+    warning_count: int = 0
+    blocker_count: int = 0
+    span_count: int = 0
+    created_at: str
+
+
 class ScoreCard(BaseModel):
     product_id: str
     purpose_fit: float = Field(ge=0, le=100)
@@ -638,6 +665,7 @@ class OperationsMetrics(BaseModel):
     alert_delivery_attempts: int = 0
     sent_alert_deliveries: int = 0
     failed_alert_deliveries: int = 0
+    trace_spans: int = 0
     feedback_count: int = 0
     beta_leads: int = 0
     latest_trace_id: str | None = None

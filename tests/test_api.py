@@ -62,6 +62,7 @@ def test_admin_page_exposes_review_console() -> None:
     assert "발송 큐" in response.text
     assert "알림 발송 채널" in response.text
     assert "발송 시도" in response.text
+    assert "Trace 저장소" in response.text
     assert "품질/비용 감사" in response.text
     assert "사용자 피드백" in response.text
     assert "베타 리드" in response.text
@@ -175,6 +176,17 @@ def test_analyze_endpoint_returns_trace_and_alerts() -> None:
     trace_response = client.get(f"/traces/{payload['graph_trace_id']}")
     assert trace_response.status_code == 200
     assert trace_response.json()
+
+    trace_runs = client.get("/ops/traces")
+    assert trace_runs.status_code == 200
+    assert any(item["trace_id"] == payload["graph_trace_id"] for item in trace_runs.json())
+
+    trace_spans = client.get(f"/ops/traces/{payload['graph_trace_id']}/spans")
+    assert trace_spans.status_code == 200
+    span_payload = trace_spans.json()
+    assert len(span_payload) == len(payload["trace_events"])
+    assert span_payload[0]["sequence"] == 1
+    assert span_payload[0]["step"] == payload["trace_events"][0]["step"]
 
 
 def test_report_save_alert_subscription_and_metrics_flow() -> None:
@@ -385,6 +397,7 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     assert payload["alert_channels"] >= 1
     assert payload["alert_delivery_attempts"] >= 1
     assert payload["sent_alert_deliveries"] >= 1
+    assert payload["trace_spans"] >= len(analysis["trace_events"])
     assert payload["average_quality_score"] > 0
     assert payload["estimated_cost_krw"] > 0
 
@@ -395,6 +408,22 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     assert quality_payload["average_quality_score"] > 0
     assert quality_payload["total_estimated_cost_krw"] > 0
     assert any(item["trace_id"] == trace_id for item in quality_payload["recent_audits"])
+
+    trace_runs = client.get("/ops/traces", headers=WORKSPACE_A)
+    assert trace_runs.status_code == 200
+    assert any(
+        item["trace_id"] == trace_id and item["span_count"] == len(analysis["trace_events"])
+        for item in trace_runs.json()
+    )
+
+    trace_spans = client.get(f"/ops/traces/{trace_id}/spans", headers=WORKSPACE_A)
+    assert trace_spans.status_code == 200
+    assert [item["sequence"] for item in trace_spans.json()] == list(
+        range(1, len(analysis["trace_events"]) + 1)
+    )
+
+    blocked_trace_spans = client.get(f"/ops/traces/{trace_id}/spans", headers=WORKSPACE_B)
+    assert blocked_trace_spans.status_code == 404
 
     feedback = client.post(
         "/feedback",
