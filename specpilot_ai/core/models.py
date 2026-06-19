@@ -28,6 +28,19 @@ class CheckStatus(StrEnum):
     blocker = "blocker"
 
 
+class SourceKind(StrEnum):
+    price = "price"
+    review = "review"
+    benchmark = "benchmark"
+    official = "official"
+
+
+class ReviewStatus(StrEnum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+
+
 class PurchaseCriteria(BaseModel):
     category: Category
     budget_krw: int | None = Field(default=None, ge=0)
@@ -253,6 +266,78 @@ class OperationsMetrics(BaseModel):
     latest_trace_id: str | None = None
     average_top_score: float = 0
     conversion_ready_rate: float = 0
+
+
+class SourceAdapterStatus(BaseModel):
+    adapter_id: str
+    name: str
+    kind: SourceKind
+    enabled: bool
+    freshness_minutes: int
+    confidence: float = Field(ge=0, le=1)
+    last_checked_at: str
+    message: str
+
+
+class SourceCandidate(BaseModel):
+    source_id: str
+    adapter_id: str
+    kind: SourceKind
+    title: str
+    url: str
+    normalized_model: str
+    extracted_price_krw: int | None = None
+    seller: str | None = None
+    evidence_text: str
+    confidence: float = Field(ge=0, le=1)
+    collected_at: str
+    needs_review: bool = False
+    risk_flags: list[str] = Field(default_factory=list)
+
+
+class SourceCollectionRequest(BaseModel):
+    query: str = Field(min_length=2)
+    category: Category = Category.desktop_pc
+    adapters: list[str] = Field(default_factory=list)
+    limit: int = Field(default=12, ge=1, le=50)
+
+
+class SourceCollectionResponse(BaseModel):
+    query: str
+    category: Category
+    adapter_statuses: list[SourceAdapterStatus]
+    candidates: list[SourceCandidate]
+    review_queue: list[SourceCandidate]
+
+
+class ReviewQueueItem(BaseModel):
+    review_id: str
+    source: SourceCandidate
+    status: ReviewStatus = ReviewStatus.pending
+    reason: str
+    created_at: str
+    resolved_at: str | None = None
+    reviewer: str | None = None
+
+
+class ReviewDecisionRequest(BaseModel):
+    status: ReviewStatus
+    reviewer: str = "operator"
+    note: str = ""
+
+
+class ReviewDecision(BaseModel):
+    review_id: str
+    status: ReviewStatus
+    reviewer: str
+    note: str
+    resolved_at: str
+
+
+class AdminReviewDashboard(BaseModel):
+    adapter_statuses: list[SourceAdapterStatus]
+    pending_reviews: list[ReviewQueueItem]
+    metrics: OperationsMetrics
 
 
 class ProductBrief(BaseModel):
