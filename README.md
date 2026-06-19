@@ -36,6 +36,8 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - SQLite 기반 분석 결과 저장
 - 저장 리포트 조회와 가격 알림 구독
 - 운영 지표 API
+- 가격/리뷰/벤치마크/공식 스토어 소스 어댑터 계약
+- 관리자 검수 콘솔(`/admin`)
 - Neo4j 그래프 스키마 미리보기
 - 데모 모드 기본 지원
 
@@ -140,6 +142,34 @@ curl -X POST http://127.0.0.1:8000/alerts/subscribe \
 curl http://127.0.0.1:8000/ops/metrics
 ```
 
+### 소스 어댑터 상태와 수집
+
+```bash
+curl http://127.0.0.1:8000/sources/status
+```
+
+```bash
+curl -X POST http://127.0.0.1:8000/sources/collect \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "영상 편집과 게임용 데스크톱 200만원 QHD 144Hz",
+    "category": "desktop_pc",
+    "limit": 12
+  }'
+```
+
+관리자 검수 화면:
+
+```text
+http://127.0.0.1:8000/admin
+```
+
+관리자 검수 API:
+
+```bash
+curl http://127.0.0.1:8000/admin/dashboard
+```
+
 ## 분석 워크플로
 
 LangGraph 노드는 다음 순서로 실행됩니다.
@@ -234,6 +264,7 @@ pytest -q
 - 루트 웹 UI가 표시되는지
 - `/analyze`, `/alerts/preview`, `/traces/{trace_id}`가 동작하는지
 - `/reports/save`, `/reports/{report_id}`, `/alerts/subscribe`, `/ops/metrics`가 동작하는지
+- `/sources/status`, `/sources/collect`, `/admin/reviews`, `/admin/dashboard`가 동작하는지
 
 ## 운영 원칙
 
@@ -245,7 +276,7 @@ pytest -q
 
 ## 다음 제품화 과제
 
-- 실제 가격 비교/오픈마켓/공식 스토어 어댑터 연결
+- 실제 가격 비교/오픈마켓/공식 스토어 어댑터의 네트워크 커넥터 연결
 - 사용자 계정과 저장 견적 권한 모델
 - 실제 가격 알림 발송 채널 연동
 - LangSmith 또는 OpenTelemetry trace 저장
