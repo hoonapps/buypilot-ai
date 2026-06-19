@@ -1,6 +1,6 @@
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class Category(StrEnum):
@@ -78,6 +78,7 @@ class PriceSnapshot(BaseModel):
     stock_status: str = "in_stock"
     source_type: str = "price_compare"
 
+    @computed_field
     @property
     def effective_price_krw(self) -> int:
         return (

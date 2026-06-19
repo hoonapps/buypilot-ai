@@ -148,6 +148,8 @@ def launch_page_html() -> str:
     th, td { padding: 11px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
     th { color: var(--muted); font-size: 12px; }
     .sections { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px; }
+    .comparison-card { grid-column: 1 / -1; overflow-x: auto; }
+    .comparison-card table { min-width: 860px; }
     .list { display: grid; gap: 8px; padding-left: 0; list-style: none; margin: 0; }
     .list li { padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--muted); line-height: 1.55; }
     .trace { display: grid; gap: 8px; margin-top: 12px; }
@@ -280,7 +282,7 @@ def launch_page_html() -> str:
         </div>
         <div class="grid cards">${topCards}</div>
         <section class="sections">
-          <div class="card">
+          <div class="card comparison-card">
             <h3>비교표</h3>
             <table>
               <thead><tr><th>순위</th><th>모델</th><th>실구매가</th><th>목적</th><th>호환</th><th>주요 리스크</th></tr></thead>

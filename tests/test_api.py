@@ -31,6 +31,7 @@ def test_analyze_endpoint_returns_trace_and_alerts() -> None:
     assert len(payload["report"]["top_recommendations"]) == 3
     assert len(payload["report"]["comparison_table"]) == 5
     assert payload["report"]["price_alerts"]
+    assert payload["report"]["top_recommendations"][0]["price"]["effective_price_krw"] > 0
     assert payload["trace_events"]
 
     trace_response = client.get(f"/traces/{payload['graph_trace_id']}")
