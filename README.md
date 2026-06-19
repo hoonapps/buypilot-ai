@@ -36,6 +36,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - Agent trace 조회
 - SQLite 기반 분석 결과 저장
 - 저장 리포트 조회와 가격 알림 구독
+- 저장 리포트 공개 공유 링크 생성과 공개 리포트 페이지
 - 목표가 도달 평가와 발송 큐 이벤트 저장
 - 추천 만족도 피드백, 구매 의향, 선택 후보 저장
 - 베타 신청 리드 저장과 개인정보 마스킹
@@ -174,6 +175,32 @@ curl -X POST http://127.0.0.1:8000/reports/save \
 
 ```bash
 curl http://127.0.0.1:8000/reports \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
+공유 링크 생성:
+
+```bash
+curl -X POST http://127.0.0.1:8000/reports/report_xxxxxxxxxxxx/share \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
+공개 JSON 조회:
+
+```bash
+curl http://127.0.0.1:8000/public/reports/share_xxxxxxxxxxxxxxxxxxxx
+```
+
+공개 리포트 페이지:
+
+```text
+http://127.0.0.1:8000/r/share_xxxxxxxxxxxxxxxxxxxx
+```
+
+공유 해제:
+
+```bash
+curl -X DELETE http://127.0.0.1:8000/reports/report_xxxxxxxxxxxx/share \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
@@ -341,13 +368,14 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `report.trust_policy`: 가격 캐시, 제휴 고지, 공정성, 리뷰 표현 정책
 - `quality_audit`: 분석 품질 점수, 예상 소스 호출, 예상 토큰/비용, 공개 차단 사유
 - `trace_events`: Agent 단계별 실행 로그
+- `share_token`, `shared_at`, `share_views`: 저장 리포트 공개 공유 상태
 - `feedback_count`, `average_satisfaction`, `purchase_intent_rate`: 추천 결과가 실제 구매 판단으로 이어지는지 보는 운영 지표
 - `beta_leads`: 베타 신청 리드 수
 
 ## 로컬 저장소
 
-분석 실행, 저장 리포트, 가격 알림 구독, 사용자 피드백, 베타 리드는 기본적으로 SQLite에 저장됩니다.
-저장 리포트, 알림, 피드백, 리드는 `X-SpecPilot-Key`에서 계산된 워크스페이스 단위로 분리됩니다.
+분석 실행, 저장 리포트, 공유 토큰, 가격 알림 구독, 사용자 피드백, 베타 리드는 기본적으로 SQLite에 저장됩니다.
+저장 리포트, 공유 토큰, 알림, 피드백, 리드는 `X-SpecPilot-Key`에서 계산된 워크스페이스 단위로 분리됩니다. 공개 리포트는 공유 토큰이 발급된 단일 리포트만 조회할 수 있습니다.
 
 기본 경로:
 
@@ -413,6 +441,7 @@ make docker-build
 - 루트 웹 UI가 표시되는지
 - `/analyze`, `/alerts/preview`, `/traces/{trace_id}`가 동작하는지
 - `/reports/save`, `/reports/{report_id}`, `/alerts/subscribe`, `/ops/metrics`가 동작하는지
+- `/reports/{report_id}/share`, `/public/reports/{share_token}`, `/r/{share_token}`이 공개 공유 리포트를 만들고 해제하는지
 - `/alerts/evaluate`, `/alerts/events`가 목표가 도달 이벤트를 저장하고 격리하는지
 - `/feedback`, `/beta/leads`가 만족도와 베타 리드를 저장하고 워크스페이스별로 격리하는지
 - `/ops/quality`가 품질 감사와 예상 비용을 워크스페이스별로 반환하는지
@@ -439,6 +468,7 @@ GitHub Actions는 `main` push와 PR에서 다음을 실행합니다.
 - 제휴 링크를 붙일 경우 추천 기준과 제휴 고지를 분리해서 노출해야 합니다.
 - 신뢰도 0.8 미만 또는 리스크 플래그가 있는 근거는 관리자 검수 큐에 넣습니다.
 - 공개 전 품질 점수, 경고 수, 차단 사유, 예상 비용을 운영 콘솔에서 확인합니다.
+- 공개 공유 리포트는 토큰 기반으로 열고, 워크스페이스 소유자만 공유를 생성하거나 해제합니다.
 - 연락처와 이메일 원문은 저장하지 않고 마스킹된 값만 운영 콘솔에 노출합니다.
 - 추천 만족도와 구매 의향은 모델 개선 신호로 쓰되 추천 순위에는 즉시 반영하지 않습니다.
 
