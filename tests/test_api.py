@@ -1176,6 +1176,10 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     backlog_items = backlog.json()
     assert backlog_items
     assert any(item["source_type"] == "readiness" for item in backlog_items)
+    learning_backlog = next(item for item in backlog_items if item["source_type"] == "learning")
+    assert learning_backlog["source_id"] == top_recommendation["product"]["id"]
+    assert "학습 인사이트 개선" in learning_backlog["title"]
+    assert learning_backlog["suggested_action"]
     assert all(item["workspace_id"] == readiness_payload["workspace_id"] for item in backlog_items)
 
     backlog_id = backlog_items[0]["backlog_id"]

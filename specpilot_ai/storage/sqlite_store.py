@@ -2213,6 +2213,23 @@ class SpecPilotStore:
                     created_at=now,
                 )
             )
+        learning = self.learning_insights_for_workspace(workspace_id, limit=limit)
+        for insight in learning.insights:
+            model_name = insight.model_name or insight.product_id
+            tags = ", ".join(insight.learning_tags) if insight.learning_tags else "태그 없음"
+            items.append(
+                BetaBacklogItem(
+                    backlog_id=f"backlog_learning_{insight.product_id}",
+                    workspace_id=workspace_id,
+                    source_type="learning",
+                    source_id=insight.product_id,
+                    severity=insight.status,
+                    title=f"학습 인사이트 개선: {model_name}",
+                    evidence=f"{insight.evidence} / 태그: {tags}",
+                    suggested_action=insight.recommended_action,
+                    created_at=learning.generated_at,
+                )
+            )
         with self._connect() as conn:
             feedback_rows = conn.execute(
                 """
