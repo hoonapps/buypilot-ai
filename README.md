@@ -43,6 +43,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 구매 타이밍 윈도우: 후보별 적정가 밴드, 목표가, 변동 리스크, 결제 트리거
 - 구매 실행 패키지: 결제 전 실행 단계, 판매자 확인 질문, 공유 검토 문구
 - 결제 전 검수: 저장 리포트 기준 최종 결제 금액, 옵션/사양, 판매자 답변, 리스크 승인 상태를 기록하고 결제 가능/보류 판정
+- 구매 링크 거버넌스: 저장 리포트 후보별 제휴/비제휴 구매 링크, 제휴 고지, 정책 경고, 클릭 리다이렉트 추적
 - 구매 결과 추적: 저장 리포트가 실제 구매, 이탈, 지연, 반품/취소로 이어졌는지 기록하고 최종 결제 금액 차이와 학습 신호 집계
 - 학습 인사이트: 구매 결과, 결제 전 검수 차단, 사용자 피드백을 제품별 전환/반품/가격 신호로 묶어 개선 액션 추천
 - 출처 신뢰도, 캐시 만료 기준, 제휴 고지 정책
@@ -281,6 +282,34 @@ curl http://127.0.0.1:8000/reports/report_xxxxxxxxxxxx/checkout-reviews \
 curl http://127.0.0.1:8000/checkout-reviews \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
+
+구매 링크 등록:
+
+```bash
+curl -X POST http://127.0.0.1:8000/reports/report_xxxxxxxxxxxx/purchase-links \
+  -H "Content-Type: application/json" \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY" \
+  -d '{
+    "product_id": "desktop_creator_4070",
+    "seller_name": "공식 스토어",
+    "url": "https://shop.example.com/specpilot-desktop",
+    "is_affiliate": false,
+    "price_krw": 1990000,
+    "shipping_fee_krw": 3000,
+    "coupon_krw": 5000,
+    "rank": 1,
+    "notes": "비제휴 대안 링크"
+  }'
+```
+
+구매 링크 거버넌스:
+
+```bash
+curl http://127.0.0.1:8000/reports/report_xxxxxxxxxxxx/purchase-link-governance \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
+공개 리포트의 구매 링크는 `/buy/plink_xxxxxxxxxxxx` 내부 redirect를 거쳐 클릭 이벤트를 저장한 뒤 실제 판매처로 이동합니다. 제휴 링크가 있으면 같은 후보의 비제휴 대안을 함께 등록해야 하며, 제휴 링크만 단독 노출되면 governance가 blocker로 표시됩니다.
 
 구매 결과 기록:
 
@@ -898,6 +927,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/ops/integrations`: 외부 연동 provider의 category, credential 상태, rate limit, 보존 기간, 운영 증거를 워크스페이스별로 저장
 - `/ops/integration-readiness`: 가격 API, 오픈마켓, 공식 스토어, 이메일, observability, scheduler 등 공개 전 필수 연동의 mock/configured/verified/blocker 상태와 필수 액션을 집계
 - `share_token`, `shared_at`, `share_views`: 저장 리포트 공개 공유 상태
+- `/reports/{report_id}/purchase-links`, `/reports/{report_id}/purchase-link-governance`, `/buy/{link_id}`: 후보별 제휴/비제휴 구매 링크, 제휴 고지, 비제휴 대안 정책 경고, 공개 클릭 redirect와 클릭 지표
 - `/reports/completion-templates`, `/reports/completion-recipient-groups`, `/reports/completion-preview`, `/reports/completion-batches`, `/reports/completion-engagement`, `/reports/completion-provider-events`, `/reports/completion-deliveries/provider-webhooks`, `/t/o/{tracking_token}.png`, `/t/c/{tracking_token}`: 완료 리포트 템플릿, 수신자 그룹, unsubscribe 제외, 발송 전 렌더링 미리보기, batch와 개별 delivery 성공/실패/재시도/열람/클릭/반송/신고/수신 제외 상태, provider 삽입용 공개 추적 픽셀/클릭 리다이렉트
 - `purchase_outcomes`, `completed_purchase_outcomes`, `purchase_conversion_rate`, `average_final_price_delta_krw`, `purchase_outcome_value_krw`: 실제 구매 결과와 최종 결제 금액 차이를 보는 운영 지표
 - `/ops/learning-insights`: 실제 구매 결과, 결제 전 검수 차단, 만족도 피드백을 제품별 전환율, 반품률, 가격 차이, 개선 액션으로 집계
@@ -979,6 +1009,7 @@ make docker-build
 - `/reports/save`, `/reports/{report_id}`, `/alerts/subscribe`, `/ops/metrics`가 동작하는지
 - `/reports/{report_id}/share`, `/public/reports/{share_token}`, `/r/{share_token}`이 공개 공유 리포트를 만들고 해제하는지
 - `/reports/{report_id}/checkout-review`, `/reports/{report_id}/checkout-reviews`, `/checkout-reviews`가 결제 전 검수와 워크스페이스 격리를 처리하는지
+- `/reports/{report_id}/purchase-links`, `/reports/{report_id}/purchase-link-governance`, `/buy/{link_id}`가 제휴/비제휴 구매 링크, 정책 경고, 공개 클릭 redirect, 클릭 지표를 처리하는지
 - `/reports/{report_id}/purchase-outcomes`, `/purchase-outcomes`가 실제 구매, 이탈, 지연, 반품/취소 결과와 최종가 차이를 저장하고 워크스페이스별로 격리하는지
 - `/ops/learning-insights`가 구매 결과, 결제 검수, 피드백을 제품별 전환/리스크/개선 액션으로 묶고 워크스페이스별로 격리하는지
 - `/reports/completion-preview`, `/reports/completion-batches`, `/reports/completion-engagement`, `/reports/completion-provider-events`, `/reports/completion-deliveries/provider-webhooks`, `/t/o/{tracking_token}.png`, `/t/c/{tracking_token}`가 완료 리포트 미리보기, batch, delivery, 공개 추적 픽셀/클릭 리다이렉트, provider webhook, 열람/클릭/반송/신고/수신 제외 상태를 저장하고 워크스페이스별로 격리하는지
@@ -1018,7 +1049,8 @@ GitHub Actions는 `main` push와 PR에서 다음을 실행합니다.
 - due refresh는 `cadence_minutes`와 마지막 실행 시각을 기준으로 지금 실행할 모니터만 처리합니다.
 - live fetch는 provider 정책, robots/약관 승인, 시간당 rate limit을 통과해야 실행됩니다.
 - 특정 판매처 편향을 줄이기 위해 가격, 호환성, 리뷰, 안정성 점수를 분리합니다.
-- 제휴 링크를 붙일 경우 추천 기준과 제휴 고지를 분리해서 노출해야 합니다.
+- 제휴 링크를 붙일 경우 추천 기준과 제휴 고지를 분리해서 노출하고, 같은 후보의 비제휴 구매 대안을 함께 제공합니다.
+- 공개 구매 링크는 내부 `/buy/{link_id}` redirect로 클릭을 기록하되, 추천 순위 계산에는 클릭 수나 제휴 여부를 직접 반영하지 않습니다.
 - 신뢰도 0.8 미만 또는 리스크 플래그가 있는 근거는 관리자 검수 큐에 넣습니다.
 - 공개 전 품질 점수, 경고 수, 차단 사유, 예상 비용을 운영 콘솔에서 확인합니다.
 - 품질 회귀 모니터는 최근 분석 구간과 이전 구간을 비교해 품질 하락, 비용 급등, provider 차단율을 함께 봅니다.

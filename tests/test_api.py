@@ -422,6 +422,90 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     )
     assert invalid_checkout_outcome.status_code == 404
 
+    affiliate_link = client.post(
+        f"/reports/{saved_payload['report_id']}/purchase-links",
+        headers=WORKSPACE_A,
+        json={
+            "product_id": top_recommendation["product"]["id"],
+            "seller_name": "Pytest 제휴몰",
+            "url": "https://shop.example.com/specpilot-top",
+            "is_affiliate": True,
+            "affiliate_network": "pytest-partner",
+            "price_krw": top_recommendation["price"]["effective_price_krw"],
+            "shipping_fee_krw": 3_000,
+            "coupon_krw": 5_000,
+            "rank": 1,
+            "notes": "pytest 제휴 링크",
+        },
+    )
+    assert affiliate_link.status_code == 200
+    affiliate_payload = affiliate_link.json()
+    assert affiliate_payload["is_affiliate"] is True
+    assert affiliate_payload["click_path"].startswith("/buy/plink_")
+    assert "제휴 링크" in affiliate_payload["disclosure"]
+
+    governance_after_affiliate = client.get(
+        f"/reports/{saved_payload['report_id']}/purchase-link-governance",
+        headers=WORKSPACE_A,
+    )
+    assert governance_after_affiliate.status_code == 200
+    assert governance_after_affiliate.json()["status"] == "blocker"
+    assert governance_after_affiliate.json()["required_actions"]
+
+    non_affiliate_link = client.post(
+        f"/reports/{saved_payload['report_id']}/purchase-links",
+        headers=WORKSPACE_A,
+        json={
+            "product_id": top_recommendation["product"]["id"],
+            "seller_name": "Pytest 공식몰",
+            "url": "https://official.example.com/specpilot-top",
+            "is_affiliate": False,
+            "price_krw": top_recommendation["price"]["effective_price_krw"] + 8_000,
+            "rank": 2,
+            "notes": "pytest 비제휴 대안",
+        },
+    )
+    assert non_affiliate_link.status_code == 200
+    assert non_affiliate_link.json()["is_affiliate"] is False
+
+    purchase_links = client.get(
+        f"/reports/{saved_payload['report_id']}/purchase-links",
+        headers=WORKSPACE_A,
+    )
+    assert purchase_links.status_code == 200
+    assert len(purchase_links.json()) >= 2
+    assert {item["is_affiliate"] for item in purchase_links.json()} == {True, False}
+
+    governance_after_alternative = client.get(
+        f"/reports/{saved_payload['report_id']}/purchase-link-governance",
+        headers=WORKSPACE_A,
+    )
+    assert governance_after_alternative.status_code == 200
+    assert governance_after_alternative.json()["status"] in {"ok", "warning"}
+    assert governance_after_alternative.json()["non_affiliate_link_count"] >= 1
+
+    invalid_purchase_link = client.post(
+        f"/reports/{saved_payload['report_id']}/purchase-links",
+        headers=WORKSPACE_A,
+        json={
+            "product_id": top_recommendation["product"]["id"],
+            "seller_name": "internal",
+            "url": "http://127.0.0.1/private",
+        },
+    )
+    assert invalid_purchase_link.status_code == 400
+
+    isolated_purchase_link = client.post(
+        f"/reports/{saved_payload['report_id']}/purchase-links",
+        headers=WORKSPACE_B,
+        json={
+            "product_id": top_recommendation["product"]["id"],
+            "seller_name": "other workspace",
+            "url": "https://other.example.com/specpilot",
+        },
+    )
+    assert isolated_purchase_link.status_code == 404
+
     share = client.post(
         f"/reports/{saved_payload['report_id']}/share",
         headers=WORKSPACE_A,
@@ -442,6 +526,8 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     assert public_report.status_code == 200
     assert public_report.json()["response"]["graph_trace_id"] == trace_id
     assert public_report.json()["share_views"] == 1
+    assert len(public_report.json()["purchase_links"]) >= 2
+    assert any(item["is_affiliate"] for item in public_report.json()["purchase_links"])
 
     public_page = client.get(f"/r/{share_payload['share_token']}")
     assert public_page.status_code == 200
@@ -457,6 +543,17 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     assert "조건 충족 매트릭스" in public_page.text
     assert "구매 실행 패키지" in public_page.text
     assert "판매자 확인 질문" in public_page.text
+    assert "구매 링크" in public_page.text
+    assert "Pytest 제휴몰" in public_page.text
+    assert "비제휴" in public_page.text
+
+    click = client.get(
+        affiliate_payload["click_path"],
+        headers={"referer": f"http://testserver/r/{share_payload['share_token']}"},
+        follow_redirects=False,
+    )
+    assert click.status_code == 302
+    assert click.headers["location"] == "https://shop.example.com/specpilot-top"
 
     report_after_share = client.get(
         f"/reports/{saved_payload['report_id']}",
@@ -473,6 +570,9 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     assert metrics_after_share["purchase_outcomes"] >= 2
     assert metrics_after_share["completed_purchase_outcomes"] >= 1
     assert metrics_after_share["delayed_purchase_outcomes"] >= 1
+    assert metrics_after_share["purchase_links"] >= 2
+    assert metrics_after_share["affiliate_purchase_links"] >= 1
+    assert metrics_after_share["purchase_link_clicks"] >= 1
     assert metrics_after_share["purchase_conversion_rate"] > 0
     assert metrics_after_share["average_final_price_delta_krw"] >= 0
     assert (

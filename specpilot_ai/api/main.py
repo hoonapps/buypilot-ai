@@ -1,3 +1,4 @@
+import ipaddress
 from datetime import UTC, datetime, timedelta
 from urllib.parse import unquote, urlparse
 from uuid import uuid4
@@ -64,6 +65,9 @@ from specpilot_ai.core.models import (
     PriceAlertPlan,
     ProductBrief,
     PublicReport,
+    PurchaseLink,
+    PurchaseLinkGovernance,
+    PurchaseLinkRequest,
     PurchaseOutcome,
     PurchaseOutcomeRequest,
     QualityDashboard,
@@ -632,6 +636,67 @@ def list_purchase_outcomes(
     )
 
 
+@app.post("/reports/{report_id}/purchase-links", response_model=PurchaseLink)
+def create_purchase_link(
+    report_id: str,
+    request: PurchaseLinkRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> PurchaseLink:
+    _validate_public_purchase_url(request.url)
+    link = _store().create_purchase_link_for_workspace(
+        workspace.workspace_id,
+        report_id,
+        request,
+    )
+    if link is None:
+        raise HTTPException(
+            status_code=404,
+            detail="purchase link를 만들 리포트 또는 후보를 찾을 수 없습니다.",
+        )
+    return link
+
+
+@app.get("/reports/{report_id}/purchase-links", response_model=list[PurchaseLink])
+def list_report_purchase_links(
+    report_id: str,
+    active_only: bool = False,
+    limit: int = 100,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[PurchaseLink]:
+    report = _store().get_report_for_workspace(workspace.workspace_id, report_id)
+    if report is None:
+        raise HTTPException(
+            status_code=404,
+            detail="purchase link를 조회할 리포트를 찾을 수 없습니다.",
+        )
+    return _store().list_purchase_links_for_workspace(
+        workspace.workspace_id,
+        report_id,
+        active_only=active_only,
+        limit=limit,
+    )
+
+
+@app.get(
+    "/reports/{report_id}/purchase-link-governance",
+    response_model=PurchaseLinkGovernance,
+)
+def report_purchase_link_governance(
+    report_id: str,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> PurchaseLinkGovernance:
+    governance = _store().purchase_link_governance_for_workspace(
+        workspace.workspace_id,
+        report_id,
+    )
+    if governance is None:
+        raise HTTPException(
+            status_code=404,
+            detail="purchase link governance를 조회할 리포트를 찾을 수 없습니다.",
+        )
+    return governance
+
+
 @app.post("/reports/{report_id}/share", response_model=ReportShare)
 def share_report(
     report_id: str,
@@ -668,6 +733,20 @@ def public_report_page(share_token: str) -> str:
     if report is None:
         raise HTTPException(status_code=404, detail="공개 리포트를 찾을 수 없습니다.")
     return public_report_html(report)
+
+
+@app.get("/buy/{link_id}")
+def purchase_link_redirect(link_id: str, request: Request) -> RedirectResponse:
+    click = _store().record_purchase_link_click(
+        link_id,
+        source=request.query_params.get("source", "public_report"),
+        referrer_host=_referrer_host(request.headers.get("referer")),
+        user_agent_family=_user_agent_family(request.headers.get("user-agent")),
+    )
+    if click is None:
+        raise HTTPException(status_code=404, detail="구매 링크를 찾을 수 없습니다.")
+    _, destination = click
+    return RedirectResponse(destination, status_code=302)
 
 
 @app.post("/alerts/subscribe", response_model=AlertSubscription)
@@ -1475,6 +1554,43 @@ def _limited_header(value: str | None, limit: int = 180) -> str:
     if not value:
         return ""
     return value[:limit]
+
+
+def _validate_public_purchase_url(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise HTTPException(status_code=400, detail="구매 링크는 http 또는 https URL이어야 합니다.")
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise HTTPException(status_code=400, detail="구매 링크 host를 확인할 수 없습니다.")
+    if host in {"localhost", "metadata.google.internal"} or host.endswith(".local"):
+        raise HTTPException(status_code=400, detail="내부 네트워크 구매 링크는 저장할 수 없습니다.")
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return
+    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+        raise HTTPException(
+            status_code=400,
+            detail="private 또는 loopback 구매 링크는 저장할 수 없습니다.",
+        )
+
+
+def _referrer_host(referrer: str | None) -> str:
+    if not referrer:
+        return ""
+    return (urlparse(referrer).hostname or "")[:160]
+
+
+def _user_agent_family(user_agent: str | None) -> str:
+    value = (user_agent or "").lower()
+    if "iphone" in value or "android" in value or "mobile" in value:
+        return "mobile"
+    if "bot" in value or "crawler" in value or "spider" in value:
+        return "bot"
+    if value:
+        return "desktop"
+    return ""
 
 
 def _safe_tracking_redirect_path(target: str | None) -> str:

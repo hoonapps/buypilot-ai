@@ -67,6 +67,10 @@ from specpilot_ai.core.models import (
     ProviderReliabilityMetric,
     ProviderReviewStatus,
     PublicReport,
+    PurchaseLink,
+    PurchaseLinkClick,
+    PurchaseLinkGovernance,
+    PurchaseLinkRequest,
     PurchaseOutcome,
     PurchaseOutcomeRequest,
     PurchaseOutcomeStatus,
@@ -1089,6 +1093,197 @@ class SpecPilotStore:
             ).fetchall()
         return [_purchase_outcome_from_row(row) for row in rows]
 
+    def create_purchase_link_for_workspace(
+        self,
+        workspace_id: str,
+        report_id: str,
+        request: PurchaseLinkRequest,
+    ) -> PurchaseLink | None:
+        report = self.get_report_for_workspace(workspace_id, report_id)
+        if report is None:
+            return None
+        link = _build_purchase_link(report, request)
+        if link is None:
+            return None
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO purchase_links (
+                    link_id, report_id, trace_id, workspace_id, product_id, model_name,
+                    seller_name, url, is_affiliate, affiliate_network, price_krw,
+                    shipping_fee_krw, coupon_krw, effective_price_krw, rank, active,
+                    notes, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    link.link_id,
+                    link.report_id,
+                    link.trace_id,
+                    link.workspace_id,
+                    link.product_id,
+                    link.model_name,
+                    link.seller_name,
+                    link.url,
+                    int(link.is_affiliate),
+                    link.affiliate_network,
+                    link.price_krw,
+                    link.shipping_fee_krw,
+                    link.coupon_krw,
+                    link.effective_price_krw,
+                    link.rank,
+                    int(link.active),
+                    link.notes,
+                    link.created_at,
+                    link.updated_at,
+                ),
+            )
+        return self._purchase_link_with_policy(link)
+
+    def list_purchase_links_for_workspace(
+        self,
+        workspace_id: str,
+        report_id: str,
+        *,
+        active_only: bool = False,
+        limit: int = 100,
+    ) -> list[PurchaseLink]:
+        where = "pl.workspace_id = ? AND pl.report_id = ?"
+        params: list[object] = [workspace_id, report_id]
+        if active_only:
+            where = f"{where} AND pl.active = 1"
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT pl.*,
+                       COALESCE(COUNT(plc.click_id), 0) AS click_count
+                FROM purchase_links pl
+                LEFT JOIN purchase_link_clicks plc
+                  ON plc.link_id = pl.link_id
+                WHERE {where}
+                GROUP BY pl.link_id
+                ORDER BY pl.rank ASC, pl.created_at ASC
+                LIMIT ?
+                """,
+                tuple(params),
+            ).fetchall()
+        links = [_purchase_link_from_row(row) for row in rows]
+        return self._purchase_links_with_policy(links)
+
+    def purchase_link_governance_for_workspace(
+        self,
+        workspace_id: str,
+        report_id: str,
+    ) -> PurchaseLinkGovernance | None:
+        report = self.get_report_for_workspace(workspace_id, report_id)
+        if report is None:
+            return None
+        links = self.list_purchase_links_for_workspace(
+            workspace_id,
+            report_id,
+            active_only=False,
+            limit=200,
+        )
+        return _purchase_link_governance(workspace_id, report_id, links)
+
+    def record_purchase_link_click(
+        self,
+        link_id: str,
+        *,
+        source: str = "public_report",
+        referrer_host: str = "",
+        user_agent_family: str = "",
+    ) -> tuple[PurchaseLinkClick, str] | None:
+        now = _now()
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM purchase_links
+                WHERE link_id = ? AND active = 1
+                """,
+                (link_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            link = _purchase_link_from_row(row)
+            click = PurchaseLinkClick(
+                click_id=f"plink_click_{uuid4().hex[:12]}",
+                link_id=link.link_id,
+                report_id=link.report_id,
+                workspace_id=link.workspace_id,
+                product_id=link.product_id,
+                source=source,
+                referrer_host=referrer_host[:160],
+                user_agent_family=user_agent_family[:80],
+                created_at=now,
+            )
+            conn.execute(
+                """
+                INSERT INTO purchase_link_clicks (
+                    click_id, link_id, report_id, workspace_id, product_id,
+                    source, referrer_host, user_agent_family, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    click.click_id,
+                    click.link_id,
+                    click.report_id,
+                    click.workspace_id,
+                    click.product_id,
+                    click.source,
+                    click.referrer_host,
+                    click.user_agent_family,
+                    click.created_at,
+                ),
+            )
+        return click, link.url
+
+    def _purchase_link_with_policy(self, link: PurchaseLink) -> PurchaseLink:
+        links = self.list_purchase_links_for_workspace(
+            link.workspace_id,
+            link.report_id,
+            active_only=False,
+            limit=200,
+        )
+        by_id = {item.link_id: item for item in links}
+        return by_id.get(link.link_id, link)
+
+    def _purchase_links_with_policy(self, links: list[PurchaseLink]) -> list[PurchaseLink]:
+        affiliate_products = {
+            link.product_id for link in links if link.active and link.is_affiliate
+        }
+        non_affiliate_products = {
+            link.product_id for link in links if link.active and not link.is_affiliate
+        }
+        has_any_non_affiliate = bool(non_affiliate_products)
+        enriched = []
+        for link in links:
+            warnings = list(link.policy_warnings)
+            status = link.status
+            if link.is_affiliate and link.product_id not in non_affiliate_products:
+                warnings.append("제휴 링크에는 같은 후보의 비제휴 대안을 함께 노출해야 합니다.")
+                status = CheckStatus.warning
+            if link.is_affiliate and not has_any_non_affiliate:
+                warnings.append("리포트 전체에 비제휴 구매 대안이 없어 공개 전 보강이 필요합니다.")
+                status = CheckStatus.blocker
+            if (
+                link.product_id in affiliate_products
+                and link.product_id not in non_affiliate_products
+            ):
+                status = CheckStatus.blocker if link.is_affiliate else status
+            enriched.append(
+                link.model_copy(
+                    update={
+                        "status": status,
+                        "policy_warnings": _dedupe_strings(warnings),
+                    }
+                )
+            )
+        return enriched
+
     def share_report_for_workspace(
         self,
         workspace_id: str,
@@ -1164,7 +1359,7 @@ class SpecPilotStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT sr.report_id, sr.title, sr.final_pick_id, sr.top_model_name,
+                SELECT sr.report_id, sr.workspace_id, sr.title, sr.final_pick_id, sr.top_model_name,
                        sr.shared_at, sr.share_views, ar.response_json
                 FROM saved_reports sr
                 JOIN analysis_runs ar
@@ -1184,6 +1379,12 @@ class SpecPilotStore:
                 (now, share_token),
             )
         data = dict(row)
+        purchase_links = self.list_purchase_links_for_workspace(
+            data["workspace_id"],
+            data["report_id"],
+            active_only=True,
+            limit=50,
+        )
         return PublicReport(
             report_id=data["report_id"],
             title=data["title"],
@@ -1192,6 +1393,7 @@ class SpecPilotStore:
             shared_at=data["shared_at"],
             share_views=data["share_views"] + 1,
             response=AnalyzeResponse.model_validate_json(data["response_json"]),
+            purchase_links=purchase_links,
         )
 
     def create_alert_subscription(
@@ -3270,6 +3472,22 @@ class SpecPilotStore:
                 """,
                 params,
             ).fetchone()[0]
+            purchase_links = conn.execute(
+                f"SELECT COUNT(*) FROM purchase_links{where}",
+                params,
+            ).fetchone()[0]
+            affiliate_purchase_links = conn.execute(
+                f"""
+                SELECT COUNT(*)
+                FROM purchase_links{where}
+                {' AND ' if where else ' WHERE '}is_affiliate = 1
+                """,
+                params,
+            ).fetchone()[0]
+            purchase_link_clicks = conn.execute(
+                f"SELECT COUNT(*) FROM purchase_link_clicks{where}",
+                params,
+            ).fetchone()[0]
             outcome_value_row = conn.execute(
                 f"""
                 SELECT
@@ -3349,6 +3567,9 @@ class SpecPilotStore:
             abandoned_purchase_outcomes=abandoned_purchase_outcomes,
             delayed_purchase_outcomes=delayed_purchase_outcomes,
             returned_purchase_outcomes=returned_purchase_outcomes,
+            purchase_links=purchase_links,
+            affiliate_purchase_links=affiliate_purchase_links,
+            purchase_link_clicks=purchase_link_clicks,
             purchase_conversion_rate=round(
                 (
                     completed_purchase_outcomes
@@ -3678,6 +3899,43 @@ class SpecPilotStore:
                     FOREIGN KEY(report_id) REFERENCES saved_reports(report_id),
                     FOREIGN KEY(trace_id) REFERENCES analysis_runs(trace_id),
                     FOREIGN KEY(checkout_review_id) REFERENCES checkout_reviews(review_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS purchase_links (
+                    link_id TEXT PRIMARY KEY,
+                    report_id TEXT NOT NULL,
+                    trace_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    product_id TEXT NOT NULL,
+                    model_name TEXT NOT NULL,
+                    seller_name TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    is_affiliate INTEGER NOT NULL DEFAULT 0,
+                    affiliate_network TEXT NOT NULL DEFAULT '',
+                    price_krw INTEGER,
+                    shipping_fee_krw INTEGER NOT NULL DEFAULT 0,
+                    coupon_krw INTEGER NOT NULL DEFAULT 0,
+                    effective_price_krw INTEGER,
+                    rank INTEGER NOT NULL DEFAULT 1,
+                    active INTEGER NOT NULL DEFAULT 1,
+                    notes TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(report_id) REFERENCES saved_reports(report_id),
+                    FOREIGN KEY(trace_id) REFERENCES analysis_runs(trace_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS purchase_link_clicks (
+                    click_id TEXT PRIMARY KEY,
+                    link_id TEXT NOT NULL,
+                    report_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    product_id TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'public_report',
+                    referrer_host TEXT NOT NULL DEFAULT '',
+                    user_agent_family TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(link_id) REFERENCES purchase_links(link_id)
                 );
 
                 CREATE TABLE IF NOT EXISTS alert_subscriptions (
@@ -4019,6 +4277,12 @@ class SpecPilotStore:
                     ON purchase_outcomes(report_id, created_at);
                 CREATE INDEX IF NOT EXISTS idx_purchase_outcomes_status
                     ON purchase_outcomes(workspace_id, status, created_at);
+                CREATE INDEX IF NOT EXISTS idx_purchase_links_workspace
+                    ON purchase_links(workspace_id, report_id, product_id);
+                CREATE INDEX IF NOT EXISTS idx_purchase_link_clicks_link
+                    ON purchase_link_clicks(link_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_purchase_link_clicks_workspace
+                    ON purchase_link_clicks(workspace_id, created_at);
                 CREATE INDEX IF NOT EXISTS idx_alerts_trace
                     ON alert_subscriptions(trace_id);
                 CREATE INDEX IF NOT EXISTS idx_source_review_status
@@ -4628,6 +4892,134 @@ def _purchase_outcome_from_row(row: sqlite3.Row) -> PurchaseOutcome:
         learning_signal=data["learning_signal"],
         notes=data["notes"],
         created_at=data["created_at"],
+    )
+
+
+def _purchase_link_from_row(row: sqlite3.Row) -> PurchaseLink:
+    data = dict(row)
+    is_affiliate = bool(data["is_affiliate"])
+    disclosure = (
+        "제휴 링크입니다. 추천 순위는 목적 적합도, 실구매가, 호환성, 리뷰 신뢰도로 계산했습니다."
+        if is_affiliate
+        else "비제휴 구매 대안입니다."
+    )
+    return PurchaseLink(
+        link_id=data["link_id"],
+        report_id=data["report_id"],
+        trace_id=data["trace_id"],
+        workspace_id=data["workspace_id"],
+        product_id=data["product_id"],
+        model_name=data["model_name"],
+        seller_name=data["seller_name"],
+        url=data["url"],
+        is_affiliate=is_affiliate,
+        affiliate_network=data["affiliate_network"],
+        price_krw=data["price_krw"],
+        shipping_fee_krw=data["shipping_fee_krw"],
+        coupon_krw=data["coupon_krw"],
+        effective_price_krw=data["effective_price_krw"],
+        rank=data["rank"],
+        active=bool(data["active"]),
+        disclosure=disclosure,
+        policy_warnings=[],
+        click_path=f"/buy/{data['link_id']}",
+        click_count=data["click_count"] if "click_count" in data else 0,
+        notes=data["notes"],
+        created_at=data["created_at"],
+        updated_at=data["updated_at"],
+    )
+
+
+def _build_purchase_link(
+    report: SavedReportDetail,
+    request: PurchaseLinkRequest,
+) -> PurchaseLink | None:
+    purchase = report.response.report
+    product_id = request.product_id or purchase.final_pick_id
+    recommendation = next(
+        (
+            item
+            for item in purchase.top_recommendations
+            if item.product.id == product_id
+        ),
+        None,
+    )
+    if recommendation is None:
+        return None
+    price = request.price_krw
+    effective_price = (
+        price + request.shipping_fee_krw - request.coupon_krw
+        if price is not None
+        else None
+    )
+    now = _now()
+    link_id = f"plink_{uuid4().hex[:12]}"
+    disclosure = (
+        "제휴 링크입니다. 추천 순위는 목적 적합도, 실구매가, 호환성, 리뷰 신뢰도로 계산했습니다."
+        if request.is_affiliate
+        else "비제휴 구매 대안입니다."
+    )
+    return PurchaseLink(
+        link_id=link_id,
+        report_id=report.report_id,
+        trace_id=report.trace_id,
+        workspace_id=report.workspace_id,
+        product_id=recommendation.product.id,
+        model_name=recommendation.product.model_name,
+        seller_name=request.seller_name.strip(),
+        url=request.url.strip(),
+        is_affiliate=request.is_affiliate,
+        affiliate_network=request.affiliate_network.strip(),
+        price_krw=price,
+        shipping_fee_krw=request.shipping_fee_krw,
+        coupon_krw=request.coupon_krw,
+        effective_price_krw=effective_price,
+        rank=request.rank,
+        active=request.active,
+        disclosure=disclosure,
+        policy_warnings=[],
+        click_path=f"/buy/{link_id}",
+        notes=request.notes.strip(),
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _purchase_link_governance(
+    workspace_id: str,
+    report_id: str,
+    links: list[PurchaseLink],
+) -> PurchaseLinkGovernance:
+    active_links = [link for link in links if link.active]
+    affiliate_count = sum(1 for link in active_links if link.is_affiliate)
+    non_affiliate_count = sum(1 for link in active_links if not link.is_affiliate)
+    click_count = sum(link.click_count for link in links)
+    required_actions: list[str] = []
+    status = CheckStatus.ok
+    if affiliate_count and non_affiliate_count == 0:
+        status = CheckStatus.blocker
+        required_actions.append("제휴 링크 공개 전 비제휴 구매 대안을 최소 1개 이상 추가하세요.")
+    elif any(link.status != CheckStatus.ok for link in links):
+        status = CheckStatus.warning
+        required_actions.append("후보별 제휴 링크와 비제휴 링크의 균형을 맞추세요.")
+    if not active_links:
+        status = CheckStatus.warning
+        required_actions.append("공개 리포트에서 사용자가 확인할 구매 링크를 등록하세요.")
+    summary = (
+        f"활성 구매 링크 {len(active_links)}개, 제휴 {affiliate_count}개, "
+        f"비제휴 {non_affiliate_count}개, 클릭 {click_count}회입니다."
+    )
+    return PurchaseLinkGovernance(
+        workspace_id=workspace_id,
+        report_id=report_id,
+        status=status,
+        affiliate_link_count=affiliate_count,
+        non_affiliate_link_count=non_affiliate_count,
+        active_link_count=len(active_links),
+        click_count=click_count,
+        summary=summary,
+        required_actions=_dedupe_strings(required_actions),
+        links=links,
     )
 
 

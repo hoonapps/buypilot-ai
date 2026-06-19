@@ -848,6 +848,72 @@ class PurchaseOutcome(BaseModel):
     created_at: str
 
 
+class PurchaseLinkRequest(BaseModel):
+    product_id: str | None = None
+    seller_name: str = Field(min_length=1)
+    url: str = Field(min_length=8)
+    is_affiliate: bool = False
+    affiliate_network: str = ""
+    price_krw: int | None = Field(default=None, ge=0)
+    shipping_fee_krw: int = Field(default=0, ge=0)
+    coupon_krw: int = Field(default=0, ge=0)
+    rank: int = Field(default=1, ge=1, le=20)
+    active: bool = True
+    notes: str = ""
+
+
+class PurchaseLink(BaseModel):
+    link_id: str
+    report_id: str
+    trace_id: str
+    workspace_id: str = "demo"
+    product_id: str
+    model_name: str
+    seller_name: str
+    url: str
+    is_affiliate: bool = False
+    affiliate_network: str = ""
+    price_krw: int | None = None
+    shipping_fee_krw: int = 0
+    coupon_krw: int = 0
+    effective_price_krw: int | None = None
+    rank: int = 1
+    active: bool = True
+    status: CheckStatus = CheckStatus.ok
+    disclosure: str
+    policy_warnings: list[str] = Field(default_factory=list)
+    click_path: str
+    click_count: int = 0
+    notes: str = ""
+    created_at: str
+    updated_at: str
+
+
+class PurchaseLinkClick(BaseModel):
+    click_id: str
+    link_id: str
+    report_id: str
+    workspace_id: str = "demo"
+    product_id: str
+    source: str = "public_report"
+    referrer_host: str = ""
+    user_agent_family: str = ""
+    created_at: str
+
+
+class PurchaseLinkGovernance(BaseModel):
+    workspace_id: str
+    report_id: str
+    status: CheckStatus
+    affiliate_link_count: int = 0
+    non_affiliate_link_count: int = 0
+    active_link_count: int = 0
+    click_count: int = 0
+    summary: str
+    required_actions: list[str] = Field(default_factory=list)
+    links: list[PurchaseLink] = Field(default_factory=list)
+
+
 class CompletionReportBatchRequest(BaseModel):
     report_ids: list[str] = Field(default_factory=list)
     channel: str = "email"
@@ -1033,6 +1099,7 @@ class PublicReport(BaseModel):
     shared_at: str
     share_views: int = 0
     response: AnalyzeResponse
+    purchase_links: list[PurchaseLink] = Field(default_factory=list)
 
 
 class AlertSubscriptionRequest(BaseModel):
@@ -1165,6 +1232,9 @@ class OperationsMetrics(BaseModel):
     abandoned_purchase_outcomes: int = 0
     delayed_purchase_outcomes: int = 0
     returned_purchase_outcomes: int = 0
+    purchase_links: int = 0
+    affiliate_purchase_links: int = 0
+    purchase_link_clicks: int = 0
     purchase_conversion_rate: float = 0
     average_final_price_delta_krw: float = 0
     purchase_outcome_value_krw: int = 0

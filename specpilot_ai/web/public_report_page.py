@@ -149,6 +149,7 @@ def public_report_html(report: PublicReport) -> str:
     brief_reasons = _list_items(share_brief.key_reasons if share_brief else [])
     brief_watchouts = _list_items(share_brief.watchouts if share_brief else [])
     brief_questions = _list_items(share_brief.reviewer_questions if share_brief else [])
+    purchase_link_cards = _purchase_link_cards(report)
     return f"""
 <!doctype html>
 <html lang="ko">
@@ -279,6 +280,10 @@ def public_report_html(report: PublicReport) -> str:
       <div class="grid cards">{deal_window_cards}</div>
     </section>
     <section class="section">
+      <h2>구매 링크</h2>
+      <div class="grid cards">{purchase_link_cards}</div>
+    </section>
+    <section class="section">
       <h2>예산/조건 스트레스 테스트</h2>
       <div class="grid cards">{stress_cards}</div>
     </section>
@@ -360,6 +365,31 @@ def _won(value: int) -> str:
 
 def _list_items(items: list[str]) -> str:
     return "\n".join(f"<li>{escape(item)}</li>" for item in items)
+
+
+def _purchase_link_cards(report: PublicReport) -> str:
+    if not report.purchase_links:
+        return """
+        <article class="card">
+          <span class="rank">링크 준비 중</span>
+          <h3>구매 링크 검수 전</h3>
+          <p>공개 전 운영자가 제휴 여부와 비제휴 대안을 검수한 링크만 노출합니다.</p>
+        </article>
+        """
+    return "\n".join(
+        f"""
+        <article class="card">
+          <span class="rank">{'제휴' if link.is_affiliate else '비제휴'} · {escape(link.status.value)}</span>
+          <h3>{escape(link.seller_name)}</h3>
+          <p>{escape(link.model_name)}</p>
+          <strong>{_won(link.effective_price_krw) if link.effective_price_krw is not None else '가격 확인 필요'}</strong>
+          <p>{escape(link.disclosure)}</p>
+          <ul>{_list_items(link.policy_warnings) or '<li>추천 순위와 링크 수익은 분리해 운영합니다.</li>'}</ul>
+          <a class="cta" href="{escape(link.click_path)}?source=public_report">판매처 확인</a>
+        </article>
+        """
+        for link in report.purchase_links
+    )
 
 
 def _option_audit_rows(items) -> str:
