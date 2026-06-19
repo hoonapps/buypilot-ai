@@ -36,6 +36,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - Agent trace 조회
 - SQLite 기반 분석 결과 저장
 - 저장 리포트 조회와 가격 알림 구독
+- 목표가 도달 평가와 발송 큐 이벤트 저장
 - 운영 지표 API
 - 가격/리뷰/벤치마크/공식 스토어 소스 어댑터 계약
 - 관리자 검수 콘솔(`/admin`)
@@ -189,6 +190,27 @@ curl -X POST http://127.0.0.1:8000/alerts/subscribe \
   }'
 ```
 
+목표가 도달 평가:
+
+```bash
+curl -X POST http://127.0.0.1:8000/alerts/evaluate \
+  -H "Content-Type: application/json" \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY" \
+  -d '{
+    "price_overrides_krw": {
+      "build-001": 1847999
+    },
+    "dry_run": false
+  }'
+```
+
+알림 발송 이벤트 조회:
+
+```bash
+curl http://127.0.0.1:8000/alerts/events \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
 운영 지표:
 
 ```bash
@@ -333,6 +355,7 @@ make docker-build
 - 루트 웹 UI가 표시되는지
 - `/analyze`, `/alerts/preview`, `/traces/{trace_id}`가 동작하는지
 - `/reports/save`, `/reports/{report_id}`, `/alerts/subscribe`, `/ops/metrics`가 동작하는지
+- `/alerts/evaluate`, `/alerts/events`가 목표가 도달 이벤트를 저장하고 격리하는지
 - `/sources/status`, `/sources/collect`, `/admin/reviews`, `/admin/dashboard`가 동작하는지
 - `/policy/trust`가 캐시, 제휴 고지, 공정성 정책을 반환하는지
 - `/health`, `/ready` 운영 엔드포인트가 동작하는지
@@ -359,7 +382,7 @@ GitHub Actions는 `main` push와 PR에서 다음을 실행합니다.
 ## 다음 제품화 과제
 
 - 실제 가격 비교/오픈마켓/공식 스토어 어댑터의 네트워크 커넥터 연결
-- 실제 가격 알림 발송 채널 연동
+- 실제 가격 알림 발송 채널 어댑터 연동
 - LangSmith 또는 OpenTelemetry trace 저장
 - 관리자용 분석 비용 대시보드
 - 실제 구매 시나리오 베타 테스트
