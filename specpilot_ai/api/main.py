@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -54,6 +54,8 @@ from specpilot_ai.core.models import (
     SourceRefreshRequest,
     SourceRefreshResponse,
     SourceRefreshRun,
+    SourceScheduleItem,
+    SourceSchedulePreview,
     SourceUrlIngestRequest,
     SourceUrlIngestResponse,
     TraceEvent,
@@ -626,60 +628,46 @@ def refresh_source_monitors(
         monitor_ids=request.monitor_ids or None,
         limit=request.limit,
     )
-    runs: list[SourceRefreshRun] = []
-    candidates = []
-    review_items: list[ReviewQueueItem] = []
-    for monitor in monitors:
-        html = request.html_overrides.get(monitor.monitor_id, monitor.html_snapshot)
-        if not html.strip():
-            gate = _source_provider_gate(monitor.url, workspace.workspace_id, record=True)
-            if not gate.allowed:
-                run = _source_refresh_run(
-                    monitor=monitor,
-                    status="failed",
-                    message=gate.message,
-                )
-                runs.append(_store().record_source_refresh_run(run))
-                continue
-        try:
-            response = ingest_source_url(
-                SourceUrlIngestRequest(
-                    url=monitor.url,
-                    category=monitor.category,
-                    kind=monitor.kind,
-                    expected_model=monitor.expected_model,
-                    source_name=monitor.source_name,
-                    seller=monitor.seller,
-                    html=html,
-                )
-            )
-        except ValueError as exc:
-            run = _source_refresh_run(
-                monitor=monitor,
-                status="failed",
-                message=str(exc),
-            )
-        else:
-            if response.review_item is not None:
-                _store().add_review_items([response.review_item])
-                review_items.append(response.review_item)
-            candidates.append(response.candidate)
-            run = _source_refresh_run(
-                monitor=monitor,
-                status="succeeded",
-                source_id=response.candidate.source_id,
-                review_id=response.review_item.review_id if response.review_item else None,
-                fetched_live=response.fetched_live,
-                message=" / ".join(response.extraction_notes),
-            )
-        runs.append(_store().record_source_refresh_run(run))
-    return SourceRefreshResponse(
-        selected_count=len(monitors),
-        succeeded_count=sum(1 for run in runs if run.status == "succeeded"),
-        failed_count=sum(1 for run in runs if run.status == "failed"),
-        candidates=candidates,
-        review_items=review_items,
-        runs=runs,
+    return _refresh_monitors(
+        monitors,
+        workspace_id=workspace.workspace_id,
+        html_overrides=request.html_overrides,
+    )
+
+
+@app.get("/sources/schedule", response_model=SourceSchedulePreview)
+def source_refresh_schedule(
+    limit: int = 100,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> SourceSchedulePreview:
+    monitors = _store().list_source_monitors_for_workspace(
+        workspace.workspace_id,
+        active=True,
+        limit=limit,
+    )
+    return _source_schedule_preview(workspace.workspace_id, monitors)
+
+
+@app.post("/sources/refresh-due", response_model=SourceRefreshResponse)
+def refresh_due_source_monitors(
+    request: SourceRefreshRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> SourceRefreshResponse:
+    monitors = _store().list_source_monitors_for_workspace(
+        workspace.workspace_id,
+        active=None if request.include_inactive else True,
+        monitor_ids=request.monitor_ids or None,
+        limit=request.limit,
+    )
+    due_monitors = [
+        item.monitor
+        for item in _source_schedule_items(monitors, datetime.now(UTC))
+        if item.due
+    ]
+    return _refresh_monitors(
+        due_monitors,
+        workspace_id=workspace.workspace_id,
+        html_overrides=request.html_overrides,
     )
 
 
@@ -821,6 +809,120 @@ def _matching_source_provider(
     if not matches:
         return None
     return sorted(matches, key=lambda item: len(item.host_pattern), reverse=True)[0]
+
+
+def _refresh_monitors(
+    monitors: list[SourceMonitor],
+    *,
+    workspace_id: str,
+    html_overrides: dict[str, str],
+) -> SourceRefreshResponse:
+    runs: list[SourceRefreshRun] = []
+    candidates = []
+    review_items: list[ReviewQueueItem] = []
+    for monitor in monitors:
+        html = html_overrides.get(monitor.monitor_id, monitor.html_snapshot)
+        if not html.strip():
+            gate = _source_provider_gate(monitor.url, workspace_id, record=True)
+            if not gate.allowed:
+                run = _source_refresh_run(
+                    monitor=monitor,
+                    status="failed",
+                    message=gate.message,
+                )
+                runs.append(_store().record_source_refresh_run(run))
+                continue
+        try:
+            response = ingest_source_url(
+                SourceUrlIngestRequest(
+                    url=monitor.url,
+                    category=monitor.category,
+                    kind=monitor.kind,
+                    expected_model=monitor.expected_model,
+                    source_name=monitor.source_name,
+                    seller=monitor.seller,
+                    html=html,
+                )
+            )
+        except ValueError as exc:
+            run = _source_refresh_run(
+                monitor=monitor,
+                status="failed",
+                message=str(exc),
+            )
+        else:
+            if response.review_item is not None:
+                _store().add_review_items([response.review_item])
+                review_items.append(response.review_item)
+            candidates.append(response.candidate)
+            run = _source_refresh_run(
+                monitor=monitor,
+                status="succeeded",
+                source_id=response.candidate.source_id,
+                review_id=response.review_item.review_id if response.review_item else None,
+                fetched_live=response.fetched_live,
+                message=" / ".join(response.extraction_notes),
+            )
+        runs.append(_store().record_source_refresh_run(run))
+    return SourceRefreshResponse(
+        selected_count=len(monitors),
+        succeeded_count=sum(1 for run in runs if run.status == "succeeded"),
+        failed_count=sum(1 for run in runs if run.status == "failed"),
+        candidates=candidates,
+        review_items=review_items,
+        runs=runs,
+    )
+
+
+def _source_schedule_preview(
+    workspace_id: str,
+    monitors: list[SourceMonitor],
+) -> SourceSchedulePreview:
+    now = datetime.now(UTC)
+    items = _source_schedule_items(monitors, now)
+    due = [item for item in items if item.due]
+    upcoming = [item for item in items if not item.due]
+    return SourceSchedulePreview(
+        workspace_id=workspace_id,
+        due_count=len(due),
+        upcoming_count=len(upcoming),
+        generated_at=now.isoformat(),
+        due=due,
+        upcoming=upcoming,
+    )
+
+
+def _source_schedule_items(
+    monitors: list[SourceMonitor],
+    now: datetime,
+) -> list[SourceScheduleItem]:
+    return [_source_schedule_item(monitor, now) for monitor in monitors]
+
+
+def _source_schedule_item(
+    monitor: SourceMonitor,
+    now: datetime,
+) -> SourceScheduleItem:
+    next_due = _next_due_at(monitor)
+    due = next_due is None or next_due <= now
+    overdue_minutes = 0
+    if due and next_due is not None:
+        overdue_minutes = max(0, int((now - next_due).total_seconds() // 60))
+    return SourceScheduleItem(
+        monitor=monitor,
+        due=due,
+        next_due_at=next_due.isoformat() if next_due else None,
+        overdue_minutes=overdue_minutes,
+    )
+
+
+def _next_due_at(monitor: SourceMonitor) -> datetime | None:
+    if monitor.last_run_at is None:
+        return None
+    last_run_at = datetime.fromisoformat(monitor.last_run_at)
+    if last_run_at.tzinfo is None:
+        last_run_at = last_run_at.replace(tzinfo=UTC)
+    return last_run_at + timedelta(minutes=monitor.cadence_minutes)
 
 
 def _source_refresh_run(

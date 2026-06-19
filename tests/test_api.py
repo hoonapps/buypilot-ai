@@ -63,6 +63,7 @@ def test_admin_page_exposes_review_console() -> None:
     assert "소스 수집" in response.text
     assert "URL 인입" in response.text
     assert "모니터 등록" in response.text
+    assert "due refresh" in response.text
     assert "수집 refresh 이력" in response.text
     assert "provider 정책 저장" in response.text
     assert "Source Provider 정책" in response.text
@@ -576,6 +577,34 @@ def test_source_collection_and_admin_review_flow() -> None:
     monitor_payload = monitor.json()
     assert monitor_payload["last_status"] == "never_run"
     assert "html_snapshot" not in monitor_payload
+
+    schedule_before = client.get("/sources/schedule", headers=WORKSPACE_A)
+    assert schedule_before.status_code == 200
+    assert any(
+        item["monitor"]["monitor_id"] == monitor_payload["monitor_id"]
+        for item in schedule_before.json()["due"]
+    )
+
+    due_refresh = client.post(
+        "/sources/refresh-due",
+        headers=WORKSPACE_A,
+        json={"limit": 10},
+    )
+    assert due_refresh.status_code == 200
+    due_payload = due_refresh.json()
+    assert due_payload["selected_count"] >= 1
+    assert any(
+        item["monitor_id"] == monitor_payload["monitor_id"]
+        and item["status"] == "succeeded"
+        for item in due_payload["runs"]
+    )
+
+    schedule_after = client.get("/sources/schedule", headers=WORKSPACE_A)
+    assert schedule_after.status_code == 200
+    assert not any(
+        item["monitor"]["monitor_id"] == monitor_payload["monitor_id"]
+        for item in schedule_after.json()["due"]
+    )
 
     refresh = client.post(
         "/sources/refresh",

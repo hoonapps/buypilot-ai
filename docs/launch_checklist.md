@@ -38,6 +38,7 @@
 - 소스 어댑터 상태 진단
 - 실제 상품 URL/HTML 스냅샷 인입과 검수 큐 등록
 - URL 모니터 등록, 수집 refresh 실행, refresh 성공/실패 이력 확인
+- Due schedule preview와 due 모니터 refresh 실행
 - Source provider 정책, robots/약관 승인, live fetch rate limit 게이트 확인
 - 관리자 검수 콘솔
 - Docker Compose 실행
@@ -46,7 +47,7 @@
 
 ## 운영 전 반드시 붙일 외부 연동
 
-- 가격 비교/오픈마켓/공식 스토어의 공식 provider 계약과 자동 실행 스케줄러
+- 가격 비교/오픈마켓/공식 스토어의 공식 provider 계약과 외부 cron/Cloud Scheduler 배포
 - 오픈마켓/공식 스토어 공식 API credential과 계약별 사용량 한도
 - 벤치마크 출처 크롤링 또는 수동 검수 데이터
 - 리뷰 수집/요약 파이프라인
@@ -76,6 +77,7 @@
 | 출처 신뢰 | 출처별 신뢰도, 캐시 TTL, 검수 필요 여부가 응답과 UI에 노출되어야 한다 |
 | 외부 URL 인입 | 내부망/private IP URL을 차단하고 상품 URL/HTML 스냅샷에서 추출한 가격 근거를 검수 큐에 등록해야 한다 |
 | URL 모니터 | 반복 수집 대상 URL, refresh 성공/실패, live fetch 여부, 연결된 검수 항목을 운영 콘솔에서 확인할 수 있어야 한다 |
+| Due refresh | cadence와 마지막 실행 시각 기준으로 지금 실행할 URL 모니터만 선별하고 실행할 수 있어야 한다 |
 | Provider 정책 | live fetch는 승인된 host, robots/약관 승인, 시간당 rate limit을 통과해야 실행되어야 한다 |
 | 제휴 고지 | 제휴 링크 여부와 추천 순위 계산 기준이 분리되어야 한다 |
 | 공유 리포트 | 워크스페이스 소유자만 공유 토큰을 만들고 공개 페이지는 단일 리포트만 노출해야 한다 |

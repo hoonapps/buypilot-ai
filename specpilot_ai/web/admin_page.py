@@ -111,6 +111,7 @@ def admin_page_html() -> str:
           <button class="secondary" id="save-provider">provider 정책 저장</button>
           <button class="secondary" id="save-monitor">모니터 등록</button>
           <button class="secondary" id="refresh-monitors">모니터 refresh</button>
+          <button class="secondary" id="refresh-due-monitors">due refresh</button>
           <button class="secondary" id="refresh">새로고침</button>
         </div>
       </div>
@@ -133,6 +134,7 @@ def admin_page_html() -> str:
       <div class="panel">
         <h2>URL 모니터</h2>
         <p>실제 상품 URL을 반복 수집 대상으로 등록하고 refresh 상태를 추적합니다.</p>
+        <div class="grid cards" id="source-schedule"></div>
         <div class="review-list" id="source-monitors"></div>
       </div>
       <div class="panel">
@@ -199,7 +201,8 @@ def admin_page_html() -> str:
         traceResponse,
         monitorResponse,
         refreshRunResponse,
-        providerResponse
+        providerResponse,
+        scheduleResponse
       ] = await Promise.all([
         fetch('/admin/dashboard'),
         fetch('/ops/quality'),
@@ -211,7 +214,8 @@ def admin_page_html() -> str:
         fetch('/ops/traces'),
         fetch('/sources/monitors'),
         fetch('/sources/refresh-runs'),
-        fetch('/sources/providers')
+        fetch('/sources/providers'),
+        fetch('/sources/schedule')
       ]);
       const data = await response.json();
       const quality = await qualityResponse.json();
@@ -224,9 +228,11 @@ def admin_page_html() -> str:
       const monitors = await monitorResponse.json();
       const refreshRuns = await refreshRunResponse.json();
       const providers = await providerResponse.json();
+      const schedule = await scheduleResponse.json();
       renderMetrics(data.metrics);
       renderSources(data.adapter_statuses);
       renderReviews(data.pending_reviews);
+      renderSourceSchedule(schedule);
       renderSourceMonitors(monitors);
       renderSourceRefreshRuns(refreshRuns);
       renderSourceProviders(providers);
@@ -274,6 +280,14 @@ def admin_page_html() -> str:
           <p>${source.message}</p>
         </div>
       `).join('');
+    }
+
+    function renderSourceSchedule(schedule) {
+      document.querySelector('#source-schedule').innerHTML = [
+        ['due', schedule.due_count],
+        ['upcoming', schedule.upcoming_count],
+        ['생성', new Date(schedule.generated_at).toLocaleString()]
+      ].map(([label, value]) => `<div class="card"><span class="kicker">${label}</span><div class="metric">${value}</div></div>`).join('');
     }
 
     function renderSourceMonitors(monitors) {
@@ -529,6 +543,14 @@ def admin_page_html() -> str:
     });
     document.querySelector('#refresh-monitors').addEventListener('click', async () => {
       await fetch('/sources/refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: 20 })
+      });
+      await loadDashboard();
+    });
+    document.querySelector('#refresh-due-monitors').addEventListener('click', async () => {
+      await fetch('/sources/refresh-due', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ limit: 20 })

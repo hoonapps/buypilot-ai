@@ -818,6 +818,22 @@ class SourceRefreshResponse(BaseModel):
     runs: list[SourceRefreshRun] = Field(default_factory=list)
 
 
+class SourceScheduleItem(BaseModel):
+    monitor: SourceMonitor
+    due: bool
+    next_due_at: str | None = None
+    overdue_minutes: int = 0
+
+
+class SourceSchedulePreview(BaseModel):
+    workspace_id: str
+    due_count: int
+    upcoming_count: int
+    generated_at: str
+    due: list[SourceScheduleItem] = Field(default_factory=list)
+    upcoming: list[SourceScheduleItem] = Field(default_factory=list)
+
+
 class SourceProviderPolicyRequest(BaseModel):
     provider_name: str = Field(min_length=2)
     host_pattern: str = Field(min_length=3)

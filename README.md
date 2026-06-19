@@ -56,6 +56,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 가격/리뷰/벤치마크/공식 스토어 소스 어댑터 계약
 - 실제 상품 URL/HTML 스냅샷 인입과 관리자 검수 큐 등록
 - URL 모니터 등록, 수집 refresh 실행, refresh 이력 추적
+- Due schedule preview와 due 모니터 refresh 실행
 - Source provider 정책: live fetch 허용 host, robots/약관 승인, 시간당 rate limit 게이트
 - 관리자 검수 콘솔(`/admin`)
 - 공개 신뢰 정책 API(`/policy/trust`)
@@ -438,6 +439,20 @@ curl http://127.0.0.1:8000/sources/refresh-runs \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
+`cadence_minutes`와 `last_run_at` 기준으로 지금 실행해야 할 모니터만 확인하고 실행합니다. 이 API는 cron, GitHub Actions, Cloud Scheduler 같은 외부 스케줄러에서 호출하기 위한 운영 경계입니다.
+
+```bash
+curl http://127.0.0.1:8000/sources/schedule \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
+```bash
+curl -X POST http://127.0.0.1:8000/sources/refresh-due \
+  -H "Content-Type: application/json" \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY" \
+  -d '{"limit": 20}'
+```
+
 실제 live fetch는 provider 정책이 승인된 host만 허용합니다. 정책이 없거나 robots/약관 검토가 승인되지 않았거나 시간당 rate limit을 넘으면 차단됩니다.
 
 ```bash
@@ -612,7 +627,7 @@ make docker-build
 - `/ops/traces`, `/ops/traces/{trace_id}/spans`가 저장 trace와 단계별 span을 워크스페이스별로 반환하는지
 - `/feedback`, `/beta/leads`가 만족도와 베타 리드를 저장하고 워크스페이스별로 격리하는지
 - `/ops/quality`가 품질 감사와 예상 비용을 워크스페이스별로 반환하는지
-- `/sources/status`, `/sources/collect`, `/sources/ingest-url`, `/sources/monitors`, `/sources/refresh`, `/sources/refresh-runs`, `/sources/providers`, `/sources/providers/check`, `/admin/reviews`, `/admin/dashboard`가 동작하는지
+- `/sources/status`, `/sources/collect`, `/sources/ingest-url`, `/sources/monitors`, `/sources/schedule`, `/sources/refresh`, `/sources/refresh-due`, `/sources/refresh-runs`, `/sources/providers`, `/sources/providers/check`, `/admin/reviews`, `/admin/dashboard`가 동작하는지
 - `/policy/trust`가 캐시, 제휴 고지, 공정성 정책을 반환하는지
 - `/health`, `/ready` 운영 엔드포인트가 동작하는지
 
@@ -637,6 +652,7 @@ GitHub Actions는 `main` push와 PR에서 다음을 실행합니다.
 - 출처 없는 스펙이나 가격은 추천 근거로 사용하지 않습니다.
 - 외부 URL 인입은 내부망/private IP를 차단하고 실제 추천 반영 전에 검수 큐를 거칩니다.
 - URL 모니터 refresh는 성공/실패, live fetch 여부, 연결된 검수 항목을 이력으로 남깁니다.
+- due refresh는 `cadence_minutes`와 마지막 실행 시각을 기준으로 지금 실행할 모니터만 처리합니다.
 - live fetch는 provider 정책, robots/약관 승인, 시간당 rate limit을 통과해야 실행됩니다.
 - 특정 판매처 편향을 줄이기 위해 가격, 호환성, 리뷰, 안정성 점수를 분리합니다.
 - 제휴 링크를 붙일 경우 추천 기준과 제휴 고지를 분리해서 노출해야 합니다.
@@ -655,7 +671,7 @@ GitHub Actions는 `main` push와 PR에서 다음을 실행합니다.
 
 ## 다음 제품화 과제
 
-- 가격 비교/오픈마켓/공식 스토어의 공식 provider 계약과 자동 실행 스케줄러 연결
+- 가격 비교/오픈마켓/공식 스토어의 공식 provider 계약과 외부 cron/Cloud Scheduler 배포 연결
 - 실제 이메일/SMS/웹훅 provider credential 연결과 운영 rate limit 적용
 - LangSmith 또는 OpenTelemetry 외부 export 연동
 - 실제 구매 시나리오 베타 테스트
