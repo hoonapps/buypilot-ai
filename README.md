@@ -57,6 +57,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 추천 만족도 피드백, 구매 의향, 선택 후보 저장
 - 베타 신청 리드 저장과 개인정보 마스킹
 - 베타 출시 준비도 대시보드: 분석, 공유, 알림, 피드백, 리드, 품질 차단 사유를 launch readiness 점수로 집계
+- 출시 게이트: readiness, 품질 회귀, 학습 인사이트, 백로그 SLA, 전환/발송 운영 상태로 공개 go/no-go 판정
 - 베타 cohort 운영: 구매 시나리오별 리드, 피드백, 만족도, 구매 의향 집계
 - 자동 개선 백로그: readiness 경고, 낮은 만족도, 품질 차단 사유, 제품별 학습 인사이트를 운영 항목으로 변환
 - cohort 리포트 export: JSON/Markdown으로 베타 운영 리포트 출력
@@ -580,6 +581,13 @@ curl http://127.0.0.1:8000/beta/readiness \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
+공개 go/no-go 출시 게이트를 확인합니다.
+
+```bash
+curl http://127.0.0.1:8000/beta/launch-gate \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
 시나리오별 베타 cohort를 만들고 개선 백로그를 확인합니다.
 
 ```bash
@@ -890,6 +898,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/reports/completion-templates`, `/reports/completion-recipient-groups`, `/reports/completion-preview`, `/reports/completion-batches`, `/reports/completion-engagement`, `/reports/completion-provider-events`, `/reports/completion-deliveries/provider-webhooks`, `/t/o/{tracking_token}.png`, `/t/c/{tracking_token}`: 완료 리포트 템플릿, 수신자 그룹, unsubscribe 제외, 발송 전 렌더링 미리보기, batch와 개별 delivery 성공/실패/재시도/열람/클릭/반송/신고/수신 제외 상태, provider 삽입용 공개 추적 픽셀/클릭 리다이렉트
 - `purchase_outcomes`, `completed_purchase_outcomes`, `purchase_conversion_rate`, `average_final_price_delta_krw`, `purchase_outcome_value_krw`: 실제 구매 결과와 최종 결제 금액 차이를 보는 운영 지표
 - `/ops/learning-insights`: 실제 구매 결과, 결제 전 검수 차단, 만족도 피드백을 제품별 전환율, 반품률, 가격 차이, 개선 액션으로 집계
+- `/beta/launch-gate`: readiness, 품질 회귀, 학습 인사이트, 백로그 SLA, 전환/발송 운영 상태를 공개 go/no-go 판정과 필수 액션으로 집계
 - `feedback_count`, `average_satisfaction`, `purchase_intent_rate`: 추천 결과가 실제 구매 판단으로 이어지는지 보는 운영 지표
 - `beta_leads`: 베타 신청 리드 수
 - `alert_channels`, `alert_delivery_attempts`, `sent_alert_deliveries`, `failed_alert_deliveries`: 알림 발송 채널과 dispatch 운영 지표
@@ -897,7 +906,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 
 ## 로컬 저장소
 
-분석 실행, trace span, observability export outbox, 저장 리포트, 공유 토큰, 완료 리포트 템플릿/수신자 그룹/batch/delivery/engagement/provider event, 가격 알림 구독, 알림 채널, 발송 큐, 발송 시도, 사용자 피드백, 베타 리드는 기본적으로 SQLite에 저장됩니다.
+분석 실행, trace span, observability export outbox, 저장 리포트, 공유 토큰, 완료 리포트 템플릿/수신자 그룹/batch/delivery/engagement/provider event, 가격 알림 구독, 알림 채널, 발송 큐, 발송 시도, 사용자 피드백, 베타 리드, 출시 게이트 판단 근거는 기본적으로 SQLite에 저장된 운영 신호에서 계산됩니다.
 저장 리포트, 공유 토큰, 완료 리포트 템플릿/수신자 그룹/batch/engagement/provider event, 알림, 발송 채널, 피드백, 리드는 `X-SpecPilot-Key`에서 계산된 워크스페이스 단위로 분리됩니다. 공개 리포트는 공유 토큰이 발급된 단일 리포트만 조회할 수 있습니다.
 
 기본 경로:
@@ -974,7 +983,7 @@ make docker-build
 - `/alerts/channels`, `/alerts/dispatch`, `/alerts/deliveries`가 발송 채널 설정, 큐 발송, 발송 시도 기록을 워크스페이스별로 처리하는지
 - `/ops/traces`, `/ops/traces/{trace_id}/spans`가 저장 trace와 단계별 span을 워크스페이스별로 반환하는지
 - `/ops/observability/exports`, `/ops/observability/dispatch`가 trace span과 품질 감사 payload를 outbox로 저장하고 dispatch/retry 상태를 워크스페이스별로 격리하는지
-- `/feedback`, `/beta/leads`, `/beta/readiness`, `/beta/cohorts`, `/beta/backlog`가 만족도, 베타 리드, 출시 준비도, cohort, 개선 백로그를 워크스페이스별로 격리하는지
+- `/feedback`, `/beta/leads`, `/beta/readiness`, `/beta/launch-gate`, `/beta/cohorts`, `/beta/backlog`가 만족도, 베타 리드, 출시 준비도, 공개 go/no-go, cohort, 개선 백로그를 워크스페이스별로 격리하는지
 - `/beta/backlog/{backlog_id}`, `/beta/backlog/summary`, `/beta/cohorts/{cohort_id}/report`, `/beta/cohorts/{cohort_id}/report.md`가 백로그 SLA/완료 요약과 cohort export를 워크스페이스별로 처리하는지
 - `/ops/quality`가 품질 감사와 예상 비용을 워크스페이스별로 반환하는지
 - `/ops/regression`이 최근/이전 품질 구간, 비용 변화, provider 차단율을 워크스페이스별로 집계하는지

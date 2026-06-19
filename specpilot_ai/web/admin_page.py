@@ -126,6 +126,12 @@ def admin_page_html() -> str:
       <div class="grid cards" id="beta-readiness-summary"></div>
       <div class="quality-list" id="beta-readiness-checks" style="margin-top:12px"></div>
     </section>
+    <section class="panel" style="margin-top:14px">
+      <h2>출시 게이트</h2>
+      <p>준비도, 품질 회귀, 학습 인사이트, 백로그 SLA, 전환/발송 상태를 묶어 공개 go/no-go를 판단합니다.</p>
+      <div class="grid cards" id="launch-gate-summary"></div>
+      <div class="quality-list" id="launch-gate-checks" style="margin-top:12px"></div>
+    </section>
     <section class="grid top-grid" style="margin-top:14px">
       <div class="panel">
         <h2>소스 어댑터</h2>
@@ -274,6 +280,7 @@ def admin_page_html() -> str:
         providerResponse,
         scheduleResponse,
         readinessResponse,
+        launchGateResponse,
         betaCohortResponse,
         betaBacklogResponse,
         betaBacklogSummaryResponse,
@@ -301,6 +308,7 @@ def admin_page_html() -> str:
         fetch('/sources/providers'),
         fetch('/sources/schedule'),
         fetch('/beta/readiness'),
+        fetch('/beta/launch-gate'),
         fetch('/beta/cohorts'),
         fetch('/beta/backlog'),
         fetch('/beta/backlog/summary'),
@@ -328,6 +336,7 @@ def admin_page_html() -> str:
       const providers = await providerResponse.json();
       const schedule = await scheduleResponse.json();
       const readiness = await readinessResponse.json();
+      const launchGate = await launchGateResponse.json();
       const betaCohorts = await betaCohortResponse.json();
       const betaBacklog = await betaBacklogResponse.json();
       const betaBacklogSummary = await betaBacklogSummaryResponse.json();
@@ -345,6 +354,7 @@ def admin_page_html() -> str:
       latestCompletionGroups = completionGroups;
       renderMetrics(data.metrics);
       renderBetaReadiness(readiness);
+      renderLaunchGate(launchGate);
       renderSources(data.adapter_statuses);
       renderReviews(data.pending_reviews);
       renderSourceSchedule(schedule);
@@ -443,6 +453,39 @@ def admin_page_html() -> str:
           <span class="kicker">Next actions</span>
           <h3>다음 실행 항목</h3>
           <ul>${actions.length ? actions.map((item) => `<li>${item}</li>`).join('') : '<li>현재 기준으로 추가 차단 항목이 없습니다.</li>'}</ul>
+        </article>
+      `;
+    }
+
+    function renderLaunchGate(gate) {
+      document.querySelector('#launch-gate-summary').innerHTML = [
+        ['판정', gate.decision],
+        ['상태', gate.status],
+        ['준비도', Math.round(gate.launch_readiness_score) + '점'],
+        ['필수 액션', (gate.required_actions || []).length]
+      ].map(([label, value]) => `<div class="card"><span class="kicker">${label}</span><div class="metric">${value}</div></div>`).join('');
+      const requiredActions = gate.required_actions || [];
+      document.querySelector('#launch-gate-checks').innerHTML = `
+        <article class="review-item quality-item ${gate.status === 'blocker' ? 'danger' : gate.status === 'warning' ? 'warn' : ''}">
+          <span class="kicker">launch-gate · ${gate.status}</span>
+          <h3>${gate.readiness_label} · ${gate.decision}</h3>
+          <p>${gate.summary}</p>
+        </article>
+        ${(gate.checks || []).map((check) => {
+          const tone = check.status === 'blocker' ? 'danger' : check.status === 'warning' ? 'warn' : '';
+          return `
+            <article class="review-item quality-item ${tone}">
+              <span class="kicker">${check.area} · ${check.status}</span>
+              <h3>${check.label}</h3>
+              <p>${check.metric}</p>
+              <p>${check.recommendation}</p>
+            </article>
+          `;
+        }).join('')}
+        <article class="review-item">
+          <span class="kicker">Required actions</span>
+          <h3>공개 전 필수 액션</h3>
+          <ul>${requiredActions.length ? requiredActions.map((item) => `<li>${item}</li>`).join('') : '<li>현재 기준으로 공개 전 필수 액션이 없습니다.</li>'}</ul>
         </article>
       `;
     }

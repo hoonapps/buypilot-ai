@@ -48,6 +48,8 @@ from specpilot_ai.core.models import (
     CompletionReportTemplateRequest,
     FeedbackRecord,
     FeedbackRequest,
+    LaunchGateCheck,
+    LaunchGateDashboard,
     ObservabilityDispatchResponse,
     ObservabilityExportRecord,
     ObservabilityExportRequest,
@@ -3326,6 +3328,117 @@ class SpecPilotStore:
             ][:4],
         )
 
+    def launch_gate_for_workspace(self, workspace_id: str) -> LaunchGateDashboard:
+        metrics = self.metrics_for_workspace(workspace_id)
+        readiness = self.beta_readiness_for_workspace(workspace_id)
+        regression = self.ops_regression_for_workspace(workspace_id, window_size=5)
+        learning = self.learning_insights_for_workspace(workspace_id, limit=20)
+        backlog = self.beta_backlog_action_summary_for_workspace(workspace_id, limit=200)
+        checks = [
+            _launch_gate_check(
+                area="readiness",
+                label="베타 출시 준비도",
+                status=_launch_readiness_gate_status(readiness.launch_readiness_score),
+                metric=f"{readiness.launch_readiness_score}점 · {readiness.readiness_label}",
+                recommendation=readiness.next_actions[0]
+                if readiness.next_actions
+                else "준비도 기준을 유지하세요.",
+            ),
+            _launch_gate_check(
+                area="regression",
+                label="품질 회귀",
+                status=regression.status,
+                metric=(
+                    f"최근 품질 {regression.recent.average_quality_score}점 / "
+                    f"비용 변화 {round(regression.cost_delta_rate * 100)}%"
+                ),
+                recommendation=regression.next_actions[0]
+                if regression.next_actions
+                else "품질 회귀 신호를 계속 모니터링하세요.",
+            ),
+            _launch_gate_check(
+                area="learning",
+                label="제품별 학습 인사이트",
+                status=learning.status,
+                metric=f"{learning.insight_count}개 인사이트 · {learning.summary}",
+                recommendation=learning.top_actions[0]
+                if learning.top_actions
+                else "구매 결과 표본을 계속 수집하세요.",
+            ),
+            _launch_gate_check(
+                area="backlog",
+                label="운영 백로그 SLA",
+                status=_launch_backlog_gate_status(backlog),
+                metric=(
+                    f"전체 {backlog.total_count}건 / 지연 {backlog.overdue_count}건 / "
+                    f"blocker {backlog.blocker_count}건"
+                ),
+                recommendation=backlog.next_actions[0]
+                if backlog.next_actions
+                else "백로그 SLA 상태를 유지하세요.",
+            ),
+            _launch_gate_check(
+                area="conversion",
+                label="구매 전환 신호",
+                status=_launch_conversion_gate_status(metrics),
+                metric=(
+                    f"구매 결과 {metrics.purchase_outcomes}건 / "
+                    f"전환 {round(metrics.purchase_conversion_rate * 100)}% / "
+                    f"구매 의향 {round(metrics.purchase_intent_rate * 100)}%"
+                ),
+                recommendation=(
+                    "피드백, 구매 의향, 실제 구매 결과를 더 모아 "
+                    "공개 확대 판단의 표본을 보강하세요."
+                ),
+            ),
+            _launch_gate_check(
+                area="delivery",
+                label="리포트 발송/알림 운영",
+                status=_launch_delivery_gate_status(metrics),
+                metric=(
+                    f"완료 발송 {metrics.completion_report_deliveries}건 / "
+                    f"알림 발송 성공 {metrics.sent_alert_deliveries}건 / "
+                    f"채널 {metrics.alert_channels}개"
+                ),
+                recommendation=(
+                    "완료 리포트 발송, 목표가 알림 채널, provider webhook 상태를 "
+                    "실제 운영 흐름으로 검증하세요."
+                ),
+            ),
+        ]
+        status, decision = _launch_gate_status_and_decision(
+            checks,
+            readiness.launch_readiness_score,
+        )
+        required_actions = _launch_gate_required_actions(
+            checks,
+            readiness,
+            regression,
+            learning,
+            backlog,
+        )
+        return LaunchGateDashboard(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            decision=decision,
+            status=status,
+            launch_readiness_score=readiness.launch_readiness_score,
+            readiness_label=readiness.readiness_label,
+            summary=_launch_gate_summary(decision, checks, readiness.launch_readiness_score),
+            required_actions=required_actions,
+            checks=checks,
+            metric_cards={
+                "analysis_runs": metrics.analysis_runs,
+                "shared_reports": metrics.shared_reports,
+                "purchase_outcomes": metrics.purchase_outcomes,
+                "purchase_conversion_rate": metrics.purchase_conversion_rate,
+                "average_quality_score": metrics.average_quality_score,
+                "open_backlog": backlog.open_count,
+                "overdue_backlog": backlog.overdue_count,
+                "learning_insights": learning.insight_count,
+            },
+        )
+
     def _ensure_schema(self) -> None:
         with self._connect() as conn:
             conn.executescript(
@@ -5498,6 +5611,119 @@ def _quality_readiness_check(quality: QualityDashboard) -> BetaReadinessCheck:
         status=CheckStatus.ok,
         metric=f"평균 {quality.average_quality_score}점 / 차단 0건",
         recommendation="품질 감사 기준은 공개 베타 기준을 충족했습니다.",
+    )
+
+
+def _launch_gate_check(
+    *,
+    area: str,
+    label: str,
+    status: CheckStatus,
+    metric: str,
+    recommendation: str,
+) -> LaunchGateCheck:
+    return LaunchGateCheck(
+        area=area,
+        label=label,
+        status=status,
+        metric=metric,
+        recommendation=recommendation,
+    )
+
+
+def _launch_readiness_gate_status(score: float) -> CheckStatus:
+    if score < 45:
+        return CheckStatus.blocker
+    if score < 70:
+        return CheckStatus.warning
+    return CheckStatus.ok
+
+
+def _launch_backlog_gate_status(backlog: BetaBacklogSummary) -> CheckStatus:
+    if backlog.overdue_count:
+        return CheckStatus.blocker
+    if backlog.blocker_count or backlog.due_soon_count:
+        return CheckStatus.warning
+    return CheckStatus.ok
+
+
+def _launch_conversion_gate_status(metrics: OperationsMetrics) -> CheckStatus:
+    if metrics.purchase_outcomes == 0 and metrics.feedback_count == 0:
+        return CheckStatus.blocker
+    if metrics.purchase_outcomes < 3 or metrics.purchase_conversion_rate < 0.25:
+        return CheckStatus.warning
+    return CheckStatus.ok
+
+
+def _launch_delivery_gate_status(metrics: OperationsMetrics) -> CheckStatus:
+    if metrics.alert_channels == 0:
+        return CheckStatus.warning
+    if metrics.completion_report_deliveries == 0 and metrics.sent_alert_deliveries == 0:
+        return CheckStatus.warning
+    if (
+        metrics.failed_alert_deliveries > metrics.sent_alert_deliveries
+        and metrics.sent_alert_deliveries
+    ):
+        return CheckStatus.warning
+    return CheckStatus.ok
+
+
+def _launch_gate_status_and_decision(
+    checks: list[LaunchGateCheck],
+    score: float,
+) -> tuple[CheckStatus, str]:
+    if any(check.status == CheckStatus.blocker for check in checks):
+        return CheckStatus.blocker, "blocked"
+    if score >= 85 and all(check.status == CheckStatus.ok for check in checks):
+        return CheckStatus.ok, "go"
+    if score >= 70:
+        return CheckStatus.warning, "limited_beta"
+    return CheckStatus.warning, "hold"
+
+
+def _launch_gate_required_actions(
+    checks: list[LaunchGateCheck],
+    readiness: BetaReadinessDashboard,
+    regression: OpsRegressionDashboard,
+    learning: OpsLearningDashboard,
+    backlog: BetaBacklogSummary,
+) -> list[str]:
+    actions = [
+        check.recommendation
+        for check in checks
+        if check.status != CheckStatus.ok
+    ]
+    actions.extend(readiness.next_actions[:2])
+    actions.extend(regression.next_actions[:2])
+    actions.extend(learning.top_actions[:2])
+    actions.extend(backlog.next_actions[:2])
+    if not actions:
+        actions.append("공개 배포 후 24시간 동안 품질 회귀와 구매 결과를 집중 모니터링하세요.")
+    return _dedupe_strings(actions)[:8]
+
+
+def _launch_gate_summary(
+    decision: str,
+    checks: list[LaunchGateCheck],
+    score: float,
+) -> str:
+    blocker_count = sum(1 for check in checks if check.status == CheckStatus.blocker)
+    warning_count = sum(1 for check in checks if check.status == CheckStatus.warning)
+    if decision == "go":
+        return f"출시 준비도 {score}점입니다. 핵심 게이트가 통과되어 공개 확대가 가능합니다."
+    if decision == "limited_beta":
+        return (
+            f"출시 준비도 {score}점입니다. blocker는 없지만 warning {warning_count}건을 "
+            "모니터링하며 제한 베타로 확대하세요."
+        )
+    if decision == "blocked":
+        return (
+            f"출시 준비도 {score}점입니다. blocker {blocker_count}건이 있어 공개 확대를 "
+            "중단하고 필수 액션을 먼저 처리해야 합니다."
+        )
+    return (
+        f"출시 준비도 {score}점입니다. warning {warning_count}건을 보강한 뒤 "
+        "다시 출시 게이트를 확인하세요."
     )
 
 

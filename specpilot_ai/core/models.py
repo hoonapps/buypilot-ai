@@ -1193,6 +1193,27 @@ class BetaReadinessDashboard(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class LaunchGateCheck(BaseModel):
+    area: str
+    label: str
+    status: CheckStatus
+    metric: str
+    recommendation: str
+
+
+class LaunchGateDashboard(BaseModel):
+    workspace_id: str
+    generated_at: str
+    decision: str
+    status: CheckStatus
+    launch_readiness_score: float = Field(ge=0, le=100)
+    readiness_label: str
+    summary: str
+    required_actions: list[str] = Field(default_factory=list)
+    checks: list[LaunchGateCheck] = Field(default_factory=list)
+    metric_cards: dict[str, int | float | str] = Field(default_factory=dict)
+
+
 class SourceAdapterStatus(BaseModel):
     adapter_id: str
     name: str

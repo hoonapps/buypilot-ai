@@ -87,6 +87,8 @@ def test_admin_page_exposes_review_console() -> None:
     assert "purchase-outcomes" in response.text
     assert "학습 인사이트" in response.text
     assert "learning-insights" in response.text
+    assert "출시 게이트" in response.text
+    assert "launch-gate" in response.text
     assert "품질/비용 감사" in response.text
     assert "품질 회귀 모니터" in response.text
     assert "사용자 피드백" in response.text
@@ -1239,6 +1241,32 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     assert summary_payload["done_count"] >= 1
     assert "pytest 완료 요약" in summary_payload["completion_summaries"]
     assert summary_payload["next_actions"]
+
+    launch_gate = client.get("/beta/launch-gate", headers=WORKSPACE_A)
+    assert launch_gate.status_code == 200
+    launch_payload = launch_gate.json()
+    assert launch_payload["workspace_id"] == readiness_payload["workspace_id"]
+    assert launch_payload["decision"] in {"go", "limited_beta", "hold", "blocked"}
+    assert launch_payload["status"] in {"ok", "warning", "blocker"}
+    assert launch_payload["summary"]
+    assert launch_payload["required_actions"]
+    assert len(launch_payload["checks"]) >= 6
+    assert {check["area"] for check in launch_payload["checks"]} >= {
+        "readiness",
+        "regression",
+        "learning",
+        "backlog",
+        "conversion",
+        "delivery",
+    }
+    assert launch_payload["metric_cards"]["learning_insights"] >= 1
+    assert launch_payload["metric_cards"]["purchase_outcomes"] >= 2
+
+    isolated_launch_gate = client.get("/beta/launch-gate", headers=WORKSPACE_B)
+    assert isolated_launch_gate.status_code == 200
+    isolated_launch_payload = isolated_launch_gate.json()
+    assert isolated_launch_payload["workspace_id"] != launch_payload["workspace_id"]
+    assert isolated_launch_payload["metric_cards"]["purchase_outcomes"] == 0
 
     cohort_report = client.get(
         f"/beta/cohorts/{cohort_payload['cohort_id']}/report",

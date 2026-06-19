@@ -50,6 +50,7 @@ from specpilot_ai.core.models import (
     FeedbackRequest,
     IntakeDiagnosisRequest,
     IntakeDiagnosisResponse,
+    LaunchGateDashboard,
     ObservabilityDispatchRequest,
     ObservabilityDispatchResponse,
     ObservabilityExportRecord,
@@ -910,6 +911,13 @@ def beta_readiness(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> BetaReadinessDashboard:
     return _store().beta_readiness_for_workspace(workspace.workspace_id)
+
+
+@app.get("/beta/launch-gate", response_model=LaunchGateDashboard)
+def beta_launch_gate(
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> LaunchGateDashboard:
+    return _store().launch_gate_for_workspace(workspace.workspace_id)
 
 
 @app.post("/beta/cohorts", response_model=BetaCohort)
