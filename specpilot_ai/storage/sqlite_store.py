@@ -89,6 +89,8 @@ from specpilot_ai.core.models import (
     PublicAcquisitionSurface,
     PublicConversionBoard,
     PublicConversionStage,
+    PublicLaunchActionRoute,
+    PublicLaunchActionRouter,
     PublicLaunchObjectionKit,
     PublicLaunchSharePack,
     PublicLaunchShareVariant,
@@ -3553,6 +3555,64 @@ class SpecPilotStore:
         if not self.public_site_url:
             return path
         return f"{self.public_site_url}{path}"
+
+    def public_launch_action_router_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 8,
+    ) -> PublicLaunchActionRouter:
+        metrics = self.metrics_for_workspace(workspace_id)
+        proof = self.public_proof_hub_for_workspace(workspace_id, limit=limit)
+        objections = self.public_launch_objection_kit_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        share_pack = self.public_launch_share_pack_for_workspace(workspace_id, limit=limit)
+        referrals = self.waitlist_referral_dashboard_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        pricing = self.pricing_dashboard_for_workspace(workspace_id)
+        pulse = self.launch_pulse_for_workspace(workspace_id, limit=limit)
+        routes = _public_launch_action_routes(
+            metrics=metrics,
+            proof=proof,
+            objections=objections,
+            share_pack=share_pack,
+            referrals=referrals,
+            pricing=pricing,
+            pulse=pulse,
+        )
+        routing_score = round(
+            sum(route.priority_score for route in routes) / max(len(routes), 1),
+            1,
+        )
+        status = _score_status(routing_score, warning=55, ok=76)
+        default_route = max(routes, key=lambda route: route.priority_score)
+        return PublicLaunchActionRouter(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            status=status,
+            routing_score=routing_score,
+            headline=_public_action_router_headline(status, routing_score),
+            summary=_public_action_router_summary(metrics, referrals, pricing, pulse),
+            default_route_key=default_route.key,
+            routes=routes,
+            quick_filters=[
+                "처음 구매합니다",
+                "공유받고 들어왔습니다",
+                "팀 장비 구매입니다",
+                "유료 기능이 궁금합니다",
+            ],
+            measurement_events=[
+                "launch_action_router_view",
+                "launch_action_route_click",
+                "launch_action_analysis_start",
+                "launch_action_waitlist_join",
+                "launch_action_pricing_intent",
+            ],
+            next_actions=_public_action_router_next_actions(status, routes),
+        )
 
     def create_beta_lead_for_workspace(
         self,
@@ -11826,6 +11886,175 @@ def _public_share_pack_next_actions(
         actions.append("Pulse 점수가 낮은 채널에는 반박 FAQ와 proof strip을 함께 붙이세요.")
     if status == CheckStatus.ok:
         actions.append("반응이 좋은 채널 문구를 출시 배포 플랜의 D+1 슬롯으로 승격하세요.")
+    return list(dict.fromkeys(actions))[:6]
+
+
+def _public_action_router_headline(status: CheckStatus, score: float) -> str:
+    if status == CheckStatus.ok:
+        return f"방문자 액션 라우터 {score}점, 첫 행동을 바로 분기할 수 있습니다."
+    if status == CheckStatus.warning:
+        return f"방문자 액션 라우터 {score}점, 핵심 분기는 준비됐고 반응 표본이 더 필요합니다."
+    return f"방문자 액션 라우터 {score}점, 첫 행동 CTA를 더 선명하게 만들어야 합니다."
+
+
+def _public_action_router_summary(
+    metrics: OperationsMetrics,
+    referrals: WaitlistReferralDashboard,
+    pricing: PricingDashboard,
+    pulse: LaunchPulseDashboard,
+) -> str:
+    return (
+        "첫 구매자, 공유 유입, 팀 구매자, 유료 관심자를 분석 시작/공유/대기열/"
+        f"Team 상담/요금제 관심으로 분기합니다. 분석 {metrics.analysis_runs}건, "
+        f"공유 조회 {metrics.public_share_views}회, 추천 대기열 {referrals.total_referrals}명, "
+        f"요금제 관심 {pricing.intent_count}건, Pulse {round(pulse.pulse_score)}점을 반영했습니다."
+    )
+
+
+def _public_launch_action_routes(
+    *,
+    metrics: OperationsMetrics,
+    proof: PublicProofHub,
+    objections: PublicLaunchObjectionKit,
+    share_pack: PublicLaunchSharePack,
+    referrals: WaitlistReferralDashboard,
+    pricing: PricingDashboard,
+    pulse: LaunchPulseDashboard,
+) -> list[PublicLaunchActionRoute]:
+    analysis_score = min(
+        100.0,
+        68 + metrics.analysis_runs * 1.4 + proof.proof_score * 0.12,
+    )
+    share_score = min(
+        100.0,
+        52 + metrics.public_share_views * 3 + share_pack.share_score * 0.28,
+    )
+    referral_score = min(
+        100.0,
+        46 + referrals.total_referrals * 7 + pulse.pulse_score * 0.25,
+    )
+    team_score = min(
+        100.0,
+        58 + pricing.team_intent_count * 12 + objections.objection_score * 0.18,
+    )
+    pricing_score = min(
+        100.0,
+        50 + pricing.intent_count * 9 + pricing.estimated_mrr_krw / 50000,
+    )
+    return [
+        _public_action_route(
+            key="first_purchase_analysis",
+            persona="첫 PC/노트북 구매자",
+            trigger="예산과 용도는 있지만 후보를 고르지 못함",
+            recommended_action="첫 문장 진단 후 분석 시작",
+            cta_label="내 조건으로 분석 시작",
+            cta_path="/#start-concierge",
+            score=analysis_score,
+            why_now="가장 빠른 가치 경험은 자기 조건으로 TOP 3와 제외 후보를 보는 것입니다.",
+            proof_points=["첫 구매 진단 콘시어지", "공개 후보 비교 스냅샷", "구매 타이밍 윈도우"],
+            fallback_action="구매 실패 방지 체크리스트부터 확인",
+            tracking_event="launch_action_analysis_start",
+        ),
+        _public_action_route(
+            key="shared_review",
+            persona="공유받고 들어온 검토자",
+            trigger="지인이나 커뮤니티 글을 보고 서비스 신뢰성을 확인 중",
+            recommended_action="반박 FAQ 확인 후 공유 문구 복사",
+            cta_label="공유 문구 복사",
+            cta_path="/#launch-share-pack",
+            score=share_score,
+            why_now="의심이 풀린 직후 바로 공유해야 공개 반응이 확산됩니다.",
+            proof_points=["런칭 반박 FAQ", "공개 proof strip", "채널별 공유 확산팩"],
+            fallback_action="Trust Center와 공개 검증 허브 확인",
+            tracking_event="launch_action_share_copy",
+        ),
+        _public_action_route(
+            key="waitlist_referral",
+            persona="공개 베타 대기자",
+            trigger="지금 당장 구매하지 않지만 주변 구매자를 초대할 수 있음",
+            recommended_action="대기열 등록 후 추천 링크 공유",
+            cta_label="추천 대기열 등록",
+            cta_path="/#pricing-ops",
+            score=referral_score,
+            why_now="추천 코드와 보상 사다리를 먼저 보여주면 공개 전 대기 수요를 만들 수 있습니다.",
+            proof_points=["추천 보상 사다리", "공개 리더보드", "초대 링크 공유 문구"],
+            fallback_action="공개 런칭룸 링크만 먼저 공유",
+            tracking_event="launch_action_waitlist_join",
+        ),
+        _public_action_route(
+            key="team_purchase",
+            persona="팀 장비 구매 담당자",
+            trigger="여러 명의 노트북/PC 구매 기준과 승인 근거가 필요함",
+            recommended_action="Team 구매 표준안으로 시작",
+            cta_label="Team 구매 표준안 보기",
+            cta_path="/#team-consult",
+            score=team_score,
+            why_now="팀 구매는 승인자 브리프와 결제 전 검수 흐름을 먼저 보여줘야 전환됩니다.",
+            proof_points=["Team 상담 안건", "ROI 포인트", "롤아웃 단계"],
+            fallback_action="팀 조건 예시를 분석 폼에 자동 입력",
+            tracking_event="launch_action_team_consult",
+        ),
+        _public_action_route(
+            key="paid_intent",
+            persona="유료 기능 관심자",
+            trigger="가격 알림, 저장 리포트, 결제 전 검수, 팀 기능이 궁금함",
+            recommended_action="요금제 비교 후 관심 등록",
+            cta_label="요금제 관심 등록",
+            cta_path="/#pricing-ops",
+            score=pricing_score,
+            why_now="결제 연동 전에는 관심 등록과 예상 MRR을 빠르게 모아야 합니다.",
+            proof_points=["Free/Premium/Team 비교", "예상 MRR", "Team 상담 키트"],
+            fallback_action="Free 리포트로 먼저 분석 시작",
+            tracking_event="launch_action_pricing_intent",
+        ),
+    ]
+
+
+def _public_action_route(
+    *,
+    key: str,
+    persona: str,
+    trigger: str,
+    recommended_action: str,
+    cta_label: str,
+    cta_path: str,
+    score: float,
+    why_now: str,
+    proof_points: list[str],
+    fallback_action: str,
+    tracking_event: str,
+) -> PublicLaunchActionRoute:
+    return PublicLaunchActionRoute(
+        key=key,
+        persona=persona,
+        trigger=trigger,
+        recommended_action=recommended_action,
+        cta_label=cta_label,
+        cta_path=cta_path,
+        priority_score=round(min(100.0, score), 1),
+        status=_score_status(score, warning=55, ok=76),
+        why_now=why_now,
+        proof_points=proof_points,
+        fallback_action=fallback_action,
+        tracking_event=tracking_event,
+    )
+
+
+def _public_action_router_next_actions(
+    status: CheckStatus,
+    routes: list[PublicLaunchActionRoute],
+) -> list[str]:
+    actions = [
+        "런칭 페이지 첫 화면 CTA 아래에 방문자 액션 라우터 링크를 고정하세요.",
+        "각 route 클릭을 launch_action_route_click 이벤트로 저장하세요.",
+    ]
+    low_routes = [route for route in routes if route.status != CheckStatus.ok]
+    actions.extend(
+        f"{route.persona} route는 {route.fallback_action}을 보강하세요."
+        for route in low_routes[:3]
+    )
+    if status == CheckStatus.ok:
+        actions.append("가장 높은 route를 hero 보조 CTA와 공유 확산팩 상단에 반영하세요.")
     return list(dict.fromkeys(actions))[:6]
 
 

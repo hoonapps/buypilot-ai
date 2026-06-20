@@ -1743,6 +1743,41 @@ def test_public_launch_share_pack_packages_visitor_share_copy() -> None:
     assert payload["next_actions"]
 
 
+def test_public_launch_action_router_prioritizes_visitor_next_steps() -> None:
+    workspace = {"X-SpecPilot-Key": f"pytest-action-router-{uuid4().hex}"}
+    client.post(
+        "/growth/events",
+        headers=workspace,
+        json={
+            "event_type": "subscription_cta",
+            "source": "pytest-action-router",
+            "surface": "launch-action-router",
+            "label": "요금제 관심 CTA",
+        },
+    )
+
+    response = client.get("/public/launch-action-router?limit=6", headers=workspace)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["router_version"] == "specpilot.public_launch_action_router.v1"
+    assert payload["workspace_id"].startswith("workspace_")
+    assert payload["status"] in {"ok", "warning", "blocker"}
+    assert payload["routing_score"] > 0
+    route_keys = {route["key"] for route in payload["routes"]}
+    assert {
+        "first_purchase_analysis",
+        "shared_review",
+        "waitlist_referral",
+        "team_purchase",
+        "paid_intent",
+    } <= route_keys
+    assert payload["default_route_key"] in route_keys
+    assert all(route["cta_path"].startswith("/#") for route in payload["routes"])
+    assert "launch_action_route_click" in payload["measurement_events"]
+    assert payload["quick_filters"]
+    assert payload["next_actions"]
+
+
 def test_public_launch_room_packages_demo_proof_and_growth_ctas() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-launch-room-{uuid4().hex}"}
     referral = client.post(
@@ -1788,6 +1823,7 @@ def test_public_launch_room_packages_demo_proof_and_growth_ctas() -> None:
         "acquisition_hub",
         "objection_kit",
         "share_pack",
+        "action_router",
         "launch_pulse",
         "referral_waitlist",
         "pricing_interest",

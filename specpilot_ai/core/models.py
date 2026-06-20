@@ -1107,6 +1107,36 @@ class PublicLaunchSharePack(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class PublicLaunchActionRoute(BaseModel):
+    key: str
+    persona: str
+    trigger: str
+    recommended_action: str
+    cta_label: str
+    cta_path: str
+    priority_score: float = Field(ge=0, le=100)
+    status: CheckStatus
+    why_now: str
+    proof_points: list[str] = Field(default_factory=list)
+    fallback_action: str
+    tracking_event: str
+
+
+class PublicLaunchActionRouter(BaseModel):
+    router_version: str = "specpilot.public_launch_action_router.v1"
+    workspace_id: str
+    generated_at: str
+    status: CheckStatus
+    routing_score: float = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    default_route_key: str
+    routes: list[PublicLaunchActionRoute] = Field(default_factory=list)
+    quick_filters: list[str] = Field(default_factory=list)
+    measurement_events: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PublicProofEvidence(BaseModel):
     title: str
     status: CheckStatus

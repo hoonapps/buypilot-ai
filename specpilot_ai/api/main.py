@@ -94,6 +94,7 @@ from specpilot_ai.core.models import (
     PublicCategoryMarketReport,
     PublicConversionBoard,
     PublicDealTimingWindow,
+    PublicLaunchActionRouter,
     PublicLaunchObjectionKit,
     PublicLaunchRoom,
     PublicLaunchRoomCard,
@@ -1260,6 +1261,17 @@ def public_launch_share_pack(
     )
 
 
+@app.get("/public/launch-action-router", response_model=PublicLaunchActionRouter)
+def public_launch_action_router(
+    limit: int = 8,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> PublicLaunchActionRouter:
+    return _store().public_launch_action_router_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+
+
 @app.get("/public/launch-room", response_model=PublicLaunchRoom)
 def public_launch_room(
     limit: int = 8,
@@ -1278,6 +1290,10 @@ def public_launch_room(
         limit=limit,
     )
     share_pack = store.public_launch_share_pack_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+    action_router = store.public_launch_action_router_for_workspace(
         workspace.workspace_id,
         limit=limit,
     )
@@ -1371,6 +1387,15 @@ def public_launch_room(
                 body=share_pack.summary,
                 cta_label="공유 문구 보기",
                 cta_path="/#launch-share-pack",
+            ),
+            PublicLaunchRoomCard(
+                key="action_router",
+                title="방문자 액션 라우터",
+                status=action_router.status,
+                metric=f"{round(action_router.routing_score)}점",
+                body=action_router.summary,
+                cta_label="내 다음 행동 고르기",
+                cta_path="/#launch-action-router",
             ),
             PublicLaunchRoomCard(
                 key="launch_pulse",
