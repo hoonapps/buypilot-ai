@@ -89,7 +89,10 @@ from specpilot_ai.core.models import (
     PublicAcquisitionSurface,
     PublicConversionBoard,
     PublicConversionStage,
+    PublicLaunchObjectionKit,
     PublicObjectionAnswer,
+    PublicObjectionCard,
+    PublicObjectionComparison,
     PublicProofAsset,
     PublicProofEvidence,
     PublicProofHub,
@@ -3427,6 +3430,54 @@ class SpecPilotStore:
             trust_notes=_public_social_proof_trust_notes(),
             cta_cards=_public_social_proof_cta_cards(metrics),
             next_actions=_public_social_proof_next_actions(status, items),
+        )
+
+    def public_launch_objection_kit_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 8,
+    ) -> PublicLaunchObjectionKit:
+        metrics = self.metrics_for_workspace(workspace_id)
+        proof = self.public_proof_hub_for_workspace(workspace_id, limit=limit)
+        social = self.public_social_proof_wall_for_workspace(workspace_id, limit=limit)
+        readiness = self.beta_readiness_for_workspace(workspace_id)
+        objection_score = round(
+            proof.proof_score * 0.42
+            + social.proof_score * 0.22
+            + readiness.launch_readiness_score * 0.18
+            + min(
+                100.0,
+                metrics.checkout_reviews * 8
+                + metrics.source_monitors * 8
+                + metrics.public_share_views * 4
+                + metrics.feedback_count * 6,
+            )
+            * 0.18,
+            1,
+        )
+        status = _score_status(objection_score, warning=55, ok=75)
+        return PublicLaunchObjectionKit(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            status=status,
+            objection_score=objection_score,
+            headline=_public_objection_headline(status, objection_score),
+            summary=_public_objection_summary(metrics, proof, social),
+            primary_cta="내 조건으로 차이 확인",
+            primary_cta_path="/#analysis",
+            objections=_public_launch_objection_cards(metrics, proof, social),
+            comparisons=_public_objection_comparisons(),
+            trust_badges=list(
+                dict.fromkeys(
+                    [
+                        *proof.trust_badges,
+                        *social.trust_notes,
+                        "최저가 비교가 아니라 구매 실패 방지 흐름",
+                    ],
+                ),
+            )[:8],
+            channel_replies=_public_objection_channel_replies(metrics),
+            next_actions=_public_objection_next_actions(status, proof, social),
         )
 
     def create_beta_lead_for_workspace(
@@ -11351,6 +11402,203 @@ def _public_proof_next_actions(
         actions.append("피드백, 공유 조회, CTA 실험 표본을 먼저 만들어 공개 proof를 보강하세요.")
     if not actions:
         actions.append("공개 검증 허브 지표를 랜딩 상단 proof strip으로 노출하세요.")
+    return list(dict.fromkeys(actions))[:6]
+
+
+def _public_objection_headline(status: CheckStatus, score: float) -> str:
+    if status == CheckStatus.ok:
+        return f"출시 반박 대응 {score}점, 공개 트래픽을 설득 문구로 받을 수 있습니다."
+    if status == CheckStatus.warning:
+        return f"출시 반박 대응 {score}점, 핵심 질문은 답하지만 proof 표본을 더 쌓아야 합니다."
+    return f"출시 반박 대응 {score}점, 첫 방문자 질문부터 선명하게 답해야 합니다."
+
+
+def _public_objection_summary(
+    metrics: OperationsMetrics,
+    proof: PublicProofHub,
+    social: PublicSocialProofWall,
+) -> str:
+    return (
+        "최저가 비교, 제휴 편향, 가격 최신성, 개인정보, 초보자 난이도, 팀 구매 "
+        f"질문을 proof {round(proof.proof_score)}점, social proof "
+        f"{round(social.proof_score)}점, 공개 조회 {metrics.public_share_views}회 "
+        "신호와 함께 런칭 페이지 답변으로 정리했습니다."
+    )
+
+
+def _public_launch_objection_cards(
+    metrics: OperationsMetrics,
+    proof: PublicProofHub,
+    social: PublicSocialProofWall,
+) -> list[PublicObjectionCard]:
+    return [
+        PublicObjectionCard(
+            key="vs_price_comparison",
+            question="최저가 비교 사이트와 뭐가 다른가요?",
+            status=CheckStatus.ok,
+            short_answer=(
+                "최저가 링크가 아니라 예산, 목적, 호환성, 리뷰 리스크, 구매 타이밍, "
+                "결제 전 검수를 한 리포트로 묶습니다."
+            ),
+            proof_points=[
+                "TOP 3와 제외 후보를 같이 보여줍니다.",
+                "가격 대기/즉시 결제/검수 후 구매를 나눕니다.",
+                "공개 리포트로 가족, 동료, 커뮤니티 검토를 받을 수 있습니다.",
+            ],
+            evidence_paths=["/market/desktop-pc", "/market/laptop", "/#analysis"],
+            cta_label="내 조건으로 비교",
+            cta_path="/#analysis",
+        ),
+        PublicObjectionCard(
+            key="affiliate_bias",
+            question="제휴 링크 때문에 추천이 치우치지 않나요?",
+            status=CheckStatus.ok,
+            short_answer=(
+                "추천 점수와 제휴 링크 노출을 분리하고, 제휴/비제휴 대안과 정책 경고를 "
+                "구매 링크 거버넌스에 남깁니다."
+            ),
+            proof_points=[
+                "목적 적합도, 가격, 호환성, 리뷰 신뢰도, 구매 안정성을 따로 계산합니다.",
+                "제휴 링크 단독 노출 시 비제휴 대안 보강 액션을 띄웁니다.",
+                *proof.trust_badges[:2],
+            ],
+            evidence_paths=["/policy/trust-center", "/#launch-proof-hub"],
+            cta_label="추천 기준 보기",
+            cta_path="/#launch-proof-hub",
+        ),
+        PublicObjectionCard(
+            key="fresh_price",
+            question="가격과 재고가 바뀌면 믿을 수 있나요?",
+            status=CheckStatus.ok
+            if metrics.source_monitors or metrics.alert_subscriptions
+            else CheckStatus.warning,
+            short_answer=(
+                "가격에는 수집 시각, 출처, 캐시 TTL, 목표가 알림, URL 모니터를 붙이고 "
+                "결제 직전 옵션명과 최종 결제 금액을 다시 검수합니다."
+            ),
+            proof_points=[
+                f"가격 알림 {metrics.alert_subscriptions}개",
+                f"URL 모니터 {metrics.source_monitors}개",
+                f"결제 전 검수 {metrics.checkout_reviews}건",
+            ],
+            evidence_paths=["/#launch-proof-hub", "/#launch-public-ops"],
+            cta_label="구매 타이밍 확인",
+            cta_path="/#deal-timing",
+        ),
+        PublicObjectionCard(
+            key="privacy",
+            question="내 구매 정보나 연락처가 공개되나요?",
+            status=CheckStatus.ok,
+            short_answer=(
+                "공개 proof는 연락처와 주문번호를 마스킹하고, 공개 리포트는 토큰으로 "
+                "격리해 단일 리포트만 읽기 전용으로 노출합니다."
+            ),
+            proof_points=[
+                *social.trust_notes[:2],
+                "피드백 원문 연락처는 공개 proof에 쓰지 않습니다.",
+                "워크스페이스 API 키로 저장 리포트를 격리합니다.",
+            ],
+            evidence_paths=["/policy/privacy", "/#launch-proof-hub"],
+            cta_label="신뢰 기준 확인",
+            cta_path="/#launch-proof-hub",
+        ),
+        PublicObjectionCard(
+            key="first_buyer",
+            question="컴퓨터를 잘 모르는 사람도 쓸 수 있나요?",
+            status=CheckStatus.ok,
+            short_answer=(
+                "첫 문장만 넣으면 콘시어지가 예산, 목적, 필수 조건, 누락 질문을 "
+                "분석 가능한 구매 여정으로 바꿉니다."
+            ),
+            proof_points=[
+                "첫 구매 진단 콘시어지",
+                "구매 실패 방지 체크리스트",
+                "옵션/사양 빠른 검수기",
+            ],
+            evidence_paths=["/#start-concierge", "/#buyer-checklist", "/#spec-risk"],
+            cta_label="첫 문장 진단",
+            cta_path="/#start-concierge",
+        ),
+        PublicObjectionCard(
+            key="team_purchase",
+            question="팀 장비 구매처럼 승인 근거가 필요한 경우도 되나요?",
+            status=CheckStatus.ok,
+            short_answer=(
+                "Team 구매 표준안은 조건 취합, 승인자 브리프, ROI 포인트, 롤아웃, "
+                "제안 메일 초안까지 상담 흐름으로 정리합니다."
+            ),
+            proof_points=[
+                "팀 규모와 직무별 필수 조건을 분석 폼으로 넘깁니다.",
+                "승인자 브리프와 결제 전 검수를 같은 기준으로 묶습니다.",
+                "구매 결과 회수로 반복 구매 기준을 보정합니다.",
+            ],
+            evidence_paths=["/#team-consult", "/#pricing-ops"],
+            cta_label="팀 구매 표준안 보기",
+            cta_path="/#team-consult",
+        ),
+    ]
+
+
+def _public_objection_comparisons() -> list[PublicObjectionComparison]:
+    return [
+        PublicObjectionComparison(
+            criterion="판단 단위",
+            price_comparison_sites="상품/부품별 가격과 판매처",
+            specpilot_ai="구매 목적별 TOP 3, 제외 후보, 대안 시나리오",
+            why_it_matters="싼 상품을 찾는 것과 실패 가능성이 낮은 선택은 다릅니다.",
+        ),
+        PublicObjectionComparison(
+            criterion="구매 직전 리스크",
+            price_comparison_sites="가격 변동과 옵션 차이는 사용자가 직접 확인",
+            specpilot_ai="옵션명, 최종 결제 금액, 판매자 답변, 리스크 승인 상태 검수",
+            why_it_matters="결제 화면에서 바뀌는 조건이 실제 실패 원인이 됩니다.",
+        ),
+        PublicObjectionComparison(
+            criterion="공유 검토",
+            price_comparison_sites="링크 공유 중심",
+            specpilot_ai="공개 토큰 리포트, 검토 질문, 복사용 브리프",
+            why_it_matters="가족/동료/커뮤니티가 같은 근거로 빠르게 반박할 수 있습니다.",
+        ),
+        PublicObjectionComparison(
+            criterion="학습 루프",
+            price_comparison_sites="구매 후 결과가 추천 품질로 잘 돌아오지 않음",
+            specpilot_ai="피드백, 구매 결과, 결제 전 차단 사유를 학습 인사이트로 집계",
+            why_it_matters="공개 후 반응이 다음 추천 기준과 운영 액션으로 이어집니다.",
+        ),
+    ]
+
+
+def _public_objection_channel_replies(metrics: OperationsMetrics) -> list[str]:
+    return [
+        (
+            "최저가만 보는 도구가 아니라 예산/용도/호환성/리뷰 리스크/구매 타이밍을 "
+            "한 리포트로 묶어 결제 전 실패 가능성을 줄입니다."
+        ),
+        (
+            "제휴 링크 여부는 추천 점수와 분리하고, 공개 리포트에는 추천 이유와 제외 "
+            "이유를 같이 남깁니다."
+        ),
+        (
+            "가격이 바뀔 수 있어서 수집 시각, 캐시 기준, 목표가 알림, 결제 전 옵션 "
+            f"검수를 붙였습니다. 현재 공개 조회 {metrics.public_share_views}회 신호도 "
+            "운영 지표로 봅니다."
+        ),
+    ]
+
+
+def _public_objection_next_actions(
+    status: CheckStatus,
+    proof: PublicProofHub,
+    social: PublicSocialProofWall,
+) -> list[str]:
+    actions = [
+        "런칭 hero 하단에 최저가 비교 사이트와의 차이를 한 줄로 고정하세요.",
+        "커뮤니티 공유 문구에 제휴 편향/가격 최신성 답변을 함께 넣으세요.",
+    ]
+    if status != CheckStatus.ok:
+        actions.append("공개 리포트 조회, 피드백, 결제 전 검수 표본을 더 확보하세요.")
+    actions.extend(proof.next_actions[:2])
+    actions.extend(social.next_actions[:1])
     return list(dict.fromkeys(actions))[:6]
 
 

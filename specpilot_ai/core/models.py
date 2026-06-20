@@ -1041,6 +1041,41 @@ class PublicObjectionAnswer(BaseModel):
     evidence: list[str] = Field(default_factory=list)
 
 
+class PublicObjectionCard(BaseModel):
+    key: str
+    question: str
+    status: CheckStatus
+    short_answer: str
+    proof_points: list[str] = Field(default_factory=list)
+    evidence_paths: list[str] = Field(default_factory=list)
+    cta_label: str
+    cta_path: str
+
+
+class PublicObjectionComparison(BaseModel):
+    criterion: str
+    price_comparison_sites: str
+    specpilot_ai: str
+    why_it_matters: str
+
+
+class PublicLaunchObjectionKit(BaseModel):
+    kit_version: str = "specpilot.public_launch_objection_kit.v1"
+    workspace_id: str
+    generated_at: str
+    status: CheckStatus
+    objection_score: float = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    primary_cta: str
+    primary_cta_path: str
+    objections: list[PublicObjectionCard] = Field(default_factory=list)
+    comparisons: list[PublicObjectionComparison] = Field(default_factory=list)
+    trust_badges: list[str] = Field(default_factory=list)
+    channel_replies: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PublicProofEvidence(BaseModel):
     title: str
     status: CheckStatus

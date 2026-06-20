@@ -900,7 +900,10 @@ def test_waitlist_referrals_create_share_loop_and_dashboard() -> None:
     launch_kit_payload = launch_kit.json()
     assert launch_kit_payload["kit_version"] == "specpilot.public_referral_launch_kit.v1"
     assert launch_kit_payload["dashboard"]["total_referrals"] == 2
-    assert launch_kit_payload["leaderboard"]["entries"][0]["referral_code"] == first_payload["referral_code"]
+    assert (
+        launch_kit_payload["leaderboard"]["entries"][0]["referral_code"]
+        == first_payload["referral_code"]
+    )
     assert {tier["required_referrals"] for tier in launch_kit_payload["reward_tiers"]} == {
         1,
         3,
@@ -1680,6 +1683,35 @@ def test_public_social_proof_wall_masks_feedback_and_purchase_evidence() -> None
     assert empty_payload["metric_cards"]["feedback_count"] == 0
 
 
+def test_public_launch_objection_kit_answers_first_visitor_doubts() -> None:
+    workspace = {"X-SpecPilot-Key": f"pytest-objection-kit-{uuid4().hex}"}
+
+    response = client.get("/public/launch-objection-kit?limit=5", headers=workspace)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kit_version"] == "specpilot.public_launch_objection_kit.v1"
+    assert payload["workspace_id"].startswith("workspace_")
+    assert payload["status"] in {"ok", "warning", "blocker"}
+    assert payload["objection_score"] > 0
+    assert payload["primary_cta_path"] == "/#analysis"
+    objection_keys = {item["key"] for item in payload["objections"]}
+    assert {
+        "vs_price_comparison",
+        "affiliate_bias",
+        "fresh_price",
+        "privacy",
+        "first_buyer",
+        "team_purchase",
+    } <= objection_keys
+    assert any(
+        "최저가 비교 사이트" in item["question"] for item in payload["objections"]
+    )
+    assert len(payload["comparisons"]) >= 4
+    assert payload["trust_badges"]
+    assert payload["channel_replies"]
+    assert payload["next_actions"]
+
+
 def test_public_launch_room_packages_demo_proof_and_growth_ctas() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-launch-room-{uuid4().hex}"}
     referral = client.post(
@@ -1723,6 +1755,7 @@ def test_public_launch_room_packages_demo_proof_and_growth_ctas() -> None:
     assert {
         "proof_hub",
         "acquisition_hub",
+        "objection_kit",
         "launch_pulse",
         "referral_waitlist",
         "pricing_interest",

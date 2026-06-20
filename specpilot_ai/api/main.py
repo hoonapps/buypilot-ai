@@ -94,6 +94,7 @@ from specpilot_ai.core.models import (
     PublicCategoryMarketReport,
     PublicConversionBoard,
     PublicDealTimingWindow,
+    PublicLaunchObjectionKit,
     PublicLaunchRoom,
     PublicLaunchRoomCard,
     PublicLaunchRoomMarketLink,
@@ -1236,6 +1237,17 @@ def public_social_proof_wall(
     )
 
 
+@app.get("/public/launch-objection-kit", response_model=PublicLaunchObjectionKit)
+def public_launch_objection_kit(
+    limit: int = 8,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> PublicLaunchObjectionKit:
+    return _store().public_launch_objection_kit_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+
+
 @app.get("/public/launch-room", response_model=PublicLaunchRoom)
 def public_launch_room(
     limit: int = 8,
@@ -1246,6 +1258,10 @@ def public_launch_room(
     launch_kit = build_launch_campaign_kit()
     proof = store.public_proof_hub_for_workspace(workspace.workspace_id, limit=limit)
     acquisition = store.public_acquisition_hub_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+    objection = store.public_launch_objection_kit_for_workspace(
         workspace.workspace_id,
         limit=limit,
     )
@@ -1321,6 +1337,15 @@ def public_launch_room(
                 body=acquisition.summary,
                 cta_label=acquisition.primary_cta,
                 cta_path=acquisition.primary_cta_path,
+            ),
+            PublicLaunchRoomCard(
+                key="objection_kit",
+                title="런칭 반박 FAQ",
+                status=objection.status,
+                metric=f"{round(objection.objection_score)}점",
+                body=objection.summary,
+                cta_label="반박 FAQ 보기",
+                cta_path="/#launch-objections",
             ),
             PublicLaunchRoomCard(
                 key="launch_pulse",
