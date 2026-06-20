@@ -307,6 +307,26 @@ curl -X POST http://127.0.0.1:8000/public/setup-compatibility-kit \
   }'
 ```
 
+공개 구매 승인 브리프 키트는 장바구니 검수 결과를 가족, 팀, 커뮤니티에 공유할 수 있는 승인 질문, 찬성/반대 투표 옵션, 채널별 복사 문구로 압축합니다.
+
+```bash
+curl -X POST http://127.0.0.1:8000/public/purchase-approval-brief-kit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "category": "desktop_pc",
+    "product_title": "Creator RTX 4070 SUPER Build",
+    "verdict": "verify",
+    "budget_krw": 2200000,
+    "cart_total_krw": 2185000,
+    "blocker_count": 0,
+    "warning_count": 2,
+    "key_reasons": ["QHD 편집과 게임 목적에 GPU/RAM은 맞음"],
+    "missing_evidence": ["배송 예정일", "AS 조건"],
+    "audience": "family",
+    "decision_deadline": "오늘 22시 전"
+  }'
+```
+
 공개 결제 후속 넛지 키트는 장바구니 검수 결과를 받아 판매자 답변 요청, 목표가 재확인, 구매 결과 회수까지 이어지는 후속 알림 문구와 분석/대기열 prefill을 반환합니다.
 
 ```bash
@@ -1546,6 +1566,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/public/setup-compatibility-kit`: 공개 CPU/GPU/RAM/SSD/모니터/파워/폼팩터 또는 노트북 휴대성 조합을 목적 기준으로 점검하고 분석/검수 prefill 조회
 - `/public/listing-decoder-kit`: 공개 쇼핑몰 상품명/옵션명에서 핵심 사양과 구매 조건 위험어를 구조화하고 검수 prefill, 판매자 질문, 공유 문구 조회
 - `/public/spec-risk-scanner`, `/public/spec-risk-scanner/result`: 공개 옵션/사양 빠른 검수 메타와 결제 전 예산 초과, CPU/GPU/RAM/SSD/OS 불일치, 배송/반품/AS 증거 누락 판정, 구매 세이프티 브리프, 판매자 질문, 승인 요약, 캡처 체크리스트 조회
+- `/public/purchase-approval-brief-kit`: 공개 장바구니 검수 결과를 가족/팀/커뮤니티용 승인 질문, 찬성/반대 투표 옵션, 채널별 복사 문구, 분석 prefill로 변환
 - `/public/checkout-nudge-kit`: 공개 장바구니 검수 결과를 후속 알림 문구, 다음 행동, 판매자 답변/가격 재확인/구매 결과 회수 단계, 분석 prefill, 대기열 prefill로 변환
 - `/public/spec-rescue-kit`: 공개 장바구니 보류/확인 필요 결과를 예산 내 대체 후보 3개, 판매자 확인 메시지, 검색 문구, 분석 prefill, 공유 문구로 변환
 - `/public/candidate-compare`: 공개 후보 5개 비교표, 비교 축별 승자, 예산/성능/안전 우선 대안 시나리오, 분석 prefill, 공유 문구 조회

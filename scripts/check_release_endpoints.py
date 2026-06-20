@@ -98,6 +98,21 @@ CHECKS = (
             "share_copy",
         ),
     ),
+    SmokeCheck(
+        name="public-purchase-approval-brief-kit",
+        method="POST",
+        path="/public/purchase-approval-brief-kit",
+        required_keys=(
+            "kit_version",
+            "priority",
+            "decision_rule",
+            "approval_question",
+            "buyer_brief",
+            "vote_options",
+            "copy_variants",
+            "share_copy",
+        ),
+    ),
 )
 
 
@@ -487,6 +502,21 @@ def run_smoke() -> list[dict[str, Any]]:
                 "form_factor": "ATX tower",
                 "budget_krw": 2_200_000,
                 "purpose": "qhd_creator",
+                "source": "release_smoke",
+            }
+        if check.name == "public-purchase-approval-brief-kit":
+            json_body = {
+                "category": "desktop_pc",
+                "product_title": "Creator RTX 4070 SUPER Build",
+                "verdict": "verify",
+                "budget_krw": 2_200_000,
+                "cart_total_krw": 2_185_000,
+                "blocker_count": 0,
+                "warning_count": 2,
+                "key_reasons": ["QHD 편집 목적에 GPU/RAM은 맞음"],
+                "missing_evidence": ["배송 예정일", "AS 조건"],
+                "audience": "family",
+                "decision_deadline": "오늘 결제 전",
                 "source": "release_smoke",
             }
         response = client.request(check.method, check.path, headers=headers, json=json_body)

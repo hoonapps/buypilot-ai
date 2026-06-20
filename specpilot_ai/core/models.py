@@ -1675,6 +1675,60 @@ class PublicListingDecoderKit(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class PurchaseApprovalBriefRequest(BaseModel):
+    category: Category = Category.desktop_pc
+    product_title: str = "구매 후보"
+    verdict: str = "verify"
+    budget_krw: int = Field(default=2_200_000, ge=300_000, le=30_000_000)
+    cart_total_krw: int | None = Field(default=None, ge=0, le=30_000_000)
+    blocker_count: int = Field(default=0, ge=0, le=20)
+    warning_count: int = Field(default=0, ge=0, le=20)
+    key_reasons: list[str] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
+    audience: str = "family"
+    decision_deadline: str = "오늘 결제 전"
+    source: str = "web"
+
+
+class ApprovalVoteOption(BaseModel):
+    option_id: str
+    label: str
+    status: CheckStatus
+    description: str
+    when_to_choose: str
+
+
+class ApprovalCopyVariant(BaseModel):
+    channel: str
+    label: str
+    copy_text: str
+    cta_label: str
+
+
+class PublicPurchaseApprovalBriefKit(BaseModel):
+    kit_version: str = "specpilot.public_purchase_approval_brief_kit.v1"
+    generated_at: str
+    category: Category
+    product_title: str
+    verdict: str
+    priority: CheckStatus
+    headline: str
+    summary: str
+    decision_rule: str
+    approval_question: str
+    buyer_brief: str
+    reject_reasons: list[str] = Field(default_factory=list)
+    approve_conditions: list[str] = Field(default_factory=list)
+    evidence_checklist: list[str] = Field(default_factory=list)
+    vote_options: list[ApprovalVoteOption] = Field(default_factory=list)
+    copy_variants: list[ApprovalCopyVariant] = Field(default_factory=list)
+    analysis_prefill: str
+    share_copy: str
+    primary_cta_label: str = "승인 조건으로 분석 시작"
+    primary_cta_path: str = "#analysis"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class CheckoutNudgeRequest(BaseModel):
     category: Category = Category.desktop_pc
     product_title: str = "구매 후보"

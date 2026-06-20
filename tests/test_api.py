@@ -750,6 +750,81 @@ def test_public_setup_compatibility_kit_checks_pc_and_laptop_fit() -> None:
     assert any(check["check_id"] == "battery" for check in laptop_payload["checks"])
 
 
+def test_public_purchase_approval_brief_kit_builds_shareable_vote_packet() -> None:
+    verify = client.post(
+        "/public/purchase-approval-brief-kit",
+        json={
+            "category": "desktop_pc",
+            "product_title": "Creator RTX 4070 SUPER Build",
+            "verdict": "verify",
+            "budget_krw": 2_200_000,
+            "cart_total_krw": 2_185_000,
+            "blocker_count": 0,
+            "warning_count": 2,
+            "key_reasons": [
+                "QHD 편집과 게임 목적에 GPU/RAM은 맞음",
+                "배송 예정일과 AS 답변은 아직 캡처 필요",
+            ],
+            "missing_evidence": ["배송 예정일", "AS 조건"],
+            "audience": "family",
+            "decision_deadline": "오늘 22시 전",
+            "source": "pytest",
+        },
+    )
+
+    assert verify.status_code == 200
+    payload = verify.json()
+    assert payload["kit_version"] == "specpilot.public_purchase_approval_brief_kit.v1"
+    assert payload["category"] == "desktop_pc"
+    assert payload["product_title"] == "Creator RTX 4070 SUPER Build"
+    assert payload["verdict"] == "verify"
+    assert payload["priority"] == "warning"
+    assert "조건부 승인" in payload["headline"]
+    assert "오늘 22시 전" in payload["decision_rule"]
+    assert "승인" in payload["approval_question"]
+    assert "배송 예정일" in payload["buyer_brief"]
+    assert "AS 조건" in payload["evidence_checklist"]
+    assert payload["approve_conditions"]
+    assert payload["reject_reasons"]
+    assert {option["option_id"] for option in payload["vote_options"]} >= {
+        "approve_now",
+        "approve_after_evidence",
+        "reject_or_compare",
+    }
+    assert {variant["channel"] for variant in payload["copy_variants"]} == {
+        "kakao",
+        "team",
+        "community",
+    }
+    assert "SpecPilot AI 구매 승인 브리프" in payload["share_copy"]
+    assert "구매 승인 브리프" in payload["analysis_prefill"]
+    assert payload["primary_cta_path"] == "#analysis"
+    assert payload["next_actions"]
+
+    hold = client.post(
+        "/public/purchase-approval-brief-kit",
+        json={
+            "category": "laptop",
+            "product_title": "해외 리퍼 노트북",
+            "verdict": "hold",
+            "budget_krw": 1_600_000,
+            "cart_total_krw": 1_780_000,
+            "blocker_count": 2,
+            "warning_count": 1,
+            "key_reasons": ["리퍼/해외 배송 조건과 AS가 불명확함"],
+            "missing_evidence": ["반품 조건", "국내 AS 여부"],
+            "audience": "team",
+        },
+    )
+    assert hold.status_code == 200
+    hold_payload = hold.json()
+    assert hold_payload["priority"] == "blocker"
+    assert "반대 사유" in hold_payload["headline"]
+    assert any("blocker" in reason for reason in hold_payload["reject_reasons"])
+    assert any("결제 버튼" in condition for condition in hold_payload["approve_conditions"])
+    assert hold_payload["vote_options"][0]["option_id"] == "reject_or_compare"
+
+
 def test_public_checkout_nudge_kit_turns_cart_check_into_followup_plan() -> None:
     hold = client.post(
         "/public/checkout-nudge-kit",
