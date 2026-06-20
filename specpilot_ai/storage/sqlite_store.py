@@ -2214,14 +2214,15 @@ class SpecPilotStore:
                     l.host,
                     COUNT(*) AS fetch_count,
                     SUM(CASE WHEN l.status = 'allowed' THEN 1 ELSE 0 END) AS allowed_count,
-                    SUM(CASE WHEN l.status = 'blocked' THEN 1 ELSE 0 END) AS blocked_count
+                    SUM(CASE WHEN l.status = 'blocked' THEN 1 ELSE 0 END) AS blocked_count,
+                    MAX(l.created_at) AS last_seen_at
                 FROM source_provider_fetch_log l
                 LEFT JOIN source_provider_policies p
                   ON p.provider_id = l.provider_id
                  AND p.workspace_id = l.workspace_id
                 WHERE l.workspace_id = ?
                 GROUP BY l.provider_id, l.host, provider_name
-                ORDER BY blocked_count DESC, fetch_count DESC
+                ORDER BY blocked_count DESC, fetch_count DESC, last_seen_at DESC
                 LIMIT 100
                 """,
                 (workspace_id,),

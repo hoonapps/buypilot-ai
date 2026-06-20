@@ -334,6 +334,44 @@ def test_public_onboarding_playbooks_guide_first_purchase_flow() -> None:
     assert {"desktop_pc", "laptop"} <= categories
 
 
+def test_public_buyer_checklist_turns_budget_and_category_into_lead_magnet() -> None:
+    response = client.get(
+        "/public/buyer-checklist?category=laptop&budget_krw=900000&persona=portable_creator"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["checklist_version"] == "specpilot.public_buyer_checklist.v1"
+    assert payload["category"] == "laptop"
+    assert payload["persona"] == "portable_creator"
+    assert payload["budget_krw"] == 900_000
+    assert payload["headline"]
+    assert payload["summary"]
+    assert 0 <= payload["readiness_score"] <= 100
+    assert payload["budget_fit"]
+    assert payload["primary_cta_anchor"] == "#analysis"
+    assert "노트북" in payload["analysis_prefill"]
+    assert payload["sections"]
+    assert {section["section_id"] for section in payload["sections"]} >= {
+        "fit",
+        "price",
+        "checkout",
+    }
+    assert any(
+        item["status"] == "blocker"
+        for section in payload["sections"]
+        for item in section["items"]
+    )
+    assert payload["red_flags"]
+    assert payload["evidence_to_capture"]
+    assert "결제 전 검수" in payload["share_copy"]
+    assert payload["next_actions"]
+
+    default_checklist = client.get("/public/buyer-checklist")
+    assert default_checklist.status_code == 200
+    assert default_checklist.json()["category"] == "desktop_pc"
+
+
 def test_growth_funnel_tracks_product_reaction_events() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-growth-{uuid4().hex}"}
     other_workspace = {"X-SpecPilot-Key": f"pytest-growth-other-{uuid4().hex}"}

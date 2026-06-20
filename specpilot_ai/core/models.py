@@ -1150,6 +1150,42 @@ class PurchaseOnboardingPlaybook(BaseModel):
     cta_anchor: str = "#analysis"
 
 
+class BuyerChecklistItem(BaseModel):
+    item_id: str
+    label: str
+    status: CheckStatus
+    why_it_matters: str
+    user_input_hint: str
+    failure_if_missing: str
+
+
+class BuyerChecklistSection(BaseModel):
+    section_id: str
+    title: str
+    summary: str
+    items: list[BuyerChecklistItem] = Field(default_factory=list)
+
+
+class PublicBuyerChecklist(BaseModel):
+    checklist_version: str = "specpilot.public_buyer_checklist.v1"
+    generated_at: str
+    category: Category
+    persona: str
+    budget_krw: int
+    headline: str
+    summary: str
+    readiness_score: float = Field(ge=0, le=100)
+    budget_fit: str
+    primary_cta_label: str = "내 조건으로 분석 시작"
+    primary_cta_anchor: str = "#analysis"
+    analysis_prefill: str
+    sections: list[BuyerChecklistSection] = Field(default_factory=list)
+    red_flags: list[str] = Field(default_factory=list)
+    evidence_to_capture: list[str] = Field(default_factory=list)
+    share_copy: str
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class StartConciergeMilestone(BaseModel):
     step: str
     title: str

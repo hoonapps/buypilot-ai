@@ -83,6 +83,7 @@ from specpilot_ai.core.models import (
     PrivacyPolicySummary,
     ProductBrief,
     PublicAcquisitionHub,
+    PublicBuyerChecklist,
     PublicCategoryMarketReport,
     PublicConversionBoard,
     PublicLaunchRoom,
@@ -147,6 +148,7 @@ from specpilot_ai.core.models import (
 )
 from specpilot_ai.graph.neo4j_client import Neo4jRepository
 from specpilot_ai.graph.product_graph import pc_purchase_graph_schema
+from specpilot_ai.services.buyer_checklist import build_public_buyer_checklist
 from specpilot_ai.services.demo_gallery import build_demo_scenario_gallery
 from specpilot_ai.services.intake import diagnose_intake
 from specpilot_ai.services.launch_campaign import (
@@ -1088,6 +1090,19 @@ def public_onboarding_playbooks(
     category: Category | None = None,
 ) -> list[PurchaseOnboardingPlaybook]:
     return purchase_onboarding_playbooks(category=category)
+
+
+@app.get("/public/buyer-checklist", response_model=PublicBuyerChecklist)
+def public_buyer_checklist(
+    category: Category | None = None,
+    budget_krw: int | None = None,
+    persona: str = "first_pc_buyer",
+) -> PublicBuyerChecklist:
+    return build_public_buyer_checklist(
+        category=category,
+        budget_krw=budget_krw,
+        persona=persona,
+    )
 
 
 @app.get("/public/proof-hub", response_model=PublicProofHub)
