@@ -2171,6 +2171,75 @@ class PublicPriceBreakdownKit(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class PurchaseExecutionKitRequest(BaseModel):
+    category: Category = Category.desktop_pc
+    product_title: str = "구매 후보"
+    seller_name: str = "판매자"
+    verdict: str = "verify"
+    final_price_krw: int | None = Field(default=None, ge=0, le=200_000_000)
+    budget_krw: int | None = Field(default=None, ge=0, le=200_000_000)
+    blocker_count: int = Field(default=0, ge=0, le=20)
+    warning_count: int = Field(default=0, ge=0, le=20)
+    missing_evidence: list[str] = Field(default_factory=list)
+    seller_questions: list[str] = Field(default_factory=list)
+    evidence_ready: list[str] = Field(default_factory=list)
+    decision_deadline: str = "오늘 결제 전"
+    payment_method: str = "카드 결제"
+    share_audience: str = "family"
+    source: str = "web"
+
+
+class PurchaseExecutionStep(BaseModel):
+    step_id: str
+    label: str
+    status: CheckStatus
+    owner: str
+    timing: str
+    instruction: str
+    evidence_required: str
+    fail_condition: str
+
+
+class PurchaseExecutionGate(BaseModel):
+    gate_id: str
+    label: str
+    status: CheckStatus
+    pass_rule: str
+    block_rule: str
+
+
+class PurchaseExecutionShareMessage(BaseModel):
+    channel: str
+    label: str
+    copy_text: str
+    cta_label: str
+
+
+class PublicPurchaseExecutionKit(BaseModel):
+    kit_version: str = "specpilot.public_purchase_execution_kit.v1"
+    generated_at: str
+    category: Category
+    product_title: str
+    seller_name: str
+    priority: CheckStatus
+    execution_score: int = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    primary_action: str
+    decision_checkpoint: str
+    price_delta_krw: int | None = None
+    checkout_steps: list[PurchaseExecutionStep] = Field(default_factory=list)
+    evidence_gates: list[PurchaseExecutionGate] = Field(default_factory=list)
+    seller_questions: list[str] = Field(default_factory=list)
+    stop_conditions: list[str] = Field(default_factory=list)
+    share_messages: list[PurchaseExecutionShareMessage] = Field(default_factory=list)
+    analysis_prefill: str
+    share_copy: str
+    primary_cta_label: str = "구매 실행 조건으로 분석 시작"
+    primary_cta_path: str = "#analysis"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class CheckoutNudgeRequest(BaseModel):
     category: Category = Category.desktop_pc
     product_title: str = "구매 후보"

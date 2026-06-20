@@ -125,6 +125,7 @@ from specpilot_ai.core.models import (
     PublicProofHub,
     PublicPurchaseAftercareKit,
     PublicPurchaseApprovalBriefKit,
+    PublicPurchaseExecutionKit,
     PublicReferralLaunchKit,
     PublicReferralLeaderboard,
     PublicReport,
@@ -139,6 +140,7 @@ from specpilot_ai.core.models import (
     PurchaseAftercareRequest,
     PurchaseApprovalBriefRequest,
     PurchaseDecisionBoard,
+    PurchaseExecutionKitRequest,
     PurchaseLink,
     PurchaseLinkGovernance,
     PurchaseLinkRequest,
@@ -228,6 +230,7 @@ from specpilot_ai.services.price_breakdown import build_public_price_breakdown_k
 from specpilot_ai.services.price_watch import build_public_price_watch_kit
 from specpilot_ai.services.purchase_aftercare import build_public_purchase_aftercare_kit
 from specpilot_ai.services.purchase_approval import build_public_purchase_approval_brief_kit
+from specpilot_ai.services.purchase_execution import build_public_purchase_execution_kit
 from specpilot_ai.services.seller_evidence import build_public_seller_evidence_kit
 from specpilot_ai.services.setup_compatibility import build_public_setup_compatibility_kit
 from specpilot_ai.services.shopping_cart_intake import build_public_shopping_cart_intake_kit
@@ -1356,6 +1359,16 @@ def public_price_breakdown_kit(
     request: PriceBreakdownRequest,
 ) -> PublicPriceBreakdownKit:
     return build_public_price_breakdown_kit(request)
+
+
+@app.post(
+    "/public/purchase-execution-kit",
+    response_model=PublicPurchaseExecutionKit,
+)
+def public_purchase_execution_kit(
+    request: PurchaseExecutionKitRequest,
+) -> PublicPurchaseExecutionKit:
+    return build_public_purchase_execution_kit(request)
 
 
 @app.post(

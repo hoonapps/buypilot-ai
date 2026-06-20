@@ -237,6 +237,24 @@ CHECKS = (
             "share_copy",
         ),
     ),
+    SmokeCheck(
+        name="public-purchase-execution-kit",
+        method="POST",
+        path="/public/purchase-execution-kit",
+        required_keys=(
+            "kit_version",
+            "priority",
+            "execution_score",
+            "primary_action",
+            "decision_checkpoint",
+            "checkout_steps",
+            "evidence_gates",
+            "seller_questions",
+            "stop_conditions",
+            "share_messages",
+            "share_copy",
+        ),
+    ),
 )
 
 
@@ -774,6 +792,24 @@ def run_smoke() -> list[dict[str, Any]]:
                 "discount_expires_hours": 72,
                 "stock_count": 8,
                 "risk_terms": ["카드 할인"],
+                "source": "release_smoke",
+            }
+        if check.name == "public-purchase-execution-kit":
+            json_body = {
+                "category": "desktop_pc",
+                "product_title": "Creator RTX 4070 SUPER Build",
+                "seller_name": "PC Mall",
+                "verdict": "verify",
+                "final_price_krw": 2_165_000,
+                "budget_krw": 2_200_000,
+                "blocker_count": 0,
+                "warning_count": 2,
+                "missing_evidence": ["AS 조건", "배송 예정일"],
+                "seller_questions": ["실제 출고 사양이 장바구니 옵션과 같은가요?"],
+                "evidence_ready": ["최종 결제 금액", "옵션명"],
+                "decision_deadline": "오늘 22시 전",
+                "payment_method": "카드 결제",
+                "share_audience": "family",
                 "source": "release_smoke",
             }
         response = client.request(check.method, check.path, headers=headers, json=json_body)

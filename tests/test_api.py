@@ -1382,6 +1382,89 @@ def test_public_price_breakdown_kit_calculates_final_checkout_price() -> None:
     assert any("결제를 보류" in action for action in risky_payload["next_actions"])
 
 
+def test_public_purchase_execution_kit_turns_checks_into_checkout_runbook() -> None:
+    verify = client.post(
+        "/public/purchase-execution-kit",
+        json={
+            "category": "desktop_pc",
+            "product_title": "Creator RTX 4070 SUPER Build",
+            "seller_name": "PC Mall",
+            "verdict": "verify",
+            "final_price_krw": 2_165_000,
+            "budget_krw": 2_200_000,
+            "blocker_count": 0,
+            "warning_count": 2,
+            "missing_evidence": ["AS 조건", "배송 예정일"],
+            "seller_questions": ["실제 출고 사양이 장바구니 옵션과 같은가요?"],
+            "evidence_ready": ["최종 결제 금액", "옵션명"],
+            "decision_deadline": "오늘 22시 전",
+            "payment_method": "카드 결제",
+            "share_audience": "family",
+            "source": "pytest",
+        },
+    )
+
+    assert verify.status_code == 200
+    payload = verify.json()
+    assert payload["kit_version"] == "specpilot.public_purchase_execution_kit.v1"
+    assert payload["priority"] == "warning"
+    assert payload["execution_score"] < 100
+    assert payload["price_delta_krw"] == -35_000
+    assert "누락 증거" in payload["summary"]
+    assert "오늘 22시 전" in payload["decision_checkpoint"]
+    assert {step["step_id"] for step in payload["checkout_steps"]} == {
+        "price_recheck",
+        "option_capture",
+        "seller_answer",
+        "approval_share",
+        "payment_execute",
+        "aftercare_record",
+    }
+    assert {gate["gate_id"] for gate in payload["evidence_gates"]} == {
+        "final_price",
+        "option_spec",
+        "warranty_return",
+        "seller_answer",
+        "reviewer_approval",
+    }
+    assert any(gate["status"] == "warning" for gate in payload["evidence_gates"])
+    assert any("예산" in condition or "옵션명" in condition for condition in payload["stop_conditions"])
+    assert {message["channel"] for message in payload["share_messages"]} == {
+        "kakao",
+        "team",
+        "community",
+    }
+    assert "SpecPilot AI 구매 실행 패키지" in payload["share_copy"]
+    assert "구매 실행 직전" in payload["analysis_prefill"]
+    assert payload["primary_cta_path"] == "#analysis"
+    assert payload["next_actions"]
+
+    hold = client.post(
+        "/public/purchase-execution-kit",
+        json={
+            "category": "laptop",
+            "product_title": "해외 리퍼 노트북",
+            "seller_name": "Open Market",
+            "verdict": "hold",
+            "final_price_krw": 1_960_000,
+            "budget_krw": 1_700_000,
+            "blocker_count": 2,
+            "warning_count": 2,
+            "missing_evidence": ["AS 조건", "반품 조건", "최종 결제 금액"],
+            "share_audience": "team",
+        },
+    )
+    assert hold.status_code == 200
+    hold_payload = hold.json()
+    assert hold_payload["priority"] == "blocker"
+    assert hold_payload["execution_score"] < 50
+    assert hold_payload["price_delta_krw"] == 260_000
+    assert "결제 중단" in hold_payload["headline"]
+    assert any("blocker" in condition for condition in hold_payload["stop_conditions"])
+    assert any(step["status"] == "blocker" for step in hold_payload["checkout_steps"])
+    assert any("결제를 멈추고" in action for action in hold_payload["next_actions"])
+
+
 def test_public_checkout_nudge_kit_turns_cart_check_into_followup_plan() -> None:
     hold = client.post(
         "/public/checkout-nudge-kit",
