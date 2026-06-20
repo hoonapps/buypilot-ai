@@ -603,6 +603,69 @@ def test_public_spec_risk_scanner_checks_checkout_options_before_purchase() -> N
     assert hold_payload["next_actions"]
 
 
+def test_public_listing_decoder_kit_turns_shopping_title_into_scanner_prefill() -> None:
+    response = client.post(
+        "/public/listing-decoder-kit",
+        json={
+            "category": "laptop",
+            "product_title": (
+                "CreatorBook Pro 16 Ryzen 7 8845HS RTX 4060 "
+                "RAM 32GB SSD 1TB Windows 11 16인치 165Hz"
+            ),
+            "option_text": "색상 실버 / 국내 정품 / 당일 출고",
+            "budget_krw": 2_200_000,
+            "cart_total_krw": 2_090_000,
+            "purpose": "portable_creator",
+            "source": "pytest",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kit_version"] == "specpilot.public_listing_decoder_kit.v1"
+    assert payload["category"] == "laptop"
+    assert payload["confidence_score"] >= 80
+    assert payload["blocker_count"] == 0
+    assert payload["warning_count"] <= 1
+    slots = {fact["slot"]: fact for fact in payload["decoded_specs"]}
+    assert slots["cpu"]["status"] == "ok"
+    assert "8845" in slots["cpu"]["value"]
+    assert slots["gpu"]["status"] == "ok"
+    assert "4060" in slots["gpu"]["value"]
+    assert slots["ram"]["value"] == "32GB"
+    assert slots["storage"]["value"] == "1,000GB"
+    assert slots["os"]["value"] == "Windows 11"
+    assert slots["display"]["status"] == "ok"
+    assert payload["scanner_prefill"]["expected_cpu"]
+    assert payload["scanner_prefill"]["expected_gpu"]
+    assert payload["scanner_prefill"]["expected_ram_gb"] == 32
+    assert payload["scanner_prefill"]["expected_storage_gb"] == 1000
+    assert payload["scanner_prefill"]["source"] == "listing_decoder"
+    assert "상품명" in payload["analysis_prefill"]
+    assert "SpecPilot AI 상품명 해석" in payload["share_copy"]
+    assert payload["primary_cta_path"] == "#spec-scanner"
+    assert payload["seller_questions"]
+    assert payload["next_actions"]
+
+    risky = client.post(
+        "/public/listing-decoder-kit",
+        json={
+            "category": "desktop_pc",
+            "product_title": "RTX 4070 리퍼 전시 PC RAM 16GB SSD 512GB FreeDOS",
+            "budget_krw": 2_200_000,
+            "purpose": "qhd_creator",
+        },
+    )
+    assert risky.status_code == 200
+    risky_payload = risky.json()
+    assert risky_payload["blocker_count"] >= 1
+    assert any(
+        fact["slot"] == "condition" and fact["status"] == "blocker"
+        for fact in risky_payload["decoded_specs"]
+    )
+    assert any("바로 결제하지" in action for action in risky_payload["next_actions"])
+
+
 def test_public_checkout_nudge_kit_turns_cart_check_into_followup_plan() -> None:
     hold = client.post(
         "/public/checkout-nudge-kit",

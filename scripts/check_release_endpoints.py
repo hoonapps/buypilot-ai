@@ -71,6 +71,19 @@ CHECKS = (
             "share_copy",
         ),
     ),
+    SmokeCheck(
+        name="public-listing-decoder-kit",
+        method="POST",
+        path="/public/listing-decoder-kit",
+        required_keys=(
+            "kit_version",
+            "confidence_score",
+            "decoded_specs",
+            "scanner_prefill",
+            "seller_questions",
+            "share_copy",
+        ),
+    ),
 )
 
 
@@ -435,7 +448,20 @@ def run_smoke() -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
 
     for check in CHECKS:
-        response = client.request(check.method, check.path, headers=headers)
+        json_body = None
+        if check.name == "public-listing-decoder-kit":
+            json_body = {
+                "category": "laptop",
+                "product_title": (
+                    "CreatorBook Pro 16 Ryzen 7 8845HS RTX 4060 "
+                    "RAM 32GB SSD 1TB Windows 11"
+                ),
+                "budget_krw": 2_200_000,
+                "cart_total_krw": 2_090_000,
+                "purpose": "portable_creator",
+                "source": "release_smoke",
+            }
+        response = client.request(check.method, check.path, headers=headers, json=json_body)
         if response.status_code != 200:
             raise AssertionError(f"{check.name} returned HTTP {response.status_code}")
         payload = response.json()

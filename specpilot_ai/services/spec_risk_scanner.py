@@ -6,7 +6,10 @@ from specpilot_ai.core.models import (
     CheckoutNudgeRequest,
     CheckoutNudgeStep,
     CheckStatus,
+    ListingDecoderRequest,
+    ListingSpecFact,
     PublicCheckoutNudgeKit,
+    PublicListingDecoderKit,
     PublicSpecRiskScanner,
     SpecRiskCheck,
     SpecRiskScannerRequest,
@@ -131,6 +134,50 @@ def scan_spec_risk(
         capture_checklist=_capture_checklist(verdict, missing_evidence),
         checkout_next_step=_checkout_next_step(verdict, missing_evidence),
         next_actions=_next_actions(verdict, missing_evidence),
+    )
+
+
+def build_public_listing_decoder_kit(
+    request: ListingDecoderRequest,
+    generated_at: datetime | None = None,
+) -> PublicListingDecoderKit:
+    generated_at = generated_at or datetime.now(UTC)
+    title = request.product_title.strip() or _category_label(request.category)
+    option_text = request.option_text.strip()
+    combined_text = " ".join([title, option_text]).strip()
+    facts = _decode_listing_facts(request.category, combined_text)
+    blocker_count = sum(1 for fact in facts if fact.status == CheckStatus.blocker)
+    warning_count = sum(1 for fact in facts if fact.status == CheckStatus.warning)
+    confidence_score = _decoder_confidence_score(facts, blocker_count, warning_count)
+    scanner_prefill = _scanner_prefill(request, title, option_text, facts)
+    category_label = _category_label(request.category)
+    return PublicListingDecoderKit(
+        generated_at=generated_at.isoformat(),
+        category=request.category,
+        product_title=title,
+        option_text=option_text,
+        normalized_title=_normalized_listing_title(title, facts),
+        confidence_score=confidence_score,
+        headline=_decoder_headline(category_label, title, blocker_count, warning_count),
+        summary=(
+            f"{category_label} 상품명에서 CPU/GPU/RAM/SSD/OS와 구매 조건 신호를 구조화했습니다. "
+            f"blocker {blocker_count}개, warning {warning_count}개를 먼저 확인하고 "
+            "장바구니 검수로 이어가세요."
+        ),
+        decoded_specs=facts,
+        blocker_count=blocker_count,
+        warning_count=warning_count,
+        ambiguity_notes=_ambiguity_notes(request.category, facts),
+        seller_questions=_decoder_seller_questions(facts),
+        scanner_prefill=scanner_prefill,
+        analysis_prefill=_decoder_analysis_prefill(
+            request=request,
+            title=title,
+            facts=facts,
+            scanner_prefill=scanner_prefill,
+        ),
+        share_copy=_decoder_share_copy(title, confidence_score, facts),
+        next_actions=_decoder_next_actions(blocker_count, warning_count),
     )
 
 
@@ -501,6 +548,367 @@ def _checkout_next_step(verdict: str, missing_evidence: list[str]) -> str:
 
 def _category_label(category: Category) -> str:
     return "노트북" if category == Category.laptop else "데스크톱 PC"
+
+
+def _decode_listing_facts(category: Category, text: str) -> list[ListingSpecFact]:
+    normalized = _normalize_listing_text(text)
+    facts = [
+        _pattern_fact(
+            slot="cpu",
+            label="CPU",
+            value=_first_match(
+                normalized,
+                [
+                    r"ryzen\s*[3579]\s*[0-9]{4}[a-z0-9]*",
+                    r"i[3579]\s*-?\s*[0-9]{4,5}[a-z0-9]*",
+                    r"core\s+ultra\s+[3579]\s*[0-9]{3}[a-z]*",
+                    r"m[1234]\s*(?:pro|max|air)?",
+                ],
+            ),
+            missing_recommendation="CPU 세대와 등급이 상품명/옵션명에 보이는지 확인하세요.",
+        ),
+        _pattern_fact(
+            slot="gpu",
+            label="GPU",
+            value=_first_match(
+                normalized,
+                [
+                    r"rtx\s*[2345]0[56789]0\s*(?:ti|super)?",
+                    r"gtx\s*16[0-9]{2}\s*(?:ti|super)?",
+                    r"rx\s*[67][0-9]{3}\s*(?:xt)?",
+                    r"iris\s*xe|arc\s*[a-z]?[0-9]{3}|radeon\s*graphics",
+                ],
+            ),
+            missing_recommendation="외장 GPU가 필요한 목적이면 그래픽 옵션명을 판매자에게 확인하세요.",
+        ),
+        _capacity_fact("ram", "RAM", normalized, r"(?:ram|메모리|ddr[45]?)?\s*([0-9]{1,3})\s*(?:gb|g)\s*(?:ram|메모리)?"),
+        _capacity_fact(
+            "storage",
+            "저장장치",
+            normalized,
+            r"(?:(?:ssd|nvme|m\.2)\s*)?([0-9]{3,4}|[12])\s*(tb|gb|g)\s*(?:ssd|nvme|m\.2)?",
+        ),
+        _os_fact(normalized),
+        _condition_fact(normalized),
+    ]
+    if category == Category.laptop:
+        facts.append(_display_fact(normalized))
+    return facts
+
+
+def _pattern_fact(
+    *,
+    slot: str,
+    label: str,
+    value: str,
+    missing_recommendation: str,
+) -> ListingSpecFact:
+    if value:
+        return ListingSpecFact(
+            slot=slot,
+            label=label,
+            value=_pretty_spec_value(value),
+            status=CheckStatus.ok,
+            evidence=value,
+            recommendation=f"{label} 표기를 옵션/장바구니에서도 같은지 확인하세요.",
+        )
+    return ListingSpecFact(
+        slot=slot,
+        label=label,
+        value="확인 필요",
+        status=CheckStatus.warning,
+        evidence="상품명에서 명확한 표기를 찾지 못함",
+        recommendation=missing_recommendation,
+    )
+
+
+def _capacity_fact(slot: str, label: str, text: str, pattern: str) -> ListingSpecFact:
+    matches = list(re.finditer(pattern, text, flags=re.IGNORECASE))
+    values: list[int] = []
+    for match in matches:
+        raw_value = int(match.group(1))
+        unit = match.group(2).lower() if match.lastindex and match.lastindex >= 2 else "gb"
+        value_gb = raw_value * 1000 if unit == "tb" else raw_value
+        if 4 <= value_gb <= 8192:
+            values.append(value_gb)
+    if values:
+        selected = max(values)
+        return ListingSpecFact(
+            slot=slot,
+            label=label,
+            value=f"{selected:,}GB",
+            status=CheckStatus.ok,
+            evidence=f"{selected:,}GB",
+            recommendation=f"{label} 용량이 실제 선택 옵션과 같은지 장바구니에서 다시 대조하세요.",
+        )
+    return ListingSpecFact(
+        slot=slot,
+        label=label,
+        value="확인 필요",
+        status=CheckStatus.warning,
+        evidence="상품명에서 용량 표기를 찾지 못함",
+        recommendation=f"{label} 용량은 옵션 변경으로 자주 달라지므로 장바구니 옵션명을 확인하세요.",
+    )
+
+
+def _os_fact(text: str) -> ListingSpecFact:
+    if any(token in text for token in ["free dos", "freedos", "os 미포함", "운영체제 미포함", "윈도우 미포함"]):
+        return ListingSpecFact(
+            slot="os",
+            label="OS",
+            value="OS 미포함",
+            status=CheckStatus.warning,
+            evidence="FreeDOS/OS 미포함 표기",
+            recommendation="Windows가 필요하면 OS 포함 여부와 추가 비용을 결제 전에 확인하세요.",
+        )
+    if re.search(r"windows?\s*11|윈도우\s*11|win\s*11", text, flags=re.IGNORECASE):
+        return ListingSpecFact(
+            slot="os",
+            label="OS",
+            value="Windows 11",
+            status=CheckStatus.ok,
+            evidence="Windows 11 표기",
+            recommendation="Home/Pro 에디션과 정품 인증 조건을 확인하세요.",
+        )
+    return ListingSpecFact(
+        slot="os",
+        label="OS",
+        value="확인 필요",
+        status=CheckStatus.warning,
+        evidence="OS 표기를 찾지 못함",
+        recommendation="운영체제 포함 여부와 설치/라이선스 비용을 판매자에게 확인하세요.",
+    )
+
+
+def _condition_fact(text: str) -> ListingSpecFact:
+    blocker_tokens = ["중고", "리퍼", "refurb", "전시", "반품", "스크래치"]
+    warning_tokens = ["벌크", "해외", "병행", "직구", "무상 as 1년", "미개봉"]
+    blocker = [token for token in blocker_tokens if token in text]
+    warning = [token for token in warning_tokens if token in text]
+    if blocker:
+        return ListingSpecFact(
+            slot="condition",
+            label="상품 상태",
+            value=", ".join(blocker),
+            status=CheckStatus.blocker,
+            evidence=", ".join(blocker),
+            recommendation="신품 구매가 목표라면 중고/리퍼/전시 조건은 결제 전 제외하거나 명시 승인하세요.",
+        )
+    if warning:
+        return ListingSpecFact(
+            slot="condition",
+            label="상품 상태",
+            value=", ".join(warning),
+            status=CheckStatus.warning,
+            evidence=", ".join(warning),
+            recommendation="정품 AS, 국내 배송, 반품 가능 여부를 판매자 답변으로 남기세요.",
+        )
+    return ListingSpecFact(
+        slot="condition",
+        label="상품 상태",
+        value="신품 표기 위험 신호 없음",
+        status=CheckStatus.ok,
+        evidence="중고/리퍼/전시/해외 위험어 없음",
+        recommendation="결제 전 판매자와 반품/AS 조건은 별도 캡처하세요.",
+    )
+
+
+def _display_fact(text: str) -> ListingSpecFact:
+    size = _first_match(text, [r"([0-9]{2}(?:\.[0-9])?)\s*(?:인치|inch|\")"])
+    refresh = _first_match(text, [r"([0-9]{2,3})\s*hz"])
+    if size or refresh:
+        value = " / ".join(part for part in [size, refresh.upper() if refresh else ""] if part)
+        return ListingSpecFact(
+            slot="display",
+            label="디스플레이",
+            value=value,
+            status=CheckStatus.ok,
+            evidence=value,
+            recommendation="패널 종류, 해상도, 밝기, 무게는 상세 페이지에서 추가 확인하세요.",
+        )
+    return ListingSpecFact(
+        slot="display",
+        label="디스플레이",
+        value="확인 필요",
+        status=CheckStatus.warning,
+        evidence="크기/주사율 표기를 찾지 못함",
+        recommendation="노트북은 화면 크기, 해상도, 밝기, 무게가 구매 만족도에 직접 영향을 줍니다.",
+    )
+
+
+def _scanner_prefill(
+    request: ListingDecoderRequest,
+    title: str,
+    option_text: str,
+    facts: list[ListingSpecFact],
+) -> SpecRiskScannerRequest:
+    by_slot = {fact.slot: fact for fact in facts}
+    return SpecRiskScannerRequest(
+        category=request.category,
+        product_title=title,
+        option_text=option_text or title,
+        cart_total_krw=request.cart_total_krw,
+        budget_krw=request.budget_krw,
+        expected_cpu=_prefill_value(by_slot.get("cpu")),
+        expected_gpu=_prefill_value(by_slot.get("gpu")),
+        expected_ram_gb=_prefill_capacity(by_slot.get("ram")),
+        expected_storage_gb=_prefill_capacity(by_slot.get("storage")),
+        expected_os=_prefill_value(by_slot.get("os"), ignore_values={"OS 미포함"}),
+        evidence_text="상품명 디코더 결과 기반 prefill",
+        source="listing_decoder",
+    )
+
+
+def _prefill_value(
+    fact: ListingSpecFact | None,
+    *,
+    ignore_values: set[str] | None = None,
+) -> str:
+    if fact is None or fact.status != CheckStatus.ok:
+        return ""
+    if ignore_values and fact.value in ignore_values:
+        return ""
+    return fact.value
+
+
+def _prefill_capacity(fact: ListingSpecFact | None) -> int | None:
+    if fact is None or fact.status != CheckStatus.ok:
+        return None
+    match = re.search(r"([0-9,]+)", fact.value)
+    return int(match.group(1).replace(",", "")) if match else None
+
+
+def _decoder_confidence_score(
+    facts: list[ListingSpecFact],
+    blocker_count: int,
+    warning_count: int,
+) -> float:
+    ok_count = sum(1 for fact in facts if fact.status == CheckStatus.ok)
+    base = 42 + ok_count * 10 - warning_count * 6 - blocker_count * 18
+    return round(min(98, max(12, base)), 1)
+
+
+def _normalized_listing_title(title: str, facts: list[ListingSpecFact]) -> str:
+    spec_values = [
+        fact.value
+        for fact in facts
+        if fact.status == CheckStatus.ok and fact.slot in {"cpu", "gpu", "ram", "storage", "os"}
+    ]
+    return " / ".join([title, *spec_values[:5]])
+
+
+def _decoder_headline(
+    category_label: str,
+    title: str,
+    blocker_count: int,
+    warning_count: int,
+) -> str:
+    if blocker_count:
+        return f"{title} 상품명에서 결제 전 차단 신호를 먼저 찾았습니다."
+    if warning_count:
+        return f"{title} 상품명은 {category_label} 구매 전 추가 확인이 필요합니다."
+    return f"{title} 상품명을 장바구니 검수용 사양으로 정리했습니다."
+
+
+def _ambiguity_notes(category: Category, facts: list[ListingSpecFact]) -> list[str]:
+    notes = [
+        f"{fact.label}: {fact.recommendation}"
+        for fact in facts
+        if fact.status != CheckStatus.ok
+    ]
+    if category == Category.laptop and not any(fact.slot == "display" for fact in facts):
+        notes.append("노트북은 무게, 패널, 배터리 조건을 별도 증거로 남기세요.")
+    return notes[:5]
+
+
+def _decoder_seller_questions(facts: list[ListingSpecFact]) -> list[str]:
+    questions = [
+        "장바구니 옵션명 기준 CPU/GPU/RAM/SSD/OS가 상품명과 동일한가요?",
+        "최종 결제 금액에 배송비, 설치비, OS 비용, 카드 할인 조건이 모두 반영됐나요?",
+    ]
+    if any(fact.slot == "condition" and fact.status != CheckStatus.ok for fact in facts):
+        questions.insert(0, "신품/중고/리퍼/전시/해외 구매 조건과 국내 AS 가능 여부를 확인해 주세요.")
+    if any(fact.slot == "os" and fact.status != CheckStatus.ok for fact in facts):
+        questions.append("Windows 포함 여부, 에디션, 정품 인증 방식, 추가 설치 비용을 알려 주세요.")
+    return questions
+
+
+def _decoder_analysis_prefill(
+    *,
+    request: ListingDecoderRequest,
+    title: str,
+    facts: list[ListingSpecFact],
+    scanner_prefill: SpecRiskScannerRequest,
+) -> str:
+    specs = ", ".join(
+        f"{fact.label} {fact.value}" for fact in facts if fact.status == CheckStatus.ok
+    )
+    total = (
+        f"{request.cart_total_krw:,}원"
+        if request.cart_total_krw is not None
+        else "최종가 미입력"
+    )
+    return (
+        f"{_category_label(request.category)} 상품명 '{title}'을 해석했어. "
+        f"목적은 {request.purpose}, 예산은 {request.budget_krw:,}원, 현재 최종가는 {total}야. "
+        f"해석된 사양은 {specs or '명확하지 않음'}이고 "
+        f"검수 prefill은 CPU {scanner_prefill.expected_cpu or '미확인'}, "
+        f"GPU {scanner_prefill.expected_gpu or '미확인'}, "
+        f"RAM {scanner_prefill.expected_ram_gb or '미확인'}GB, "
+        f"SSD {scanner_prefill.expected_storage_gb or '미확인'}GB야. "
+        "이 상품명을 그대로 결제해도 되는지 옵션명, 판매자, AS, 대체 후보까지 검토해줘."
+    )
+
+
+def _decoder_share_copy(
+    title: str,
+    confidence_score: float,
+    facts: list[ListingSpecFact],
+) -> str:
+    lines = [
+        "SpecPilot AI 상품명 해석",
+        f"- 상품: {title}",
+        f"- 해석 신뢰도: {confidence_score}점",
+    ]
+    lines.extend(
+        f"- {fact.label}: {fact.value} / {fact.status.value}"
+        for fact in facts[:6]
+    )
+    lines.append("이 옵션명 그대로 결제해도 되는지 확인 부탁드립니다.")
+    return "\n".join(lines)
+
+
+def _decoder_next_actions(blocker_count: int, warning_count: int) -> list[str]:
+    actions = [
+        "해석 결과를 장바구니 옵션명과 다시 대조한 뒤 옵션/사양 빠른 검수기로 넘기세요.",
+        "상품명에 없는 사양은 상세 페이지 캡처나 판매자 답변으로 증거를 남기세요.",
+        "CPU/GPU/RAM/SSD/OS 중 하나라도 불명확하면 같은 예산의 공개 후보 비교표로 대체 후보를 확인하세요.",
+    ]
+    if blocker_count:
+        actions.insert(0, "중고/리퍼/전시/해외 조건이 보이면 신품 구매 목표에서는 바로 결제하지 마세요.")
+    elif warning_count:
+        actions.insert(0, "warning 항목은 결제 전 판매자 질문으로 먼저 닫으세요.")
+    return actions
+
+
+def _first_match(text: str, patterns: list[str]) -> str:
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return match.group(0).strip()
+    return ""
+
+
+def _pretty_spec_value(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip().upper().replace("RYZEN", "Ryzen")
+
+
+def _normalize_listing_text(value: str) -> str:
+    normalized = value.lower()
+    normalized = normalized.replace("기가", "gb").replace("테라", "tb")
+    normalized = normalized.replace("지포스", "rtx").replace("라이젠", "ryzen")
+    normalized = normalized.replace("윈도우", "windows")
+    return re.sub(r"[\[\]()/,+|]", " ", normalized)
 
 
 def _nudge_priority(

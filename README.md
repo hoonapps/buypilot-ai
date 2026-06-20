@@ -56,6 +56,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 공개 구매 성향 진단 퀴즈: 30초 질문으로 구매 persona, 추천 카테고리/예산, 분석 prefill, 체크리스트 경로, 공유 문구를 제공
 - 공개 구매 실패 비용 계산기: 예산, 수량, 긴급도, 위험 유형을 받아 잘못 산 컴퓨터의 숨은 손실, 방지 플랜, 분석 prefill을 금액으로 제시
 - 공개 구매 챌린지 공유 키트: 성향 진단, 실패 비용 계산, 체크리스트를 채널별 공유 문구와 3단계 챌린지로 묶어 리포트 생성 전 확산 루프를 제공
+- 공개 상품명 해석 키트: 쇼핑몰 상품명/옵션명에서 CPU/GPU/RAM/SSD/OS와 리퍼·전시·해외 조건을 구조화하고 검수 prefill을 제공
 - 공개 옵션/사양 빠른 검수기: 판매 페이지 옵션명, 장바구니 문구, 최종 결제 금액을 붙여 넣으면 예산 초과, 사양 불일치, 증거 누락을 결제 전 blocker/warning으로 판정하고 구매 세이프티 브리프, 판매자 확인 질문, 승인/공유 요약, 캡처 체크리스트를 반환
 - 공개 후보 비교 스냅샷: 데스크톱/노트북 후보 5개를 가격, 목적 적합도, 리뷰 신뢰, 구매 안정성으로 정렬하고 예산/성능/안전 우선 대안 시나리오를 제공
 - 공개 구매 타이밍 윈도우: 후보별 현재가, 목표가, 적정가 밴드, 변동 리스크, 결제 트리거를 공개 화면에서 즉시 결제/가격 대기로 분리
@@ -268,6 +269,21 @@ curl -X POST http://127.0.0.1:8000/public/spec-risk-scanner/result \
     "expected_storage_gb": 1000,
     "expected_os": "Windows 11 Pro",
     "evidence_text": "최종 결제 총액, 배송 예정일, 반품 조건, AS 1년, 판매자 답변 확보"
+  }'
+```
+
+공개 상품명 해석 키트는 쇼핑몰 상품명/옵션명 원문을 받아 CPU, GPU, RAM, SSD, OS, 리퍼/전시/해외 조건을 구조화하고 옵션/사양 빠른 검수기로 넘길 prefill을 반환합니다.
+
+```bash
+curl -X POST http://127.0.0.1:8000/public/listing-decoder-kit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "category": "laptop",
+    "product_title": "CreatorBook Pro 16 Ryzen 7 8845HS RTX 4060 RAM 32GB SSD 1TB Windows 11",
+    "option_text": "색상 실버 / 국내 정품 / 당일 출고",
+    "budget_krw": 2200000,
+    "cart_total_krw": 2090000,
+    "purpose": "portable_creator"
   }'
 ```
 
@@ -1507,6 +1523,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/public/buyer-persona-quiz`, `/public/buyer-persona-quiz/result`: 공개 30초 구매 성향 진단 질문과 persona별 추천 카테고리/예산, 분석 prefill, 체크리스트 경로, 공유 문구 조회
 - `/public/mistake-cost-calculator`, `/public/mistake-cost-calculator/result`: 공개 구매 실패 비용 계산 질문과 예산/수량/긴급도별 예상 손실, 방지 플랜, 분석 prefill, 공유 문구 조회
 - `/public/buyer-challenge-kit`: 구매 성향, 실패 비용, 체크리스트를 3단계 공유 챌린지와 카카오톡/커뮤니티/팀 채널별 복사 문구로 패키징
+- `/public/listing-decoder-kit`: 공개 쇼핑몰 상품명/옵션명에서 핵심 사양과 구매 조건 위험어를 구조화하고 검수 prefill, 판매자 질문, 공유 문구 조회
 - `/public/spec-risk-scanner`, `/public/spec-risk-scanner/result`: 공개 옵션/사양 빠른 검수 메타와 결제 전 예산 초과, CPU/GPU/RAM/SSD/OS 불일치, 배송/반품/AS 증거 누락 판정, 구매 세이프티 브리프, 판매자 질문, 승인 요약, 캡처 체크리스트 조회
 - `/public/checkout-nudge-kit`: 공개 장바구니 검수 결과를 후속 알림 문구, 다음 행동, 판매자 답변/가격 재확인/구매 결과 회수 단계, 분석 prefill, 대기열 prefill로 변환
 - `/public/spec-rescue-kit`: 공개 장바구니 보류/확인 필요 결과를 예산 내 대체 후보 3개, 판매자 확인 메시지, 검색 문구, 분석 prefill, 공유 문구로 변환

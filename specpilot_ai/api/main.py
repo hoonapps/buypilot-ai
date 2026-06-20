@@ -80,6 +80,7 @@ from specpilot_ai.core.models import (
     LaunchResponseLoopDashboard,
     LaunchWarRoomDashboard,
     LaunchWeekRecapDashboard,
+    ListingDecoderRequest,
     MistakeCostCalculatorRequest,
     MistakeCostCalculatorResult,
     ObservabilityDispatchRequest,
@@ -112,6 +113,7 @@ from specpilot_ai.core.models import (
     PublicLaunchRoomMarketLink,
     PublicLaunchSharePack,
     PublicLaunchSmokeDashboard,
+    PublicListingDecoderKit,
     PublicMistakeCostCalculator,
     PublicPriceWatchKit,
     PublicProofHub,
@@ -204,6 +206,7 @@ from specpilot_ai.services.price_watch import build_public_price_watch_kit
 from specpilot_ai.services.spec_rescue import build_public_spec_rescue_kit
 from specpilot_ai.services.spec_risk_scanner import (
     build_checkout_nudge_kit,
+    build_public_listing_decoder_kit,
     build_public_spec_risk_scanner,
     scan_spec_risk,
 )
@@ -1213,6 +1216,16 @@ def public_spec_risk_scanner_result(
     request: SpecRiskScannerRequest,
 ) -> SpecRiskScannerResult:
     return scan_spec_risk(request)
+
+
+@app.post(
+    "/public/listing-decoder-kit",
+    response_model=PublicListingDecoderKit,
+)
+def public_listing_decoder_kit(
+    request: ListingDecoderRequest,
+) -> PublicListingDecoderKit:
+    return build_public_listing_decoder_kit(request)
 
 
 @app.post(
