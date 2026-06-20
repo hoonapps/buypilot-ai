@@ -628,6 +628,112 @@ def test_growth_launch_pulse_summarizes_public_reaction_signals() -> None:
     assert payload["recent_growth_events"]
 
 
+def test_growth_acquisition_hub_maps_public_launch_surfaces() -> None:
+    workspace = {"X-SpecPilot-Key": f"pytest-acquisition-{uuid4().hex}"}
+
+    analysis = client.post(
+        "/analyze",
+        headers=workspace,
+        json={
+            "query": "QHD 게이밍과 영상 편집용 PC를 220만원 안에서 추천해줘",
+            "category": "desktop_pc",
+            "budget_krw": 2_200_000,
+            "purpose": "QHD gaming, Premiere Pro",
+            "must_haves": ["QHD 144Hz", "32GB RAM", "업그레이드 여지"],
+        },
+    )
+    assert analysis.status_code == 200
+    analysis_payload = analysis.json()
+    trace_id = analysis_payload["graph_trace_id"]
+    product_id = analysis_payload["report"]["top_recommendations"][0]["product"]["id"]
+
+    saved = client.post(
+        "/reports/save",
+        headers=workspace,
+        json={"trace_id": trace_id, "title": "공개 유입 테스트 리포트"},
+    )
+    assert saved.status_code == 200
+    report_id = saved.json()["report_id"]
+    share = client.post(f"/reports/{report_id}/share", headers=workspace)
+    assert share.status_code == 200
+    public_report = client.get(f"/public/reports/{share.json()['share_token']}")
+    assert public_report.status_code == 200
+
+    for event_type, surface in [
+        ("analysis_view", "demo-gallery"),
+        ("recommendation_click", "recommendation-card"),
+        ("share_cta", "share-assets"),
+        ("subscription_cta", "pricing"),
+    ]:
+        event = client.post(
+            "/growth/events",
+            headers=workspace,
+            json={
+                "event_type": event_type,
+                "trace_id": trace_id,
+                "report_id": report_id,
+                "product_id": product_id,
+                "source": "pytest",
+                "surface": surface,
+                "label": f"{event_type} acquisition seed",
+            },
+        )
+        assert event.status_code == 200
+
+    referral = client.post(
+        "/growth/waitlist-referrals",
+        headers=workspace,
+        json={
+            "email": "acquisition@example.com",
+            "persona": "team_buyer",
+            "use_case": "팀 장비 구매 비교 리포트를 공유하고 싶습니다.",
+        },
+    )
+    assert referral.status_code == 200
+
+    intent = client.post(
+        "/billing/subscription-intents",
+        headers=workspace,
+        json={
+            "email": "buyer@example.com",
+            "plan_id": "team",
+            "persona": "team_buyer",
+            "team_size": 4,
+            "use_case": "반복 PC 구매 비교",
+            "feature_priorities": ["팀 공유 리포트", "구매 결과 학습"],
+        },
+    )
+    assert intent.status_code == 200
+
+    hub = client.get("/growth/acquisition-hub?limit=10", headers=workspace)
+    assert hub.status_code == 200
+    payload = hub.json()
+    assert payload["hub_version"] == "specpilot.public_acquisition_hub.v1"
+    assert payload["workspace_id"].startswith("workspace_")
+    assert payload["launch_score"] > 0
+    assert payload["status"] in {"ok", "warning", "blocker"}
+    assert payload["primary_cta_path"] == "/#demo-gallery"
+    assert set(payload["seo_paths"]) >= {"/", "/market/desktop-pc", "/market/laptop"}
+    surface_keys = {surface["key"] for surface in payload["surfaces"]}
+    assert {
+        "demo_gallery",
+        "market_desktop",
+        "market_laptop",
+        "public_report",
+        "referral_waitlist",
+        "trust_center",
+        "pricing_interest",
+    } <= surface_keys
+    public_report_surface = next(
+        surface for surface in payload["surfaces"] if surface["key"] == "public_report"
+    )
+    assert public_report_surface["path"] == "/r/{share_token}"
+    assert "공유 리포트" in public_report_surface["label"]
+    assert payload["channel_actions"]
+    assert payload["next_actions"]
+    assert payload["recent_growth_events"]
+
+
 def test_privacy_policy_endpoint_exposes_retention_and_controls() -> None:
     response = client.get("/policy/privacy")
 

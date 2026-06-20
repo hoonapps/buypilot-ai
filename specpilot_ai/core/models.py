@@ -1067,6 +1067,36 @@ class LaunchPulseDashboard(BaseModel):
     recent_growth_events: list[GrowthEventRecord] = Field(default_factory=list)
 
 
+class PublicAcquisitionSurface(BaseModel):
+    key: str
+    label: str
+    path: str
+    channel: str
+    status: CheckStatus
+    readiness_score: float = Field(ge=0, le=100)
+    primary_cta: str
+    proof: str
+    metric: str
+    next_action: str
+
+
+class PublicAcquisitionHub(BaseModel):
+    hub_version: str = "specpilot.public_acquisition_hub.v1"
+    workspace_id: str
+    generated_at: str
+    status: CheckStatus
+    launch_score: float = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    primary_cta: str
+    primary_cta_path: str
+    surfaces: list[PublicAcquisitionSurface] = Field(default_factory=list)
+    seo_paths: list[str] = Field(default_factory=list)
+    channel_actions: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+    recent_growth_events: list[GrowthEventRecord] = Field(default_factory=list)
+
+
 class BetaCohortRequest(BaseModel):
     name: str = Field(min_length=2)
     scenario: str = Field(min_length=2)

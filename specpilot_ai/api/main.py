@@ -75,6 +75,7 @@ from specpilot_ai.core.models import (
     PricingPlan,
     PrivacyPolicySummary,
     ProductBrief,
+    PublicAcquisitionHub,
     PublicCategoryMarketReport,
     PublicReport,
     PurchaseDecisionBoard,
@@ -1255,6 +1256,17 @@ def growth_launch_pulse(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> LaunchPulseDashboard:
     return _store().launch_pulse_for_workspace(workspace.workspace_id, limit=limit)
+
+
+@app.get("/growth/acquisition-hub", response_model=PublicAcquisitionHub)
+def growth_acquisition_hub(
+    limit: int = 12,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> PublicAcquisitionHub:
+    return _store().public_acquisition_hub_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
 
 
 @app.get("/beta/readiness", response_model=BetaReadinessDashboard)

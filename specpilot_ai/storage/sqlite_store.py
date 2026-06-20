@@ -78,6 +78,8 @@ from specpilot_ai.core.models import (
     PricingPlan,
     ProviderReliabilityMetric,
     ProviderReviewStatus,
+    PublicAcquisitionHub,
+    PublicAcquisitionSurface,
     PublicReport,
     PurchaseDecisionBoard,
     PurchaseDecisionBoardItem,
@@ -2876,6 +2878,49 @@ class SpecPilotStore:
             hot_surfaces=growth.top_surfaces,
             top_actions=_pulse_top_actions(signals, growth, referrals, pricing, readiness),
             recent_feedback=feedback,
+            recent_growth_events=growth.recent_events,
+        )
+
+    def public_acquisition_hub_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 12,
+    ) -> PublicAcquisitionHub:
+        metrics = self.metrics_for_workspace(workspace_id)
+        growth = self.growth_funnel_for_workspace(workspace_id, limit=limit)
+        referrals = self.waitlist_referral_dashboard_for_workspace(workspace_id, limit=limit)
+        pricing = self.pricing_dashboard_for_workspace(workspace_id)
+        readiness = self.beta_readiness_for_workspace(workspace_id)
+        surfaces = _public_acquisition_surfaces(
+            metrics=metrics,
+            growth=growth,
+            referrals=referrals,
+            pricing=pricing,
+            readiness=readiness,
+        )
+        launch_score = round(
+            sum(surface.readiness_score for surface in surfaces) / max(len(surfaces), 1),
+            1,
+        )
+        status = _score_status(launch_score, warning=55, ok=75)
+        return PublicAcquisitionHub(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            status=status,
+            launch_score=launch_score,
+            headline=_public_acquisition_headline(status, launch_score),
+            summary=_public_acquisition_summary(metrics, growth, referrals, pricing),
+            primary_cta="공개 데모로 분석 시작",
+            primary_cta_path="/#demo-gallery",
+            surfaces=surfaces,
+            seo_paths=[
+                "/",
+                "/market/desktop-pc",
+                "/market/laptop",
+                "/r/{share_token}",
+            ],
+            channel_actions=_public_acquisition_channel_actions(surfaces),
+            next_actions=_public_acquisition_next_actions(surfaces, growth, referrals),
             recent_growth_events=growth.recent_events,
         )
 
@@ -8727,6 +8772,221 @@ def _growth_funnel_step(
         status=status,
         recommendation=recommendation,
     )
+
+
+def _score_status(score: float, *, warning: float, ok: float) -> CheckStatus:
+    if score >= ok:
+        return CheckStatus.ok
+    if score >= warning:
+        return CheckStatus.warning
+    return CheckStatus.blocker
+
+
+def _acquisition_surface(
+    *,
+    key: str,
+    label: str,
+    path: str,
+    channel: str,
+    score: float,
+    primary_cta: str,
+    proof: str,
+    metric: str,
+    next_action: str,
+) -> PublicAcquisitionSurface:
+    normalized_score = round(max(0, min(score, 100)), 1)
+    return PublicAcquisitionSurface(
+        key=key,
+        label=label,
+        path=path,
+        channel=channel,
+        status=_score_status(normalized_score, warning=55, ok=75),
+        readiness_score=normalized_score,
+        primary_cta=primary_cta,
+        proof=proof,
+        metric=metric,
+        next_action=next_action,
+    )
+
+
+def _public_acquisition_surfaces(
+    *,
+    metrics: OperationsMetrics,
+    growth: GrowthFunnelDashboard,
+    referrals: WaitlistReferralDashboard,
+    pricing: PricingDashboard,
+    readiness: BetaReadinessDashboard,
+) -> list[PublicAcquisitionSurface]:
+    market_score = min(100.0, 62 + metrics.analysis_runs * 2 + metrics.growth_events * 1.5)
+    return [
+        _acquisition_surface(
+            key="demo_gallery",
+            label="공개 데모 갤러리",
+            path="/#demo-gallery",
+            channel="first_session",
+            score=min(
+                100.0,
+                48 + metrics.analysis_runs * 5 + metrics.recommendation_card_clicks * 8,
+            ),
+            primary_cta="데모 적용 후 분석 실행",
+            proof=(
+                f"분석 {metrics.analysis_runs}건, "
+                f"추천 클릭 {metrics.recommendation_card_clicks}건"
+            ),
+            metric=f"추천 클릭률 {round(growth.activation_rate * 100)}%",
+            next_action="첫 화면 데모 preset과 분석 버튼을 계속 붙여 빈 폼 이탈을 줄이세요.",
+        ),
+        _acquisition_surface(
+            key="market_desktop",
+            label="데스크톱 PC SEO 리포트",
+            path="/market/desktop-pc",
+            channel="search",
+            score=market_score,
+            primary_cta="데스크톱 조건 분석",
+            proof="월간 데스크톱 후보, 가격 구간, 리스크 체크리스트 공개",
+            metric=f"성장 이벤트 {metrics.growth_events}건",
+            next_action="커뮤니티 글과 검색 유입을 데스크톱 공개 리포트로 모으세요.",
+        ),
+        _acquisition_surface(
+            key="market_laptop",
+            label="노트북 SEO 리포트",
+            path="/market/laptop",
+            channel="search",
+            score=market_score,
+            primary_cta="노트북 조건 분석",
+            proof="월간 노트북 후보, 휴대성/발열/외장 GPU 리스크 공개",
+            metric=f"공개 조회 {metrics.public_share_views}회",
+            next_action="노트북 구매 키워드 유입은 공개 리포트 CTA와 연결하세요.",
+        ),
+        _acquisition_surface(
+            key="public_report",
+            label="공개 공유 리포트",
+            path="/r/{share_token}",
+            channel="share",
+            score=min(
+                100.0,
+                metrics.shared_reports * 18
+                + metrics.public_share_views * 5
+                + metrics.share_cta_clicks * 8
+                + growth.share_rate * 40,
+            ),
+            primary_cta="리포트 공유",
+            proof=f"공유 리포트 {metrics.shared_reports}개, 조회 {metrics.public_share_views}회",
+            metric=f"공유 CTA {round(growth.share_rate * 100)}%",
+            next_action=(
+                "분석 직후 공유 자산을 복사하게 해 "
+                "가족/커뮤니티 검토 루프를 짧게 만드세요."
+            ),
+        ),
+        _acquisition_surface(
+            key="referral_waitlist",
+            label="추천 대기열",
+            path="/#referrals",
+            channel="referral",
+            score=min(
+                100.0,
+                referrals.total_referrals * 14
+                + referrals.referred_signup_count * 22
+                + referrals.share_rate_hint * 35,
+            ),
+            primary_cta="초대 링크 만들기",
+            proof=(
+                f"대기열 {referrals.total_referrals}명, "
+                f"추천 유입 {referrals.referred_signup_count}명"
+            ),
+            metric=f"추천 유입률 {round(referrals.share_rate_hint * 100)}%",
+            next_action="공유 리포트 하단에 추천 코드 CTA를 붙여 좋은 반응을 초대로 전환하세요.",
+        ),
+        _acquisition_surface(
+            key="trust_center",
+            label="공개 Trust Center",
+            path="/#trust-center",
+            channel="trust",
+            score=min(
+                100.0,
+                readiness.launch_readiness_score * 0.8
+                + metrics.average_quality_score * 0.2,
+            ),
+            primary_cta="신뢰 기준 확인",
+            proof=(
+                f"readiness {readiness.launch_readiness_score}점, "
+                f"품질 {metrics.average_quality_score}점"
+            ),
+            metric=readiness.readiness_label,
+            next_action="제휴 고지, 출처 검수, 개인정보 기준을 공유 리포트와 함께 노출하세요.",
+        ),
+        _acquisition_surface(
+            key="pricing_interest",
+            label="Premium/Team 전환",
+            path="/#pricing",
+            channel="monetization",
+            score=min(
+                100.0,
+                pricing.intent_count * 18
+                + (pricing.premium_intent_count + pricing.team_intent_count) * 14
+                + min(pricing.estimated_mrr_krw / 12_000, 30),
+            ),
+            primary_cta="요금제 관심 등록",
+            proof=f"요금제 관심 {pricing.intent_count}건, 예상 MRR {pricing.estimated_mrr_krw:,}원",
+            metric=pricing.top_plan_name or "요금제 수요 검증 전",
+            next_action="반복 구매/팀 구매 persona에는 Team 구매 보조 CTA를 우선 노출하세요.",
+        ),
+    ]
+
+
+def _public_acquisition_headline(status: CheckStatus, launch_score: float) -> str:
+    if status == CheckStatus.ok:
+        return f"공개 유입 허브 {launch_score}점, 유입 확대를 시작할 수 있습니다."
+    if status == CheckStatus.warning:
+        return f"공개 유입 허브 {launch_score}점, 일부 표면 보강 후 확대하세요."
+    return f"공개 유입 허브 {launch_score}점, 첫 유입 표면부터 확보해야 합니다."
+
+
+def _public_acquisition_summary(
+    metrics: OperationsMetrics,
+    growth: GrowthFunnelDashboard,
+    referrals: WaitlistReferralDashboard,
+    pricing: PricingDashboard,
+) -> str:
+    return (
+        f"분석 {metrics.analysis_runs}건, 공유 조회 {metrics.public_share_views}회, "
+        f"공유 CTA {round(growth.share_rate * 100)}%, 추천 대기열 "
+        f"{referrals.total_referrals}명, 요금제 관심 {pricing.intent_count}건을 "
+        "공개 표면별로 묶었습니다."
+    )
+
+
+def _public_acquisition_channel_actions(
+    surfaces: list[PublicAcquisitionSurface],
+) -> list[str]:
+    by_channel: dict[str, PublicAcquisitionSurface] = {}
+    for surface in sorted(surfaces, key=lambda item: item.readiness_score):
+        by_channel.setdefault(surface.channel, surface)
+    return [
+        f"{surface.channel}: {surface.label} - {surface.next_action}"
+        for surface in by_channel.values()
+    ][:6]
+
+
+def _public_acquisition_next_actions(
+    surfaces: list[PublicAcquisitionSurface],
+    growth: GrowthFunnelDashboard,
+    referrals: WaitlistReferralDashboard,
+) -> list[str]:
+    actions = [
+        surface.next_action
+        for surface in sorted(surfaces, key=lambda item: item.readiness_score)
+        if surface.status != CheckStatus.ok
+    ][:4]
+    actions.extend(growth.next_actions[:1])
+    actions.extend(referrals.next_actions[:1])
+    deduped: list[str] = []
+    for action in actions:
+        if action and action not in deduped:
+            deduped.append(action)
+    if not deduped:
+        deduped.append("모든 공개 표면이 안정적입니다. 검색/커뮤니티 트래픽을 더 배정하세요.")
+    return deduped[:6]
 
 
 def _build_report_share_assets(report: SavedReportDetail) -> ReportShareAssets:
