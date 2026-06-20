@@ -84,6 +84,20 @@ CHECKS = (
             "share_copy",
         ),
     ),
+    SmokeCheck(
+        name="public-setup-compatibility-kit",
+        method="POST",
+        path="/public/setup-compatibility-kit",
+        required_keys=(
+            "kit_version",
+            "compatibility_score",
+            "verdict",
+            "checks",
+            "scanner_prefill",
+            "analysis_prefill",
+            "share_copy",
+        ),
+    ),
 )
 
 
@@ -459,6 +473,20 @@ def run_smoke() -> list[dict[str, Any]]:
                 "budget_krw": 2_200_000,
                 "cart_total_krw": 2_090_000,
                 "purpose": "portable_creator",
+                "source": "release_smoke",
+            }
+        if check.name == "public-setup-compatibility-kit":
+            json_body = {
+                "category": "desktop_pc",
+                "cpu": "Ryzen 7 7800X3D",
+                "gpu": "RTX 4070 SUPER",
+                "ram_gb": 32,
+                "storage_gb": 1000,
+                "monitor_resolution": "QHD",
+                "psu_watt": 750,
+                "form_factor": "ATX tower",
+                "budget_krw": 2_200_000,
+                "purpose": "qhd_creator",
                 "source": "release_smoke",
             }
         response = client.request(check.method, check.path, headers=headers, json=json_body)

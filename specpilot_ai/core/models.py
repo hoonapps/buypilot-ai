@@ -1588,6 +1588,51 @@ class SpecRiskScannerResult(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class SetupCompatibilityRequest(BaseModel):
+    category: Category = Category.desktop_pc
+    cpu: str = ""
+    gpu: str = ""
+    ram_gb: int | None = Field(default=None, ge=0, le=1024)
+    storage_gb: int | None = Field(default=None, ge=0, le=16384)
+    monitor_resolution: str = "qhd"
+    psu_watt: int | None = Field(default=None, ge=0, le=3000)
+    form_factor: str = ""
+    weight_kg: float | None = Field(default=None, ge=0, le=10)
+    battery_wh: int | None = Field(default=None, ge=0, le=200)
+    budget_krw: int = Field(default=2_200_000, ge=300_000, le=30_000_000)
+    purpose: str = "qhd_creator"
+    source: str = "web"
+
+
+class SetupCompatibilityCheck(BaseModel):
+    check_id: str
+    label: str
+    status: CheckStatus
+    observed: str
+    recommendation: str
+    impact: str
+
+
+class PublicSetupCompatibilityKit(BaseModel):
+    kit_version: str = "specpilot.public_setup_compatibility_kit.v1"
+    generated_at: str
+    category: Category
+    compatibility_score: float = Field(ge=0, le=100)
+    verdict: str
+    headline: str
+    summary: str
+    blocker_count: int = 0
+    warning_count: int = 0
+    checks: list[SetupCompatibilityCheck] = Field(default_factory=list)
+    recommended_changes: list[str] = Field(default_factory=list)
+    scanner_prefill: SpecRiskScannerRequest
+    analysis_prefill: str
+    share_copy: str
+    primary_cta_label: str = "호환성 결과로 분석 시작"
+    primary_cta_path: str = "#analysis"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class ListingDecoderRequest(BaseModel):
     category: Category = Category.desktop_pc
     product_title: str = "컴퓨터 구매 후보"

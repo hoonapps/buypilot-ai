@@ -120,6 +120,7 @@ from specpilot_ai.core.models import (
     PublicReferralLaunchKit,
     PublicReferralLeaderboard,
     PublicReport,
+    PublicSetupCompatibilityKit,
     PublicSocialProofWall,
     PublicSpecRescueKit,
     PublicSpecRiskScanner,
@@ -146,6 +147,7 @@ from specpilot_ai.core.models import (
     SavedReportDetail,
     SavedReportSummary,
     SaveReportRequest,
+    SetupCompatibilityRequest,
     SourceAdapterStatus,
     SourceCollectionRequest,
     SourceCollectionResponse,
@@ -203,6 +205,7 @@ from specpilot_ai.services.mistake_cost import (
 )
 from specpilot_ai.services.onboarding import purchase_onboarding_playbooks
 from specpilot_ai.services.price_watch import build_public_price_watch_kit
+from specpilot_ai.services.setup_compatibility import build_public_setup_compatibility_kit
 from specpilot_ai.services.spec_rescue import build_public_spec_rescue_kit
 from specpilot_ai.services.spec_risk_scanner import (
     build_checkout_nudge_kit,
@@ -1226,6 +1229,16 @@ def public_listing_decoder_kit(
     request: ListingDecoderRequest,
 ) -> PublicListingDecoderKit:
     return build_public_listing_decoder_kit(request)
+
+
+@app.post(
+    "/public/setup-compatibility-kit",
+    response_model=PublicSetupCompatibilityKit,
+)
+def public_setup_compatibility_kit(
+    request: SetupCompatibilityRequest,
+) -> PublicSetupCompatibilityKit:
+    return build_public_setup_compatibility_kit(request)
 
 
 @app.post(

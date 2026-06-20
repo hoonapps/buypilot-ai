@@ -666,6 +666,90 @@ def test_public_listing_decoder_kit_turns_shopping_title_into_scanner_prefill() 
     assert any("바로 결제하지" in action for action in risky_payload["next_actions"])
 
 
+def test_public_setup_compatibility_kit_checks_pc_and_laptop_fit() -> None:
+    desktop = client.post(
+        "/public/setup-compatibility-kit",
+        json={
+            "category": "desktop_pc",
+            "cpu": "Ryzen 7 7800X3D",
+            "gpu": "RTX 4070 SUPER",
+            "ram_gb": 32,
+            "storage_gb": 1000,
+            "monitor_resolution": "QHD 1440p",
+            "psu_watt": 750,
+            "form_factor": "ATX tower",
+            "budget_krw": 2_200_000,
+            "purpose": "qhd_creator",
+            "source": "pytest",
+        },
+    )
+
+    assert desktop.status_code == 200
+    payload = desktop.json()
+    assert payload["kit_version"] == "specpilot.public_setup_compatibility_kit.v1"
+    assert payload["category"] == "desktop_pc"
+    assert payload["verdict"] in {"ready", "verify"}
+    assert payload["compatibility_score"] >= 80
+    assert payload["blocker_count"] == 0
+    check_ids = {check["check_id"] for check in payload["checks"]}
+    assert {"gpu_monitor", "cpu_gpu_balance", "ram", "storage", "psu", "form_factor"} <= check_ids
+    assert payload["scanner_prefill"]["source"] == "setup_compatibility"
+    assert payload["scanner_prefill"]["expected_gpu"] == "RTX 4070 SUPER"
+    assert payload["scanner_prefill"]["expected_ram_gb"] == 32
+    assert "호환성" in payload["analysis_prefill"]
+    assert "SpecPilot AI 세팅 호환성 체크" in payload["share_copy"]
+    assert payload["primary_cta_path"] == "#analysis"
+    assert payload["recommended_changes"]
+    assert payload["next_actions"]
+
+    risky = client.post(
+        "/public/setup-compatibility-kit",
+        json={
+            "category": "desktop_pc",
+            "cpu": "Core i3 14100",
+            "gpu": "RTX 4080 SUPER",
+            "ram_gb": 16,
+            "storage_gb": 512,
+            "monitor_resolution": "4K UHD",
+            "psu_watt": 600,
+            "form_factor": "slim mini case",
+            "budget_krw": 2_200_000,
+            "purpose": "4k_creator",
+        },
+    )
+    assert risky.status_code == 200
+    risky_payload = risky.json()
+    assert risky_payload["verdict"] == "hold"
+    assert risky_payload["blocker_count"] >= 1
+    assert any(
+        check["check_id"] == "psu" and check["status"] == "blocker"
+        for check in risky_payload["checks"]
+    )
+    assert any("바로 결제하지" in action for action in risky_payload["next_actions"])
+
+    laptop = client.post(
+        "/public/setup-compatibility-kit",
+        json={
+            "category": "laptop",
+            "cpu": "Core Ultra 7 155H",
+            "gpu": "RTX 4060 Laptop",
+            "ram_gb": 32,
+            "storage_gb": 1000,
+            "monitor_resolution": "QHD",
+            "weight_kg": 2.25,
+            "battery_wh": 55,
+            "budget_krw": 2_200_000,
+            "purpose": "portable_creator",
+        },
+    )
+    assert laptop.status_code == 200
+    laptop_payload = laptop.json()
+    assert laptop_payload["category"] == "laptop"
+    assert laptop_payload["warning_count"] >= 1
+    assert any(check["check_id"] == "weight" for check in laptop_payload["checks"])
+    assert any(check["check_id"] == "battery" for check in laptop_payload["checks"])
+
+
 def test_public_checkout_nudge_kit_turns_cart_check_into_followup_plan() -> None:
     hold = client.post(
         "/public/checkout-nudge-kit",
