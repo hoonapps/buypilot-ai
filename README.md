@@ -63,7 +63,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 공개 유입 허브: 데모, SEO 카테고리 리포트, 공유 리포트, 추천 대기열, Trust Center, 요금제 관심을 표면별 준비도와 채널 액션으로 집계
 - 공개 전환 보드: 유입 허브, 성장 퍼널, 런치 Pulse, 추천 대기열, 요금제 관심, readiness를 한 snapshot으로 묶어 출시 직후 채널 배정과 병목 액션을 결정
 - 리텐션 허브: 저장 리포트, 가격 알림, 공유 조회, 구매 상담, 구매 결과, 완료 리포트 반응을 재참여 점수와 플레이로 집계
-- 추천 대기열: 가입자별 추천 코드와 공유 URL, 카카오톡/커뮤니티/이메일 공유 키트, 추천 보상 사다리, 공개 리더보드를 발급하고 추천 유입, 우선순위 점수로 공개 전 확산 루프를 검증
+- 추천 대기열: 가입자별 추천 코드와 공유 URL, 카카오톡/커뮤니티/이메일 공유 키트, 추천 보상 사다리, 공개 리더보드, 가입 전 공개 추천 확산 키트를 발급하고 추천 유입, 우선순위 점수로 공개 전 확산 루프를 검증
 - 런치 반응 Pulse: 성장 이벤트, 만족도, 구매 의향, 추천 대기열, 요금제 관심, readiness를 합성해 공개 반응 온도와 다음 액션을 반환
 - 출시 실험 허브: 공개 CTA 카피 variant를 만들고 노출/전환 이벤트, 승자 후보, 다음 실험 액션을 워크스페이스별로 집계
 - 출시 캠페인 키트: 커뮤니티/검색/추천 채널별 공개 베타 카피, CTA 실험, 출시 체크리스트, 위험 고지, 측정 계획 생성
@@ -78,7 +78,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 공개 검증 허브: Trust Center, 시장 리포트, 공유 조회, 피드백, CTA 실험, 공개 유입 표면을 proof 카드와 출시 proof strip으로 집계
 - 공개 소셜 proof wall: 마스킹 피드백, 실구매 결과, 추천 유입 리더보드를 랜딩에 바로 노출할 공개 반응 카드로 선별
 - 공개 런칭룸: 데모 갤러리, 시장 리포트, proof strip, 유입/반응/추천/수익화 CTA를 외부 공유용 출시 페이지 패키지로 집계
-- Next.js 공개 런칭 페이지: 웹사이트 `/launch`에서 런칭룸, 첫 구매 진단 콘시어지, CTA 실험, 출시 배포 플랜, 공개 검증 허브, 공개 출시 게이트, 구매 후속 리텐션 루프, Team 구매 표준안 프리뷰, 요금제 비교, 소셜 proof wall API를 읽어 제품 스크린샷 배경, 자연어 구매 진단, 실험 기반 CTA, 첫 주 채널 배포 카드, evidence kit, go/no-go 준비도 카드, 구매 후속 액션 카드, Team 상담 안건/ROI/롤아웃/메일 초안, Free/Premium/Team 요금제 카드, 실제 반응 proof, 시장 리포트, 공유 문구를 외부 공유용 첫 화면으로 렌더링하고 분석 CTA를 메인 분석 폼 자동 채움 handoff로 연결하며 추천 대기열과 요금제 관심을 즉시 저장
+- Next.js 공개 런칭 페이지: 웹사이트 `/launch`에서 런칭룸, 첫 구매 진단 콘시어지, CTA 실험, 출시 배포 플랜, 공개 검증 허브, 공개 출시 게이트, 구매 후속 리텐션 루프, 가입 전 추천 확산 키트, Team 구매 표준안 프리뷰, 요금제 비교, 소셜 proof wall API를 읽어 제품 스크린샷 배경, 자연어 구매 진단, 실험 기반 CTA, 첫 주 채널 배포 카드, evidence kit, go/no-go 준비도 카드, 구매 후속 액션 카드, 추천 보상 사다리/공유 문구/리더보드 프리뷰, Team 상담 안건/ROI/롤아웃/메일 초안, Free/Premium/Team 요금제 카드, 실제 반응 proof, 시장 리포트, 공유 문구를 외부 공유용 첫 화면으로 렌더링하고 분석 CTA를 메인 분석 폼 자동 채움 handoff로 연결하며 추천 대기열과 요금제 관심을 즉시 저장
 - Next.js 추천 초대 페이지: 제품 API가 발급하는 `/join?ref={referral_code}` 공유 URL을 초대 코드가 미리 채워진 대기열/요금제 관심 폼으로 연결하고, 가입 후 절대 초대 링크 복사/공유 액션을 성장 이벤트로 기록
 - SQLite 기반 분석 결과 저장
 - 저장 리포트 조회와 가격 알림 구독
@@ -1368,7 +1368,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/growth/acquisition-hub`: 공개 데모, SEO 카테고리 리포트, 공유 리포트, 추천 대기열, Trust Center, 요금제 관심 표면의 준비도와 채널별 액션을 집계
 - `/growth/public-conversion-board`: 공개 유입 허브, 성장 퍼널, 런치 Pulse, 추천 대기열, 요금제 관심, readiness를 전환 점수, 단계별 병목, 우선 표면, 채널 액션으로 합성
 - `/growth/retention-hub`: 저장 리포트, 가격 알림, 공개 조회, 구매 상담, 구매 결과, 완료 리포트 engagement를 재참여 신호, 플레이, 다음 액션으로 집계
-- `/growth/waitlist-referrals`, `/growth/referral-dashboard`, `/growth/referral-leaderboard`, `/growth/referral-share-kit/{referral_code}`, `/growth/referral-rewards/{referral_code}`: 추천 대기열 가입, 추천 코드/공유 URL, `PUBLIC_SITE_URL` 기반 절대 초대 링크, 공개 추천 순위, 카카오톡/커뮤니티/이메일 공유 문구, 추천 보상 사다리, 추천 유입 수, 우선순위 점수를 워크스페이스별로 집계
+- `/growth/waitlist-referrals`, `/growth/referral-dashboard`, `/growth/referral-leaderboard`, `/growth/referral-share-kit/{referral_code}`, `/growth/referral-rewards/{referral_code}`, `/growth/referral-launch-kit`: 추천 대기열 가입, 추천 코드/공유 URL, `PUBLIC_SITE_URL` 기반 절대 초대 링크, 공개 추천 순위, 카카오톡/커뮤니티/이메일 공유 문구, 추천 보상 사다리, 가입 전 공개 추천 확산 키트, 추천 유입 수, 우선순위 점수를 워크스페이스별로 집계
 - `/growth/launch-pulse`: 성장 이벤트, 피드백, 추천 대기열, 요금제 관심, readiness를 합성해 공개 반응 Pulse 점수와 다음 액션을 반환
 - `/growth/launch-experiments`, `/growth/launch-experiments/{experiment_id}/events`, `/growth/launch-experiment-dashboard`: 공개 CTA variant, 노출/전환 이벤트, 승자 후보, 다음 실험 액션을 관리
 - `/growth/launch-kit`: 공개 베타 채널별 카피, CTA 실험, 출시 체크리스트, 위험 고지, 측정 계획을 반환

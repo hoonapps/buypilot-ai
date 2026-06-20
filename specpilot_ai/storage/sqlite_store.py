@@ -93,6 +93,7 @@ from specpilot_ai.core.models import (
     PublicProofAsset,
     PublicProofEvidence,
     PublicProofHub,
+    PublicReferralLaunchKit,
     PublicReferralLeaderboard,
     PublicReferralLeaderboardEntry,
     PublicReport,
@@ -3785,6 +3786,40 @@ class SpecPilotStore:
             workspace_id=workspace_id,
             referral=referral,
             referral_url=self._referral_url(referral.referral_code),
+        )
+
+    def public_referral_launch_kit_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 8,
+    ) -> PublicReferralLaunchKit:
+        dashboard = self.waitlist_referral_dashboard_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        leaderboard = self.public_referral_leaderboard_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        status = _public_referral_launch_status(
+            dashboard.total_referrals,
+            dashboard.referred_signup_count,
+        )
+        return PublicReferralLaunchKit(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            status=status,
+            headline=_public_referral_launch_headline(status, dashboard),
+            summary=_public_referral_launch_summary(dashboard),
+            dashboard=dashboard,
+            leaderboard=leaderboard,
+            reward_tiers=_public_referral_launch_reward_tiers(),
+            share_examples=_public_referral_launch_share_examples(),
+            cta_cards=_public_referral_launch_cta_cards(status),
+            next_actions=_public_referral_launch_next_actions(
+                dashboard,
+                leaderboard,
+            ),
         )
 
     def create_subscription_intent_for_workspace(
@@ -9767,6 +9802,105 @@ def _referral_reward_next_actions(
     else:
         actions.insert(0, "상위 추천자 badge와 팀 구매 인터뷰 CTA를 노출하세요.")
     return actions[:3]
+
+
+def _public_referral_launch_reward_tiers() -> list[ReferralRewardTier]:
+    tier_specs = [
+        ("first-share", "첫 공유 성취", 1, "공개 베타 초대 우선순위 +10점"),
+        ("early-access", "우선 초대권", 3, "오픈 전 우선 분석 슬롯과 새 기능 알림"),
+        ("premium-trial", "Premium 체험", 5, "Premium 구매 코치 1개월 체험권"),
+        ("team-session", "팀 구매 상담", 10, "팀 장비 구매 표준안 1회 상담"),
+    ]
+    return [
+        ReferralRewardTier(
+            tier_id=tier_id,
+            label=label,
+            required_referrals=required,
+            benefit=benefit,
+            status="preview",
+        )
+        for tier_id, label, required, benefit in tier_specs
+    ]
+
+
+def _public_referral_launch_share_examples() -> list[ReferralShareKitVariant]:
+    preview_referral = WaitlistReferral(
+        referral_id="preview",
+        workspace_id="public",
+        email_masked="yo***@example.com",
+        persona="computer_buyer",
+        use_case="컴퓨터와 노트북 구매 리포트 공유",
+        referral_code="SPEC-PREVIEW",
+        referred_by_code="",
+        referral_url="/join?ref=SPEC-PREVIEW",
+        referred_signup_count=0,
+        priority_score=50,
+        contact_consent=True,
+        source="public-referral-launch-kit",
+        created_at=_now(),
+    )
+    return _referral_share_kit_variants(
+        referral=preview_referral,
+        referral_url="/join?ref=SPEC-PREVIEW",
+    )
+
+
+def _public_referral_launch_status(
+    total_referrals: int,
+    referred_signup_count: int,
+) -> CheckStatus:
+    if total_referrals >= 20 and referred_signup_count >= 5:
+        return CheckStatus.ok
+    if total_referrals >= 3 or referred_signup_count:
+        return CheckStatus.warning
+    return CheckStatus.blocker
+
+
+def _public_referral_launch_headline(
+    status: CheckStatus,
+    dashboard: WaitlistReferralDashboard,
+) -> str:
+    if status == CheckStatus.ok:
+        return f"추천 대기열 {dashboard.total_referrals}명이 공개 베타를 확산 중입니다."
+    if status == CheckStatus.warning:
+        return "초기 추천 루프가 시작됐습니다. 보상 사다리를 더 앞에 노출하세요."
+    return "가입 전에도 공유 이유가 보이도록 추천 보상 사다리를 공개합니다."
+
+
+def _public_referral_launch_summary(dashboard: WaitlistReferralDashboard) -> str:
+    return (
+        f"{dashboard.summary} 카카오톡, 커뮤니티, 이메일 문구와 보상 단계를 "
+        "런칭 페이지에서 먼저 보여줘 가입 전 공유 동기를 만듭니다."
+    )
+
+
+def _public_referral_launch_cta_cards(status: CheckStatus) -> list[str]:
+    cards = [
+        "내 추천 코드 만들기",
+        "카카오톡 초대 문구 복사",
+        "추천 리더보드 보기",
+    ]
+    if status == CheckStatus.blocker:
+        cards.insert(0, "첫 10명 추천 경쟁 시작")
+    else:
+        cards.append("상위 추천자 Team 인터뷰 제안")
+    return cards[:4]
+
+
+def _public_referral_launch_next_actions(
+    dashboard: WaitlistReferralDashboard,
+    leaderboard: PublicReferralLeaderboard,
+) -> list[str]:
+    actions = [
+        "런칭 페이지 첫 화면과 공유 리포트 하단에 추천 코드 CTA를 함께 노출하세요.",
+        "보상 사다리의 다음 달성 조건을 추천 대기열 가입 직후 다시 보여주세요.",
+        "카카오톡 문구를 기본 복사 문구로 두고 커뮤니티 글은 상세 근거형으로 분리하세요.",
+    ]
+    if not leaderboard.entries:
+        actions.insert(0, "첫 추천 코드를 만든 사용자가 1위가 된다는 메시지를 강조하세요.")
+    if dashboard.share_rate_hint < 0.2:
+        actions.append("추천 유입률 20% 전까지 보상 문구와 초대 CTA를 계속 실험하세요.")
+    return actions[:5]
 
 
 def _default_channel_name(channel: str) -> str:

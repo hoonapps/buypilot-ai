@@ -895,6 +895,26 @@ def test_waitlist_referrals_create_share_loop_and_dashboard() -> None:
     assert leaderboard_payload["entries"][0]["reward_label"]
     assert leaderboard_payload["next_actions"]
 
+    launch_kit = client.get("/growth/referral-launch-kit?limit=8", headers=workspace)
+    assert launch_kit.status_code == 200
+    launch_kit_payload = launch_kit.json()
+    assert launch_kit_payload["kit_version"] == "specpilot.public_referral_launch_kit.v1"
+    assert launch_kit_payload["dashboard"]["total_referrals"] == 2
+    assert launch_kit_payload["leaderboard"]["entries"][0]["referral_code"] == first_payload["referral_code"]
+    assert {tier["required_referrals"] for tier in launch_kit_payload["reward_tiers"]} == {
+        1,
+        3,
+        5,
+        10,
+    }
+    assert {variant["channel"] for variant in launch_kit_payload["share_examples"]} == {
+        "kakao",
+        "community",
+        "email",
+    }
+    assert launch_kit_payload["cta_cards"]
+    assert launch_kit_payload["next_actions"]
+
     isolated_kit = client.get(
         f"/growth/referral-share-kit/{first_payload['referral_code']}",
         headers=other_workspace,

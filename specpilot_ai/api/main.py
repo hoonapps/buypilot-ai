@@ -99,6 +99,7 @@ from specpilot_ai.core.models import (
     PublicLaunchRoomMarketLink,
     PublicMistakeCostCalculator,
     PublicProofHub,
+    PublicReferralLaunchKit,
     PublicReferralLeaderboard,
     PublicReport,
     PublicSocialProofWall,
@@ -1567,6 +1568,17 @@ def waitlist_referral_dashboard(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> WaitlistReferralDashboard:
     return _store().waitlist_referral_dashboard_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+
+
+@app.get("/growth/referral-launch-kit", response_model=PublicReferralLaunchKit)
+def referral_launch_kit(
+    limit: int = 8,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> PublicReferralLaunchKit:
+    return _store().public_referral_launch_kit_for_workspace(
         workspace.workspace_id,
         limit=limit,
     )

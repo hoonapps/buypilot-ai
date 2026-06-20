@@ -851,6 +851,21 @@ class ReferralRewardProgress(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class PublicReferralLaunchKit(BaseModel):
+    kit_version: str = "specpilot.public_referral_launch_kit.v1"
+    workspace_id: str
+    generated_at: str
+    status: CheckStatus
+    headline: str
+    summary: str
+    dashboard: WaitlistReferralDashboard
+    leaderboard: PublicReferralLeaderboard
+    reward_tiers: list[ReferralRewardTier] = Field(default_factory=list)
+    share_examples: list[ReferralShareKitVariant] = Field(default_factory=list)
+    cta_cards: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PricingPlan(BaseModel):
     plan_id: str
     name: str
