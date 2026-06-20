@@ -69,8 +69,9 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 프라이버시/데이터 거버넌스: 공개 개인정보 정책, 워크스페이스별 데이터 인벤토리, 보존 기간, 원문 연락처 표면을 출시 게이트에 반영
 - 공개 Trust Center: 추천 공정성, 출처 검수, 개인정보 최소화, 사람 검수 기준과 구매자 권리/위험 고지를 한 응답으로 공개
 - 공개 검증 허브: Trust Center, 시장 리포트, 공유 조회, 피드백, CTA 실험, 공개 유입 표면을 proof 카드와 출시 proof strip으로 집계
+- 공개 소셜 proof wall: 마스킹 피드백, 실구매 결과, 추천 유입 리더보드를 랜딩에 바로 노출할 공개 반응 카드로 선별
 - 공개 런칭룸: 데모 갤러리, 시장 리포트, proof strip, 유입/반응/추천/수익화 CTA를 외부 공유용 출시 페이지 패키지로 집계
-- Next.js 공개 런칭 페이지: 웹사이트 `/launch`에서 런칭룸 API를 읽어 제품 스크린샷 배경, 데모 CTA, proof, 시장 리포트, 공유 문구를 외부 공유용 첫 화면으로 렌더링하고 추천 대기열과 요금제 관심을 즉시 저장
+- Next.js 공개 런칭 페이지: 웹사이트 `/launch`에서 런칭룸과 소셜 proof wall API를 읽어 제품 스크린샷 배경, 데모 CTA, 실제 반응 proof, 시장 리포트, 공유 문구를 외부 공유용 첫 화면으로 렌더링하고 추천 대기열과 요금제 관심을 즉시 저장
 - Next.js 추천 초대 페이지: 제품 API가 발급하는 `/join?ref={referral_code}` 공유 URL을 초대 코드가 미리 채워진 대기열/요금제 관심 폼으로 연결하고, 가입 후 절대 초대 링크 복사/공유 액션을 성장 이벤트로 기록
 - SQLite 기반 분석 결과 저장
 - 저장 리포트 조회와 가격 알림 구독
@@ -284,6 +285,13 @@ curl http://127.0.0.1:8000/policy/trust-center
 
 ```bash
 curl http://127.0.0.1:8000/public/proof-hub \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
+공개 소셜 proof wall:
+
+```bash
+curl http://127.0.0.1:8000/public/social-proof-wall \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
@@ -1241,6 +1249,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/policy/privacy`: 저장 데이터 범위, 마스킹, 보존 기간, 사용자 제어, 금지 데이터를 공개 정책으로 반환
 - `/policy/trust-center`: 추천 공정성, 출처 검수, 개인정보 최소화, 사람 검수 게이트, 구매자 권리, 위험 고지, 다음 액션을 공개 신뢰 대시보드로 반환
 - `/public/proof-hub`: Trust Center, 공개 시장 리포트, 공유 조회, 피드백, 출시 CTA 실험, 공개 유입 표면을 공개 proof 카드, hero proof strip, evidence kit, 반박 답변으로 집계
+- `/public/social-proof-wall`: 만족도 높은 마스킹 피드백, 구매 결과, 추천 유입 리더보드를 랜딩용 공개 proof 카드, 신뢰 고지, CTA로 선별
 - `/public/launch-room`: 데모 갤러리, 공개 시장 리포트, proof strip, 유입 허브, 런치 Pulse, 추천 대기열, 요금제 관심을 외부 공유용 런칭룸 카드로 집계
 - `/ops/data-governance`: 워크스페이스별 테이블 인벤토리, 원문 연락처 표면, 마스킹 표면, 보존 초과 액션을 집계
 - `share_token`, `shared_at`, `share_views`: 저장 리포트 공개 공유 상태

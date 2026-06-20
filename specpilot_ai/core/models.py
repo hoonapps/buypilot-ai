@@ -1033,6 +1033,35 @@ class PublicProofHub(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class PublicSocialProofItem(BaseModel):
+    proof_id: str
+    kind: str
+    title: str
+    body: str
+    metric: str
+    persona: str = ""
+    source_label: str
+    rating: int | None = None
+    status: CheckStatus = CheckStatus.ok
+    created_at: str | None = None
+
+
+class PublicSocialProofWall(BaseModel):
+    wall_version: str = "specpilot.public_social_proof_wall.v1"
+    workspace_id: str
+    generated_at: str
+    status: CheckStatus
+    proof_score: float = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    metric_cards: dict[str, int | float | str] = Field(default_factory=dict)
+    proof_strip: list[str] = Field(default_factory=list)
+    items: list[PublicSocialProofItem] = Field(default_factory=list)
+    trust_notes: list[str] = Field(default_factory=list)
+    cta_cards: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PublicLaunchRoomCard(BaseModel):
     key: str
     title: str

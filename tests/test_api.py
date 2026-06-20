@@ -1166,6 +1166,123 @@ def test_public_proof_hub_has_launch_evidence_for_empty_workspace() -> None:
     assert payload["objection_answers"]
 
 
+def test_public_social_proof_wall_masks_feedback_and_purchase_evidence() -> None:
+    workspace = {"X-SpecPilot-Key": f"pytest-social-proof-{uuid4().hex}"}
+    analysis = client.post(
+        "/analyze",
+        headers=workspace,
+        json={
+            "query": "AI 개발용 데스크톱 230만원 안에서 실패 없이 추천해줘",
+            "category": "desktop_pc",
+            "budget_krw": 2_300_000,
+            "purpose": "local LLM, QHD gaming",
+            "must_haves": ["32GB RAM", "RTX 4070급"],
+            "exclusions": ["중고"],
+        },
+    )
+    assert analysis.status_code == 200
+    analysis_payload = analysis.json()
+    trace_id = analysis_payload["graph_trace_id"]
+    top = analysis_payload["report"]["top_recommendations"][0]
+
+    saved = client.post(
+        "/reports/save",
+        headers=workspace,
+        json={"trace_id": trace_id, "title": "공개 소셜 proof 테스트"},
+    )
+    assert saved.status_code == 200
+    report_id = saved.json()["report_id"]
+
+    feedback = client.post(
+        "/feedback",
+        headers=workspace,
+        json={
+            "trace_id": trace_id,
+            "rating": 5,
+            "purchase_intent": True,
+            "selected_product_id": top["product"]["id"],
+            "reason": (
+                "proof@example.com에게도 공유했습니다. "
+                "010-1234-5678 연락처 없이 근거가 명확했습니다."
+            ),
+            "improvement_requests": ["팀 구매 비교"],
+            "contact": "proof@example.com",
+        },
+    )
+    assert feedback.status_code == 200
+
+    outcome = client.post(
+        f"/reports/{report_id}/purchase-outcomes",
+        headers=workspace,
+        json={
+            "product_id": top["product"]["id"],
+            "status": "purchased",
+            "final_paid_price_krw": top["price"]["effective_price_krw"],
+            "source_channel": "pytest",
+            "reason": "가격과 옵션을 재확인하고 구매했습니다.",
+            "satisfaction": 5,
+            "order_reference": "ORDER-123456",
+        },
+    )
+    assert outcome.status_code == 200
+
+    first_referral = client.post(
+        "/growth/waitlist-referrals",
+        headers=workspace,
+        json={
+            "email": "social-proof@example.com",
+            "persona": "developer",
+            "use_case": "친구에게 구매 리포트를 공유",
+            "contact_consent": True,
+            "source": "pytest",
+        },
+    )
+    assert first_referral.status_code == 200
+    referred = client.post(
+        "/growth/waitlist-referrals",
+        headers=workspace,
+        json={
+            "email": "friend-social-proof@example.com",
+            "persona": "creator",
+            "use_case": "추천받은 구매 검토",
+            "referred_by_code": first_referral.json()["referral_code"],
+            "contact_consent": True,
+            "source": "pytest",
+        },
+    )
+    assert referred.status_code == 200
+
+    wall = client.get("/public/social-proof-wall?limit=8", headers=workspace)
+    assert wall.status_code == 200
+    payload = wall.json()
+    assert payload["wall_version"] == "specpilot.public_social_proof_wall.v1"
+    assert payload["workspace_id"].startswith("workspace_")
+    assert payload["proof_score"] > 0
+    assert payload["status"] in {"ok", "warning", "blocker"}
+    assert payload["metric_cards"]["feedback_count"] >= 1
+    assert payload["metric_cards"]["completed_purchase_outcomes"] >= 1
+    assert payload["metric_cards"]["referred_signup_count"] >= 1
+    kinds = {item["kind"] for item in payload["items"]}
+    assert {"feedback", "purchase_outcome", "referral"} <= kinds
+    bodies = "\n".join(item["body"] for item in payload["items"])
+    assert "proof@example.com" not in bodies
+    assert "010-1234-5678" not in bodies
+    assert "[이메일 마스킹]" in bodies
+    assert payload["trust_notes"]
+    assert payload["cta_cards"]
+    assert payload["next_actions"]
+
+    empty = client.get(
+        "/public/social-proof-wall?limit=4",
+        headers={"X-SpecPilot-Key": f"pytest-empty-social-proof-{uuid4().hex}"},
+    )
+    assert empty.status_code == 200
+    empty_payload = empty.json()
+    assert empty_payload["items"]
+    assert empty_payload["items"][0]["kind"] == "trust"
+    assert empty_payload["metric_cards"]["feedback_count"] == 0
+
+
 def test_public_launch_room_packages_demo_proof_and_growth_ctas() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-launch-room-{uuid4().hex}"}
     referral = client.post(

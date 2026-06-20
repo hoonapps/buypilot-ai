@@ -91,6 +91,7 @@ from specpilot_ai.core.models import (
     PublicProofHub,
     PublicReferralLeaderboard,
     PublicReport,
+    PublicSocialProofWall,
     PurchaseDecisionBoard,
     PurchaseLink,
     PurchaseLinkGovernance,
@@ -1094,6 +1095,17 @@ def public_proof_hub(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> PublicProofHub:
     return _store().public_proof_hub_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+
+
+@app.get("/public/social-proof-wall", response_model=PublicSocialProofWall)
+def public_social_proof_wall(
+    limit: int = 8,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> PublicSocialProofWall:
+    return _store().public_social_proof_wall_for_workspace(
         workspace.workspace_id,
         limit=limit,
     )

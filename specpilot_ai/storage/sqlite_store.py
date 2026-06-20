@@ -1,4 +1,5 @@
 import json
+import re
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -96,6 +97,8 @@ from specpilot_ai.core.models import (
     PublicReferralLeaderboardEntry,
     PublicReport,
     PublicReportConversionCta,
+    PublicSocialProofItem,
+    PublicSocialProofWall,
     PurchaseDecisionBoard,
     PurchaseDecisionBoardItem,
     PurchaseLink,
@@ -3383,6 +3386,44 @@ class SpecPilotStore:
             ],
             recent_feedback=feedback[:5],
             next_actions=_public_proof_next_actions(status, proof_assets, experiments),
+        )
+
+    def public_social_proof_wall_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 8,
+    ) -> PublicSocialProofWall:
+        metrics = self.metrics_for_workspace(workspace_id)
+        feedback = self.list_feedback_for_workspace(workspace_id, limit=max(limit, 12))
+        outcomes = self.list_purchase_outcomes_for_workspace(
+            workspace_id,
+            limit=max(limit, 12),
+        )
+        referrals = self.public_referral_leaderboard_for_workspace(
+            workspace_id,
+            limit=max(3, min(limit, 8)),
+        )
+        items = _public_social_proof_items(
+            feedback=feedback,
+            outcomes=outcomes,
+            referrals=referrals,
+            limit=limit,
+        )
+        proof_score = _public_social_proof_score(metrics, items)
+        status = _score_status(proof_score, warning=45, ok=72)
+        return PublicSocialProofWall(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            status=status,
+            proof_score=proof_score,
+            headline=_public_social_proof_headline(status, proof_score, items),
+            summary=_public_social_proof_summary(metrics, len(items)),
+            metric_cards=_public_social_proof_metric_cards(metrics, referrals),
+            proof_strip=_public_social_proof_strip(metrics, referrals),
+            items=items,
+            trust_notes=_public_social_proof_trust_notes(),
+            cta_cards=_public_social_proof_cta_cards(metrics),
+            next_actions=_public_social_proof_next_actions(status, items),
         )
 
     def create_beta_lead_for_workspace(
@@ -10348,6 +10389,267 @@ def _retention_signal(
         insight=insight,
         next_action=next_action,
     )
+
+
+def _public_social_proof_items(
+    *,
+    feedback: list[FeedbackRecord],
+    outcomes: list[PurchaseOutcome],
+    referrals: PublicReferralLeaderboard,
+    limit: int,
+) -> list[PublicSocialProofItem]:
+    items: list[PublicSocialProofItem] = []
+    for record in feedback:
+        if record.rating < 4 and not record.purchase_intent:
+            continue
+        body = _public_safe_quote(
+            record.reason or "근거가 명확해 구매 결정을 검토하기 쉬웠습니다."
+        )
+        items.append(
+            PublicSocialProofItem(
+                proof_id=record.feedback_id,
+                kind="feedback",
+                title=_social_feedback_title(record),
+                body=body,
+                metric=(
+                    f"만족도 {record.rating}/5"
+                    + (" · 구매 의향 있음" if record.purchase_intent else "")
+                ),
+                persona=_feedback_persona(record.selected_product_id),
+                source_label="마스킹 사용자 피드백",
+                rating=record.rating,
+                status=CheckStatus.ok if record.rating >= 4 else CheckStatus.warning,
+                created_at=record.created_at,
+            )
+        )
+    for outcome in outcomes:
+        if outcome.status not in {
+            PurchaseOutcomeStatus.purchased,
+            PurchaseOutcomeStatus.delayed,
+        }:
+            continue
+        body = _public_safe_quote(
+            outcome.reason
+            or outcome.notes
+            or outcome.learning_signal
+            or "가격과 옵션을 다시 확인한 뒤 구매 결정을 정리했습니다."
+        )
+        items.append(
+            PublicSocialProofItem(
+                proof_id=outcome.outcome_id,
+                kind="purchase_outcome",
+                title=_social_outcome_title(outcome),
+                body=body,
+                metric=_social_outcome_metric(outcome),
+                persona=outcome.model_name or "구매 후보",
+                source_label="구매 결과 학습 신호",
+                rating=outcome.satisfaction,
+                status=CheckStatus.ok
+                if outcome.status == PurchaseOutcomeStatus.purchased
+                else CheckStatus.warning,
+                created_at=outcome.created_at,
+            )
+        )
+    for entry in referrals.entries:
+        if entry.referred_signup_count < 1:
+            continue
+        items.append(
+            PublicSocialProofItem(
+                proof_id=f"referral_{entry.referral_code}",
+                kind="referral",
+                title=f"추천 리더보드 {entry.rank}위",
+                body=(
+                    f"{entry.persona} 사용자가 초대 링크로 "
+                    f"{entry.referred_signup_count}명을 대기열에 연결했습니다."
+                ),
+                metric=f"추천 {entry.referred_signup_count}명 · {entry.reward_label}",
+                persona=entry.email_masked,
+                source_label="공개 추천 순위",
+                status=CheckStatus.ok,
+            )
+        )
+    if not items:
+        items.extend(_public_social_proof_empty_items())
+    return sorted(
+        items,
+        key=lambda item: (
+            item.status == CheckStatus.ok,
+            item.created_at or "",
+            item.proof_id,
+        ),
+        reverse=True,
+    )[: max(1, min(limit, 12))]
+
+
+def _public_safe_quote(value: str) -> str:
+    text = " ".join(value.strip().split())
+    text = re.sub(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", "[이메일 마스킹]", text)
+    text = re.sub(r"\b\d{2,3}[-. ]?\d{3,4}[-. ]?\d{4}\b", "[연락처 마스킹]", text)
+    if len(text) > 120:
+        return f"{text[:117].rstrip()}..."
+    return text
+
+
+def _social_feedback_title(record: FeedbackRecord) -> str:
+    if record.purchase_intent:
+        return "구매 의향을 만든 검토 리포트"
+    return "추천 근거를 확인한 사용자 반응"
+
+
+def _feedback_persona(product_id: str | None) -> str:
+    if not product_id:
+        return "컴퓨터·노트북 구매자"
+    return product_id.replace("_", " ").replace("-", " ")
+
+
+def _social_outcome_title(outcome: PurchaseOutcome) -> str:
+    if outcome.status == PurchaseOutcomeStatus.purchased:
+        return "실제 구매로 닫힌 추천"
+    return "구매 타이밍을 늦춰 리스크를 줄인 사례"
+
+
+def _social_outcome_metric(outcome: PurchaseOutcome) -> str:
+    if outcome.final_paid_price_krw is not None:
+        delta = outcome.price_delta_krw or 0
+        delta_label = f"{delta:+,}원".replace(",", ",")
+        return f"결제 {outcome.final_paid_price_krw:,}원 · 예상 대비 {delta_label}"
+    if outcome.satisfaction:
+        return f"만족도 {outcome.satisfaction}/5 · {outcome.status.value}"
+    return outcome.status.value
+
+
+def _public_social_proof_empty_items() -> list[PublicSocialProofItem]:
+    return [
+        PublicSocialProofItem(
+            proof_id="empty_trust_center",
+            kind="trust",
+            title="추천 기준을 먼저 공개합니다",
+            body="제휴 여부와 추천 순위를 분리하고, 가격 출처와 캐시 기준을 공개합니다.",
+            metric="Trust Center 공개",
+            persona="첫 방문자",
+            source_label="공개 신뢰 정책",
+            status=CheckStatus.warning,
+        ),
+        PublicSocialProofItem(
+            proof_id="empty_share_loop",
+            kind="trust",
+            title="공유 검토 루프를 준비했습니다",
+            body=(
+                "구매 리포트를 토큰 기반 공개 페이지로 전환해 "
+                "가족·동료와 같은 근거를 검토할 수 있습니다."
+            ),
+            metric="공개 리포트 준비",
+            persona="가족·팀 검토자",
+            source_label="제품 기본 proof",
+            status=CheckStatus.warning,
+        ),
+    ]
+
+
+def _public_social_proof_score(
+    metrics: OperationsMetrics,
+    items: list[PublicSocialProofItem],
+) -> float:
+    live_item_count = sum(1 for item in items if not item.proof_id.startswith("empty_"))
+    score = (
+        live_item_count * 12
+        + metrics.feedback_count * 6
+        + metrics.completed_purchase_outcomes * 12
+    )
+    score += metrics.purchase_intent_rate * 30
+    score += metrics.average_satisfaction * 8
+    score += min(18, metrics.public_share_views * 1.5)
+    return round(min(100.0, max(20.0, score)), 1)
+
+
+def _public_social_proof_headline(
+    status: CheckStatus,
+    score: float,
+    items: list[PublicSocialProofItem],
+) -> str:
+    live_items = [item for item in items if not item.proof_id.startswith("empty_")]
+    if status == CheckStatus.ok:
+        return f"공개 proof wall {score}점, 실제 반응을 바로 보여줄 수 있습니다."
+    if live_items:
+        return f"공개 proof wall {score}점, 초기 반응 {len(live_items)}개를 선별했습니다."
+    return "첫 반응이 쌓이기 전에도 신뢰 기준부터 공개합니다."
+
+
+def _public_social_proof_summary(metrics: OperationsMetrics, item_count: int) -> str:
+    return (
+        f"피드백 {metrics.feedback_count}건, 구매 결과 {metrics.purchase_outcomes}건, "
+        f"공개 조회 {metrics.public_share_views}회를 마스킹해 {item_count}개 proof로 정리했습니다."
+    )
+
+
+def _public_social_proof_metric_cards(
+    metrics: OperationsMetrics,
+    referrals: PublicReferralLeaderboard,
+) -> dict[str, int | float | str]:
+    return {
+        "feedback_count": metrics.feedback_count,
+        "average_satisfaction": metrics.average_satisfaction,
+        "purchase_intent_rate": f"{round(metrics.purchase_intent_rate * 100)}%",
+        "purchase_outcomes": metrics.purchase_outcomes,
+        "completed_purchase_outcomes": metrics.completed_purchase_outcomes,
+        "public_share_views": metrics.public_share_views,
+        "referral_waitlist": referrals.total_referrals,
+        "referred_signup_count": referrals.referred_signup_count,
+    }
+
+
+def _public_social_proof_strip(
+    metrics: OperationsMetrics,
+    referrals: PublicReferralLeaderboard,
+) -> list[str]:
+    strip = [
+        "연락처 원문 없이 공개 proof를 만듭니다",
+        "만족도 4점 이상 또는 구매 결과만 선별합니다",
+        "제휴 링크 여부는 proof와 추천 순위에서 분리합니다",
+    ]
+    if metrics.feedback_count:
+        strip.insert(0, f"구매자 피드백 {metrics.feedback_count}건")
+    if metrics.completed_purchase_outcomes:
+        strip.insert(0, f"실구매 결과 {metrics.completed_purchase_outcomes}건")
+    if referrals.referred_signup_count:
+        strip.insert(0, f"추천 유입 {referrals.referred_signup_count}명")
+    return list(dict.fromkeys(strip))[:6]
+
+
+def _public_social_proof_trust_notes() -> list[str]:
+    return [
+        "사용자 연락처, 주문번호, 원문 이메일은 공개하지 않습니다.",
+        "불만족·반품 신호는 내부 학습에는 쓰지만 랜딩 proof로 미화하지 않습니다.",
+        "가격과 제휴 조건은 추천 공정성 Trust Center 기준을 따릅니다.",
+    ]
+
+
+def _public_social_proof_cta_cards(metrics: OperationsMetrics) -> list[str]:
+    cards = [
+        "내 조건으로 구매 리포트 만들기",
+        "공개 베타 대기열 등록",
+        "추천 기준 Trust Center 보기",
+    ]
+    if metrics.feedback_count:
+        cards.insert(0, "내 구매 경험도 proof로 남기기")
+    if metrics.completed_purchase_outcomes:
+        cards.insert(0, "실구매 결과 기반 추천 보기")
+    return list(dict.fromkeys(cards))[:5]
+
+
+def _public_social_proof_next_actions(
+    status: CheckStatus,
+    items: list[PublicSocialProofItem],
+) -> list[str]:
+    actions = [
+        "랜딩 hero 아래에 proof wall 상위 3개를 노출하세요.",
+        "공개 리포트 하단에는 같은 proof wall과 추천 대기열 CTA를 붙이세요.",
+    ]
+    if status != CheckStatus.ok:
+        actions.insert(0, "만족도 4점 이상 피드백과 구매 결과를 먼저 3개 이상 확보하세요.")
+    if all(item.proof_id.startswith("empty_") for item in items):
+        actions.insert(0, "첫 공개 사용자에게 피드백과 구매 결과 회수 CTA를 강하게 노출하세요.")
+    return actions[:5]
 
 
 def _public_proof_asset(
