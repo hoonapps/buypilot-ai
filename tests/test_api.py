@@ -14,6 +14,7 @@ def test_launch_page_exposes_product_ui() -> None:
 
     assert response.status_code == 200
     assert "SpecPilot AI" in response.text
+    assert "온보딩 플레이북" in response.text
     assert "분석 실행" in response.text
     assert "조건 진단" in response.text
     assert "목표가 도달 테스트" in response.text
@@ -254,6 +255,34 @@ def test_public_category_market_report_is_shareable_without_workspace_key() -> N
     assert payload["report"]["picks"]
     assert payload["report"]["price_segments"]
     assert payload["report"]["risk_signals"]
+
+
+def test_public_onboarding_playbooks_guide_first_purchase_flow() -> None:
+    response = client.get("/public/onboarding/playbooks?category=laptop")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload
+    assert all(item["category"] == "laptop" for item in payload)
+    assert {item["recommended_plan_id"] for item in payload} <= {"free", "premium", "team"}
+    first = payload[0]
+    assert first["playbook_id"]
+    assert first["title"]
+    assert first["hero_query"]
+    assert first["purpose"]
+    assert first["budget_hint_krw"] > 0
+    assert first["must_haves"]
+    assert first["exclusions"]
+    assert first["readiness_slots"]
+    assert first["steps"]
+    assert first["steps"][0]["required_inputs"]
+    assert first["trust_gates"]
+    assert first["cta_anchor"] == "#analysis"
+
+    all_playbooks = client.get("/public/onboarding/playbooks")
+    assert all_playbooks.status_code == 200
+    categories = {item["category"] for item in all_playbooks.json()}
+    assert {"desktop_pc", "laptop"} <= categories
 
 
 def test_growth_funnel_tracks_product_reaction_events() -> None:

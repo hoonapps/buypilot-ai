@@ -171,6 +171,7 @@ def launch_page_html() -> str:
     <nav>
       <a href="/docs">API Docs</a>
       <a href="/product/brief">Product Brief</a>
+      <a href="/public/onboarding/playbooks">Onboarding</a>
       <a href="/graph/schema">Graph Schema</a>
     </nav>
   </header>
@@ -179,7 +180,7 @@ def launch_page_html() -> str:
       <section class="panel input-panel">
         <span class="kicker">Computer purchase agent</span>
         <h1>컴퓨터와 노트북 구매 판단을 끝까지 대신합니다</h1>
-        <p>예산, 목적, 해상도, 필수 조건을 넣으면 후보 5개를 비교하고 TOP 3, 제외 후보, 호환성, 가격 알림, 구매 전 체크리스트를 생성합니다.</p>
+        <p>예산, 목적, 해상도, 필수 조건을 넣으면 후보 5개를 비교하고 TOP 3, 제외 후보, 호환성, 가격 알림, 구매 전 체크리스트를 생성합니다. 공개 온보딩 플레이북은 처음 온 구매자가 시작 질문과 검수 게이트를 바로 고르게 합니다.</p>
         <form id="analysis-form">
           <label>구매 요청
             <textarea id="query">영상 편집과 게임용 데스크톱 200만원 안에서 맞춰줘. QHD 144Hz 모니터를 쓰고 업그레이드 여지도 있었으면 좋겠어.</textarea>

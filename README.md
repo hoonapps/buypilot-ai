@@ -49,6 +49,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 학습 인사이트: 구매 결과, 결제 전 검수 차단, 사용자 피드백을 제품별 전환/반품/가격 신호로 묶어 개선 액션 추천
 - 월간 카테고리 리포트: 데스크톱 PC/노트북 후보를 가격대, 추천 역할, 리스크, 워크스페이스 구매 신호로 묶어 공개 콘텐츠와 수익화 검증에 사용
 - 공개 카테고리 리포트: 월간 데스크톱 PC/노트북 리포트를 SEO 제목, 공유 문구, CTA와 함께 API 키 없이 공개 발행
+- 구매 온보딩 플레이북: 데스크톱/노트북/팀 구매 상황별 시작 질문, 필수 입력 슬롯, 검수 게이트, 분석 CTA를 공개 API로 제공
 - 성장 퍼널: 분석 결과 조회, 추천 카드 클릭, 대안 시나리오 클릭, 공유/알림/구독 CTA를 이벤트로 저장하고 출시 게이트에 반응 지표로 반영
 - 출처 신뢰도, 캐시 만료 기준, 제휴 고지 정책
 - Agent trace 조회와 SQLite span 저장
@@ -144,6 +145,14 @@ export SPECPILOT_KEY=specpilot-demo-key
 ```bash
 curl http://127.0.0.1:8000/me \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
+### 구매 온보딩 플레이북
+
+처음 온 사용자는 공개 플레이북으로 자기 상황에 맞는 시작 질문, 예산 힌트, 필수 입력 슬롯, 결제 전 검수 게이트를 먼저 확인할 수 있습니다.
+
+```bash
+curl "http://127.0.0.1:8000/public/onboarding/playbooks?category=laptop"
 ```
 
 ### 분석 실행
@@ -1033,6 +1042,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `share_token`, `shared_at`, `share_views`: 저장 리포트 공개 공유 상태
 - `/reports/{report_id}/purchase-links`, `/reports/{report_id}/purchase-link-governance`, `/buy/{link_id}`: 후보별 제휴/비제휴 구매 링크, 제휴 고지, 비제휴 대안 정책 경고, 공개 클릭 redirect와 클릭 지표
 - `/public/market/category-reports/{category}`: 데스크톱 PC/노트북 월간 카테고리 리포트를 SEO 제목, canonical path, 공유 문구, CTA 카드와 함께 공개 조회
+- `/public/onboarding/playbooks`: 데스크톱 PC, 휴대형 노트북, 팀 구매자용 시작 질문, 예산 힌트, 필수 입력 슬롯, 신뢰 검수 게이트, 분석 CTA를 공개 조회
 - `/reports/completion-templates`, `/reports/completion-recipient-groups`, `/reports/completion-preview`, `/reports/completion-batches`, `/reports/completion-engagement`, `/reports/completion-provider-events`, `/reports/completion-deliveries/provider-webhooks`, `/t/o/{tracking_token}.png`, `/t/c/{tracking_token}`: 완료 리포트 템플릿, 수신자 그룹, unsubscribe 제외, 발송 전 렌더링 미리보기, batch와 개별 delivery 성공/실패/재시도/열람/클릭/반송/신고/수신 제외 상태, provider 삽입용 공개 추적 픽셀/클릭 리다이렉트
 - `purchase_outcomes`, `completed_purchase_outcomes`, `purchase_conversion_rate`, `average_final_price_delta_krw`, `purchase_outcome_value_krw`: 실제 구매 결과와 최종 결제 금액 차이를 보는 운영 지표
 - `/ops/learning-insights`: 실제 구매 결과, 결제 전 검수 차단, 만족도 피드백을 제품별 전환율, 반품률, 가격 차이, 개선 액션으로 집계

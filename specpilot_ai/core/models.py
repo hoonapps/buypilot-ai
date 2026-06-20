@@ -822,6 +822,32 @@ class PublicCategoryMarketReport(BaseModel):
     report: CategoryMarketReport
 
 
+class PurchaseOnboardingStep(BaseModel):
+    title: str
+    description: str
+    required_inputs: list[str] = Field(default_factory=list)
+    output: str
+
+
+class PurchaseOnboardingPlaybook(BaseModel):
+    playbook_id: str
+    category: Category
+    persona: str
+    title: str
+    description: str
+    hero_query: str
+    purpose: str
+    budget_hint_krw: int
+    must_haves: list[str] = Field(default_factory=list)
+    exclusions: list[str] = Field(default_factory=list)
+    readiness_slots: list[str] = Field(default_factory=list)
+    steps: list[PurchaseOnboardingStep] = Field(default_factory=list)
+    trust_gates: list[str] = Field(default_factory=list)
+    recommended_plan_id: str = "free"
+    cta_label: str = "내 조건으로 분석 시작"
+    cta_anchor: str = "#analysis"
+
+
 class GrowthEventRequest(BaseModel):
     event_type: GrowthEventType
     trace_id: str | None = None
