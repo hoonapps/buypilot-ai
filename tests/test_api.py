@@ -656,6 +656,31 @@ def test_public_checkout_nudge_kit_turns_cart_check_into_followup_plan() -> None
     assert "노트북" in ready_payload["analysis_prefill"]
 
 
+def test_public_buyer_trust_kit_summarizes_trust_center_for_launch() -> None:
+    response = client.get("/public/buyer-trust-kit?limit=4")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kit_version"] == "specpilot.public_buyer_trust_kit.v1"
+    assert payload["status"] in {"ok", "warning", "blocker"}
+    assert "신뢰 기준" in payload["headline"]
+    assert len(payload["trust_badges"]) == 4
+    badge_ids = {badge["badge_id"] for badge in payload["trust_badges"]}
+    assert {
+        "recommendation_fairness",
+        "source_verification",
+        "privacy",
+        "human_review",
+    } <= badge_ids
+    assert all(badge["evidence"] for badge in payload["trust_badges"])
+    assert len(payload["buyer_rights"]) >= 3
+    assert len(payload["risk_disclosures"]) >= 3
+    assert "최저가" in payload["plain_language_guarantee"]
+    assert "제휴" in " ".join(payload["proof_strip"])
+    assert payload["primary_cta_path"] == "#analysis"
+    assert payload["next_actions"]
+
+
 def test_public_spec_rescue_kit_suggests_safer_alternatives_after_hold() -> None:
     response = client.post(
         "/public/spec-rescue-kit",

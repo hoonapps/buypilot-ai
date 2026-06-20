@@ -98,6 +98,7 @@ from specpilot_ai.core.models import (
     PublicBuyerChallengeKit,
     PublicBuyerChecklist,
     PublicBuyerPersonaQuiz,
+    PublicBuyerTrustKit,
     PublicCandidateCompare,
     PublicCategoryMarketReport,
     PublicCheckoutNudgeKit,
@@ -183,6 +184,7 @@ from specpilot_ai.services.buyer_persona_quiz import (
     build_public_buyer_persona_quiz,
     score_buyer_persona_quiz,
 )
+from specpilot_ai.services.buyer_trust import build_public_buyer_trust_kit
 from specpilot_ai.services.candidate_compare import build_public_candidate_compare
 from specpilot_ai.services.deal_timing import build_public_deal_timing_window
 from specpilot_ai.services.demo_gallery import build_demo_scenario_gallery
@@ -325,6 +327,11 @@ def privacy_policy() -> PrivacyPolicySummary:
 @app.get("/policy/trust-center", response_model=TrustCenterDashboard)
 def trust_center() -> TrustCenterDashboard:
     return build_trust_center()
+
+
+@app.get("/public/buyer-trust-kit", response_model=PublicBuyerTrustKit)
+def public_buyer_trust_kit(limit: int = 4) -> PublicBuyerTrustKit:
+    return build_public_buyer_trust_kit(limit=limit)
 
 
 @app.get("/demo/scenarios", response_model=DemoScenarioGallery)

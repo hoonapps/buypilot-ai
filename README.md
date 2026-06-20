@@ -52,6 +52,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 공개 카테고리 리포트: 월간 데스크톱 PC/노트북 리포트를 SEO 제목, 공유 문구, CTA와 함께 API 키 없이 공개 발행
 - 구매 온보딩 플레이북: 데스크톱/노트북/팀 구매 상황별 시작 질문, 필수 입력 슬롯, 검수 게이트, 분석 CTA를 공개 API로 제공
 - 공개 구매 실패 방지 체크리스트: 카테고리, 예산, 구매자 상황별 필수 확인 항목, 위험 신호, 결제 전 증거 캡처, 분석 prefill을 공개 lead magnet으로 제공
+- 공개 구매자 신뢰 키트: Trust Center를 첫 방문자용 신뢰 배지, 구매자 권리, 위험 고지, 쉬운 보증 문구로 압축해 런칭 페이지에서 바로 노출
 - 공개 구매 성향 진단 퀴즈: 30초 질문으로 구매 persona, 추천 카테고리/예산, 분석 prefill, 체크리스트 경로, 공유 문구를 제공
 - 공개 구매 실패 비용 계산기: 예산, 수량, 긴급도, 위험 유형을 받아 잘못 산 컴퓨터의 숨은 손실, 방지 플랜, 분석 prefill을 금액으로 제시
 - 공개 구매 챌린지 공유 키트: 성향 진단, 실패 비용 계산, 체크리스트를 채널별 공유 문구와 3단계 챌린지로 묶어 리포트 생성 전 확산 루프를 제공
@@ -1495,6 +1496,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/public/market/category-reports/{category}`: 데스크톱 PC/노트북 월간 카테고리 리포트를 SEO 제목, canonical path, 공유 문구, CTA 카드와 함께 공개 조회
 - `/public/onboarding/playbooks`: 데스크톱 PC, 휴대형 노트북, 팀 구매자용 시작 질문, 예산 힌트, 필수 입력 슬롯, 신뢰 검수 게이트, 분석 CTA를 공개 조회
 - `/public/buyer-checklist`: 카테고리/예산/구매자 상황별 구매 실패 방지 체크리스트, 결제 전 증거, 위험 신호, 분석 prefill을 공개 조회
+- `/public/buyer-trust-kit`: Trust Center를 구매자용 신뢰 배지, 구매자 권리, 위험 고지, 쉬운 보증 문구, 분석 CTA로 압축해 공개 조회
 - `/public/buyer-persona-quiz`, `/public/buyer-persona-quiz/result`: 공개 30초 구매 성향 진단 질문과 persona별 추천 카테고리/예산, 분석 prefill, 체크리스트 경로, 공유 문구 조회
 - `/public/mistake-cost-calculator`, `/public/mistake-cost-calculator/result`: 공개 구매 실패 비용 계산 질문과 예산/수량/긴급도별 예상 손실, 방지 플랜, 분석 prefill, 공유 문구 조회
 - `/public/buyer-challenge-kit`: 구매 성향, 실패 비용, 체크리스트를 3단계 공유 챌린지와 카카오톡/커뮤니티/팀 채널별 복사 문구로 패키징

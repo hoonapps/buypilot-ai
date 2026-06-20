@@ -403,6 +403,31 @@ class TrustCenterDashboard(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class BuyerTrustBadge(BaseModel):
+    badge_id: str
+    label: str
+    status: CheckStatus
+    summary: str
+    evidence: list[str] = Field(default_factory=list)
+    buyer_impact: str
+
+
+class PublicBuyerTrustKit(BaseModel):
+    kit_version: str = "specpilot.public_buyer_trust_kit.v1"
+    generated_at: str
+    status: CheckStatus
+    headline: str
+    summary: str
+    trust_badges: list[BuyerTrustBadge] = Field(default_factory=list)
+    buyer_rights: list[str] = Field(default_factory=list)
+    risk_disclosures: list[str] = Field(default_factory=list)
+    plain_language_guarantee: str
+    proof_strip: list[str] = Field(default_factory=list)
+    primary_cta_label: str = "신뢰 기준 보고 분석 시작"
+    primary_cta_path: str = "#analysis"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PurchaseDecision(BaseModel):
     verdict: str
     label: str
