@@ -417,6 +417,57 @@ def test_public_buyer_persona_quiz_recommends_path_and_prefill() -> None:
     assert default_result.json()["persona_id"] == "creator_gamer"
 
 
+def test_public_mistake_cost_calculator_quantifies_launch_risk() -> None:
+    calculator = client.get("/public/mistake-cost-calculator")
+
+    assert calculator.status_code == 200
+    calculator_payload = calculator.json()
+    assert (
+        calculator_payload["calculator_version"]
+        == "specpilot.public_mistake_cost_calculator.v1"
+    )
+    assert calculator_payload["headline"]
+    assert calculator_payload["summary"]
+    assert calculator_payload["default_category"] == "desktop_pc"
+    assert calculator_payload["result_endpoint"] == "/public/mistake-cost-calculator/result"
+    assert len(calculator_payload["risk_options"]) >= 5
+    assert calculator_payload["next_actions"]
+
+    result = client.post(
+        "/public/mistake-cost-calculator/result",
+        json={
+            "category": "laptop",
+            "budget_krw": 1_500_000,
+            "quantity": 12,
+            "urgency": "team_rollout",
+            "selected_risks": [
+                "performance_mismatch",
+                "approval_rework",
+                "return_delay",
+            ],
+            "source": "pytest",
+        },
+    )
+
+    assert result.status_code == 200
+    payload = result.json()
+    assert payload["result_version"] == "specpilot.mistake_cost_calculator_result.v1"
+    assert payload["category"] == "laptop"
+    assert payload["budget_krw"] == 1_500_000
+    assert payload["quantity"] == 12
+    assert payload["urgency"] == "team_rollout"
+    assert payload["estimated_mistake_cost_krw"] > 0
+    assert payload["protected_value_krw"] == 18_000_000
+    assert payload["risk_score"] >= 40
+    assert payload["risk_level"] in {"warning", "blocker"}
+    assert len(payload["line_items"]) == 3
+    assert all(item["prevention"] for item in payload["line_items"])
+    assert "팀에 지급할 노트북" in payload["analysis_prefill"]
+    assert payload["primary_cta_path"] == "#analysis"
+    assert "SpecPilot AI 구매 실패 비용 계산 결과" in payload["share_copy"]
+    assert payload["next_actions"]
+
+
 def test_growth_funnel_tracks_product_reaction_events() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-growth-{uuid4().hex}"}
     other_workspace = {"X-SpecPilot-Key": f"pytest-growth-other-{uuid4().hex}"}

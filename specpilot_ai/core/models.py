@@ -1239,6 +1239,63 @@ class BuyerPersonaQuizResult(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class MistakeCostRiskOption(BaseModel):
+    risk_id: str
+    label: str
+    default_weight: float = Field(ge=0, le=1)
+    description: str
+
+
+class PublicMistakeCostCalculator(BaseModel):
+    calculator_version: str = "specpilot.public_mistake_cost_calculator.v1"
+    generated_at: str
+    headline: str
+    summary: str
+    default_category: Category
+    default_budget_krw: int
+    default_quantity: int = 1
+    risk_options: list[MistakeCostRiskOption] = Field(default_factory=list)
+    result_endpoint: str = "/public/mistake-cost-calculator/result"
+    next_actions: list[str] = Field(default_factory=list)
+
+
+class MistakeCostCalculatorRequest(BaseModel):
+    category: Category = Category.desktop_pc
+    budget_krw: int = Field(default=2_200_000, ge=300_000, le=30_000_000)
+    quantity: int = Field(default=1, ge=1, le=200)
+    urgency: str = "normal"
+    selected_risks: list[str] = Field(default_factory=list)
+    source: str = "web"
+
+
+class MistakeCostLineItem(BaseModel):
+    item_id: str
+    label: str
+    estimated_cost_krw: int
+    prevention: str
+
+
+class MistakeCostCalculatorResult(BaseModel):
+    result_version: str = "specpilot.mistake_cost_calculator_result.v1"
+    generated_at: str
+    category: Category
+    budget_krw: int
+    quantity: int
+    urgency: str
+    estimated_mistake_cost_krw: int
+    protected_value_krw: int
+    risk_score: float = Field(ge=0, le=100)
+    risk_level: str
+    headline: str
+    summary: str
+    line_items: list[MistakeCostLineItem] = Field(default_factory=list)
+    analysis_prefill: str
+    primary_cta_label: str = "이 리스크로 분석 시작"
+    primary_cta_path: str = "#analysis"
+    share_copy: str
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class StartConciergeMilestone(BaseModel):
     step: str
     title: str

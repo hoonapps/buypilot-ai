@@ -72,6 +72,8 @@ from specpilot_ai.core.models import (
     LaunchExperimentRequest,
     LaunchGateDashboard,
     LaunchPulseDashboard,
+    MistakeCostCalculatorRequest,
+    MistakeCostCalculatorResult,
     ObservabilityDispatchRequest,
     ObservabilityDispatchResponse,
     ObservabilityExportRecord,
@@ -92,6 +94,7 @@ from specpilot_ai.core.models import (
     PublicLaunchRoom,
     PublicLaunchRoomCard,
     PublicLaunchRoomMarketLink,
+    PublicMistakeCostCalculator,
     PublicProofHub,
     PublicReferralLeaderboard,
     PublicReport,
@@ -163,6 +166,10 @@ from specpilot_ai.services.launch_campaign import (
     build_launch_distribution_plan,
 )
 from specpilot_ai.services.market import build_category_market_report
+from specpilot_ai.services.mistake_cost import (
+    build_public_mistake_cost_calculator,
+    estimate_mistake_cost,
+)
 from specpilot_ai.services.onboarding import purchase_onboarding_playbooks
 from specpilot_ai.services.start_concierge import build_start_concierge
 from specpilot_ai.services.trust import build_privacy_policy, build_trust_center, build_trust_policy
@@ -1122,6 +1129,21 @@ def public_buyer_persona_quiz_result(
     request: BuyerPersonaQuizRequest,
 ) -> BuyerPersonaQuizResult:
     return score_buyer_persona_quiz(request)
+
+
+@app.get("/public/mistake-cost-calculator", response_model=PublicMistakeCostCalculator)
+def public_mistake_cost_calculator() -> PublicMistakeCostCalculator:
+    return build_public_mistake_cost_calculator()
+
+
+@app.post(
+    "/public/mistake-cost-calculator/result",
+    response_model=MistakeCostCalculatorResult,
+)
+def public_mistake_cost_calculator_result(
+    request: MistakeCostCalculatorRequest,
+) -> MistakeCostCalculatorResult:
+    return estimate_mistake_cost(request)
 
 
 @app.get("/public/proof-hub", response_model=PublicProofHub)
