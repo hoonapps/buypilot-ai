@@ -1076,6 +1076,37 @@ class PublicLaunchObjectionKit(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class PublicLaunchShareVariant(BaseModel):
+    channel: str
+    label: str
+    audience: str
+    share_url: str
+    headline: str
+    body: str
+    cta_label: str
+    copy_text: str
+    tracking_event: str
+    proof_points: list[str] = Field(default_factory=list)
+    disclosure: str
+
+
+class PublicLaunchSharePack(BaseModel):
+    pack_version: str = "specpilot.public_launch_share_pack.v1"
+    workspace_id: str
+    generated_at: str
+    status: CheckStatus
+    share_score: float = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    primary_url: str
+    primary_copy: str
+    variants: list[PublicLaunchShareVariant] = Field(default_factory=list)
+    proof_strip: list[str] = Field(default_factory=list)
+    trust_disclosures: list[str] = Field(default_factory=list)
+    measurement_events: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PublicProofEvidence(BaseModel):
     title: str
     status: CheckStatus

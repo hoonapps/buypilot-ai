@@ -98,6 +98,7 @@ from specpilot_ai.core.models import (
     PublicLaunchRoom,
     PublicLaunchRoomCard,
     PublicLaunchRoomMarketLink,
+    PublicLaunchSharePack,
     PublicMistakeCostCalculator,
     PublicProofHub,
     PublicReferralLaunchKit,
@@ -1248,6 +1249,17 @@ def public_launch_objection_kit(
     )
 
 
+@app.get("/public/launch-share-pack", response_model=PublicLaunchSharePack)
+def public_launch_share_pack(
+    limit: int = 8,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> PublicLaunchSharePack:
+    return _store().public_launch_share_pack_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+
+
 @app.get("/public/launch-room", response_model=PublicLaunchRoom)
 def public_launch_room(
     limit: int = 8,
@@ -1262,6 +1274,10 @@ def public_launch_room(
         limit=limit,
     )
     objection = store.public_launch_objection_kit_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+    share_pack = store.public_launch_share_pack_for_workspace(
         workspace.workspace_id,
         limit=limit,
     )
@@ -1346,6 +1362,15 @@ def public_launch_room(
                 body=objection.summary,
                 cta_label="반박 FAQ 보기",
                 cta_path="/#launch-objections",
+            ),
+            PublicLaunchRoomCard(
+                key="share_pack",
+                title="공유 확산팩",
+                status=share_pack.status,
+                metric=f"{round(share_pack.share_score)}점",
+                body=share_pack.summary,
+                cta_label="공유 문구 보기",
+                cta_path="/#launch-share-pack",
             ),
             PublicLaunchRoomCard(
                 key="launch_pulse",

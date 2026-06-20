@@ -90,6 +90,8 @@ from specpilot_ai.core.models import (
     PublicConversionBoard,
     PublicConversionStage,
     PublicLaunchObjectionKit,
+    PublicLaunchSharePack,
+    PublicLaunchShareVariant,
     PublicObjectionAnswer,
     PublicObjectionCard,
     PublicObjectionComparison,
@@ -3479,6 +3481,78 @@ class SpecPilotStore:
             channel_replies=_public_objection_channel_replies(metrics),
             next_actions=_public_objection_next_actions(status, proof, social),
         )
+
+    def public_launch_share_pack_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 8,
+    ) -> PublicLaunchSharePack:
+        metrics = self.metrics_for_workspace(workspace_id)
+        proof = self.public_proof_hub_for_workspace(workspace_id, limit=limit)
+        objections = self.public_launch_objection_kit_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        referrals = self.waitlist_referral_dashboard_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        pulse = self.launch_pulse_for_workspace(workspace_id, limit=limit)
+        primary_url = self._public_path_url("/launch")
+        share_score = round(
+            proof.proof_score * 0.24
+            + objections.objection_score * 0.22
+            + pulse.pulse_score * 0.18
+            + min(100.0, metrics.public_share_views * 5 + metrics.share_cta_clicks * 15)
+            * 0.18
+            + min(100.0, referrals.total_referrals * 12 + referrals.referred_signup_count * 20)
+            * 0.18,
+            1,
+        )
+        status = _score_status(share_score, warning=55, ok=76)
+        variants = _public_launch_share_variants(
+            primary_url=primary_url,
+            metrics=metrics,
+            proof=proof,
+            objections=objections,
+        )
+        return PublicLaunchSharePack(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            status=status,
+            share_score=share_score,
+            headline=_public_share_pack_headline(status, share_score),
+            summary=_public_share_pack_summary(metrics, referrals, pulse),
+            primary_url=primary_url,
+            primary_copy=variants[0].copy_text if variants else "",
+            variants=variants,
+            proof_strip=list(
+                dict.fromkeys(
+                    [
+                        *proof.hero_proof_strip[:3],
+                        f"공개 조회 {metrics.public_share_views}회",
+                        f"추천 대기열 {referrals.total_referrals}명",
+                    ],
+                ),
+            )[:6],
+            trust_disclosures=[
+                "제휴 여부와 추천 순위를 분리합니다.",
+                "연락처와 주문번호는 공개 proof에 노출하지 않습니다.",
+                "가격은 수집 시각과 캐시 기준을 함께 확인해야 합니다.",
+            ],
+            measurement_events=[
+                "launch_share_pack_view",
+                "launch_share_copy_click",
+                "launch_share_referral_click",
+                "launch_share_analysis_start",
+            ],
+            next_actions=_public_share_pack_next_actions(status, referrals, pulse),
+        )
+
+    def _public_path_url(self, path: str) -> str:
+        if not self.public_site_url:
+            return path
+        return f"{self.public_site_url}{path}"
 
     def create_beta_lead_for_workspace(
         self,
@@ -11599,6 +11673,159 @@ def _public_objection_next_actions(
         actions.append("공개 리포트 조회, 피드백, 결제 전 검수 표본을 더 확보하세요.")
     actions.extend(proof.next_actions[:2])
     actions.extend(social.next_actions[:1])
+    return list(dict.fromkeys(actions))[:6]
+
+
+def _public_share_pack_headline(status: CheckStatus, score: float) -> str:
+    if status == CheckStatus.ok:
+        return f"공유 확산팩 {score}점, 바로 커뮤니티와 지인에게 보낼 수 있습니다."
+    if status == CheckStatus.warning:
+        return f"공유 확산팩 {score}점, 문구는 준비됐고 첫 공유 표본을 더 쌓아야 합니다."
+    return f"공유 확산팩 {score}점, 첫 공유 이유와 증거를 더 선명하게 만들어야 합니다."
+
+
+def _public_share_pack_summary(
+    metrics: OperationsMetrics,
+    referrals: WaitlistReferralDashboard,
+    pulse: LaunchPulseDashboard,
+) -> str:
+    return (
+        "런칭룸, 반박 FAQ, 공개 proof, 추천 대기열을 묶어 카카오톡/커뮤니티/"
+        f"팀 공유 문구로 정리했습니다. 공개 조회 {metrics.public_share_views}회, "
+        f"공유 CTA {metrics.share_cta_clicks}회, 추천 대기열 {referrals.total_referrals}명, "
+        f"Pulse {round(pulse.pulse_score)}점을 반영합니다."
+    )
+
+
+def _public_launch_share_variants(
+    *,
+    primary_url: str,
+    metrics: OperationsMetrics,
+    proof: PublicProofHub,
+    objections: PublicLaunchObjectionKit,
+) -> list[PublicLaunchShareVariant]:
+    proof_line = proof.hero_proof_strip[0] if proof.hero_proof_strip else "추천 기준 공개"
+    objection_line = (
+        objections.objections[0].short_answer
+        if objections.objections
+        else "최저가 비교가 아니라 구매 실패 방지 흐름입니다."
+    )
+    base_disclosure = "제휴 여부와 추천 점수는 분리하며 가격은 결제 전 다시 확인해야 합니다."
+    variants = [
+        {
+            "channel": "kakao",
+            "label": "카카오톡/지인 공유",
+            "audience": "컴퓨터나 노트북 구매를 앞둔 지인",
+            "headline": "컴퓨터 살 때 최저가만 보지 말고 리포트로 검토해봐",
+            "body": (
+                "예산과 용도만 넣으면 TOP 3, 제외 후보, 가격 타이밍, 결제 전 "
+                "체크리스트까지 한 번에 정리합니다."
+            ),
+            "cta_label": "공개 런칭룸 보기",
+            "tracking_event": "launch_share_kakao",
+            "proof_points": [proof_line, "TOP 3와 제외 후보를 함께 표시", "공개 리포트 공유 검토"],
+        },
+        {
+            "channel": "community",
+            "label": "커뮤니티 공유",
+            "audience": "견적 조언을 구하는 커뮤니티 사용자",
+            "headline": "PC/노트북 구매 실패를 줄이는 AI 구매 리포트 공개 베타",
+            "body": (
+                "최저가 링크보다 목적 적합도, 호환성, 리뷰 리스크, 가격 타이밍, "
+                "결제 전 검수에 초점을 둔 공개 런칭룸입니다."
+            ),
+            "cta_label": "내 조건으로 분석",
+            "tracking_event": "launch_share_community",
+            "proof_points": [
+                objection_line,
+                f"공개 조회 {metrics.public_share_views}회",
+                "추천 공정성 Trust Center",
+            ],
+        },
+        {
+            "channel": "team",
+            "label": "팀/회사 공유",
+            "audience": "반복 장비 구매를 맡은 팀 리더와 운영 담당자",
+            "headline": "팀 장비 구매 조건을 승인 가능한 리포트로 정리합니다",
+            "body": (
+                "팀원별 용도, 예산, A/S, 납기, 승인자 브리프를 같은 기준으로 묶고 "
+                "결제 전 검수와 구매 결과 회수까지 연결합니다."
+            ),
+            "cta_label": "Team 구매 표준안 보기",
+            "tracking_event": "launch_share_team",
+            "proof_points": ["Team 구매 표준안", "구매 결과 학습 루프", "공유 검토 브리프"],
+        },
+        {
+            "channel": "email",
+            "label": "이메일/노션 공유",
+            "audience": "구매 결정을 함께 검토할 가족, 동료, 승인자",
+            "headline": "SpecPilot AI 구매 리포트 공개 런칭룸",
+            "body": (
+                "데스크톱 PC와 노트북 구매 조건을 리포트로 만들고, 공유 브리프와 "
+                "검토 질문으로 같은 근거를 함께 확인할 수 있습니다."
+            ),
+            "cta_label": "공개 리포트 흐름 보기",
+            "tracking_event": "launch_share_email",
+            "proof_points": ["공개 리포트 토큰 격리", "검토 질문 제공", "가격 최신성 고지"],
+        },
+    ]
+    share_variants: list[PublicLaunchShareVariant] = []
+    for item in variants:
+        share_url = _share_url_for_channel(primary_url, item["channel"])
+        copy_text = _launch_share_copy(
+            headline=item["headline"],
+            body=item["body"],
+            share_url=share_url,
+            disclosure=base_disclosure,
+        )
+        share_variants.append(
+            PublicLaunchShareVariant(
+                channel=item["channel"],
+                label=item["label"],
+                audience=item["audience"],
+                share_url=share_url,
+                headline=item["headline"],
+                body=item["body"],
+                cta_label=item["cta_label"],
+                copy_text=copy_text,
+                tracking_event=item["tracking_event"],
+                proof_points=item["proof_points"],
+                disclosure=base_disclosure,
+            ),
+        )
+    return share_variants
+
+
+def _share_url_for_channel(primary_url: str, channel: str) -> str:
+    separator = "&" if "?" in primary_url else "?"
+    return f"{primary_url}{separator}source=share-pack&utm_channel={channel}"
+
+
+def _launch_share_copy(
+    *,
+    headline: str,
+    body: str,
+    share_url: str,
+    disclosure: str,
+) -> str:
+    return f"{headline}\n\n{body}\n\n{share_url}\n\n{disclosure}"
+
+
+def _public_share_pack_next_actions(
+    status: CheckStatus,
+    referrals: WaitlistReferralDashboard,
+    pulse: LaunchPulseDashboard,
+) -> list[str]:
+    actions = [
+        "런칭 페이지 상단과 공유 문구 섹션 사이에 방문자용 공유 확산팩을 노출하세요.",
+        "공유 버튼 클릭을 launch_share_copy_click 이벤트로 성장 퍼널에 남기세요.",
+    ]
+    if referrals.total_referrals == 0:
+        actions.append("추천 대기열 가입 후 개인 추천 링크를 공유 문구에 자동 삽입하세요.")
+    if pulse.status != CheckStatus.ok:
+        actions.append("Pulse 점수가 낮은 채널에는 반박 FAQ와 proof strip을 함께 붙이세요.")
+    if status == CheckStatus.ok:
+        actions.append("반응이 좋은 채널 문구를 출시 배포 플랜의 D+1 슬롯으로 승격하세요.")
     return list(dict.fromkeys(actions))[:6]
 
 

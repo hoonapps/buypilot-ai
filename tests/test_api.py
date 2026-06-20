@@ -1712,6 +1712,37 @@ def test_public_launch_objection_kit_answers_first_visitor_doubts() -> None:
     assert payload["next_actions"]
 
 
+def test_public_launch_share_pack_packages_visitor_share_copy() -> None:
+    workspace = {"X-SpecPilot-Key": f"pytest-share-pack-{uuid4().hex}"}
+    event = client.post(
+        "/growth/events",
+        headers=workspace,
+        json={
+            "event_type": "share_cta",
+            "source": "pytest-share-pack",
+            "surface": "launch-share-pack",
+            "label": "공유 확산팩 복사",
+        },
+    )
+    assert event.status_code == 200
+
+    response = client.get("/public/launch-share-pack?limit=6", headers=workspace)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["pack_version"] == "specpilot.public_launch_share_pack.v1"
+    assert payload["workspace_id"].startswith("workspace_")
+    assert payload["status"] in {"ok", "warning", "blocker"}
+    assert payload["share_score"] > 0
+    assert payload["primary_url"].startswith("/launch")
+    channels = {variant["channel"] for variant in payload["variants"]}
+    assert {"kakao", "community", "team", "email"} <= channels
+    assert all("source=share-pack" in variant["share_url"] for variant in payload["variants"])
+    assert all(variant["copy_text"] for variant in payload["variants"])
+    assert "launch_share_copy_click" in payload["measurement_events"]
+    assert payload["trust_disclosures"]
+    assert payload["next_actions"]
+
+
 def test_public_launch_room_packages_demo_proof_and_growth_ctas() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-launch-room-{uuid4().hex}"}
     referral = client.post(
@@ -1756,6 +1787,7 @@ def test_public_launch_room_packages_demo_proof_and_growth_ctas() -> None:
         "proof_hub",
         "acquisition_hub",
         "objection_kit",
+        "share_pack",
         "launch_pulse",
         "referral_waitlist",
         "pricing_interest",
