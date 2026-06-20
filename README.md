@@ -53,6 +53,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 성장 퍼널: 분석 결과 조회, 추천 카드 클릭, 대안 시나리오 클릭, 공유/알림/구독 CTA를 이벤트로 저장하고 출시 게이트에 반응 지표로 반영
 - 추천 대기열: 가입자별 추천 코드와 공유 URL을 발급하고 추천 유입, 우선순위 점수, 리더보드로 공개 전 확산 루프를 검증
 - 출시 캠페인 키트: 커뮤니티/검색/추천 채널별 공개 베타 카피, CTA 실험, 출시 체크리스트, 위험 고지, 측정 계획 생성
+- 공개 데모 갤러리: 데스크톱/크리에이터 노트북/팀 구매 시나리오를 한 번에 폼 적용 가능한 출시용 preset으로 제공
 - 출처 신뢰도, 캐시 만료 기준, 제휴 고지 정책
 - Agent trace 조회와 SQLite span 저장
 - Observability export outbox: trace span과 품질 감사 payload를 OpenTelemetry/LangSmith 연동 전 큐로 저장하고 dispatch/retry 상태 추적
@@ -157,6 +158,14 @@ curl http://127.0.0.1:8000/me \
 
 ```bash
 curl "http://127.0.0.1:8000/public/onboarding/playbooks?category=laptop"
+```
+
+### 공개 데모 갤러리
+
+첫 방문자가 빈 입력 폼에서 막히지 않도록 데스크톱, 휴대형 크리에이터 노트북, 팀 구매 시나리오를 바로 적용 가능한 분석 요청과 기대 결과, 공유 포인트로 제공합니다.
+
+```bash
+curl http://127.0.0.1:8000/demo/scenarios
 ```
 
 ### 분석 실행
@@ -1047,6 +1056,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/intake/diagnose.readiness_score`: 분석 준비도 점수
 - `/intake/diagnose.clarifying_questions`: 분석 전 되물어볼 핵심 질문
 - `/intake/diagnose.normalized_request`: 추천 조건을 보강한 분석 요청
+- `/demo/scenarios`: 첫 방문자가 10초 안에 분석 폼을 채우는 공개 데모 갤러리, preset 요청, 기대 결과, 공유 포인트
 - `report.top_recommendations`: 최종 추천 TOP 3
 - `report.excluded_products`: 제외 후보 2개와 이유
 - `report.comparison_table`: 추천/제외 후보 5개 비교표

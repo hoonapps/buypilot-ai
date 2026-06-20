@@ -158,6 +158,28 @@ class IntakeDiagnosisResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class DemoScenario(BaseModel):
+    scenario_id: str
+    title: str
+    category: Category
+    persona: str
+    one_liner: str
+    request: AnalyzeRequest
+    expected_outcome: str
+    proof_points: list[str] = Field(default_factory=list)
+    demo_cta: str
+    share_angle: str
+    tags: list[str] = Field(default_factory=list)
+
+
+class DemoScenarioGallery(BaseModel):
+    gallery_version: str = "specpilot.demo_gallery.v1"
+    headline: str
+    subheadline: str
+    primary_metric: str
+    scenarios: list[DemoScenario] = Field(default_factory=list)
+
+
 class ProductCandidate(BaseModel):
     id: str
     brand: str

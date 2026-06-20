@@ -49,6 +49,7 @@ from specpilot_ai.core.models import (
     CompletionReportTemplate,
     CompletionReportTemplateRequest,
     DataGovernanceDashboard,
+    DemoScenarioGallery,
     FeedbackRecord,
     FeedbackRequest,
     GrowthEventRecord,
@@ -124,6 +125,7 @@ from specpilot_ai.core.models import (
 )
 from specpilot_ai.graph.neo4j_client import Neo4jRepository
 from specpilot_ai.graph.product_graph import pc_purchase_graph_schema
+from specpilot_ai.services.demo_gallery import build_demo_scenario_gallery
 from specpilot_ai.services.intake import diagnose_intake
 from specpilot_ai.services.launch_campaign import build_launch_campaign_kit
 from specpilot_ai.services.market import build_category_market_report
@@ -251,37 +253,9 @@ def trust_center() -> TrustCenterDashboard:
     return build_trust_center()
 
 
-@app.get("/demo/scenarios")
-def demo_scenarios() -> dict[str, list[dict[str, object]]]:
-    return {
-        "scenarios": [
-            {
-                "name": "영상 편집 + QHD 게이밍 데스크톱",
-                "request": {
-                    "query": (
-                        "영상 편집과 게임용 데스크톱 200만원 안에서 맞춰줘. "
-                        "QHD 144Hz 모니터를 쓰고 업그레이드 여지도 있었으면 좋겠어."
-                    ),
-                    "category": Category.desktop_pc,
-                    "budget_krw": 2_000_000,
-                    "purpose": "Premiere Pro, DaVinci Resolve, QHD gaming",
-                    "must_haves": ["QHD 144Hz", "32GB RAM", "업그레이드 여지"],
-                    "exclusions": ["중고", "리퍼", "출처 없는 가격"],
-                },
-            },
-            {
-                "name": "크리에이터 노트북",
-                "request": {
-                    "query": "영상 편집용 노트북 200만원 이하로 비교해줘",
-                    "category": Category.laptop,
-                    "budget_krw": 2_000_000,
-                    "purpose": "Premiere Pro and DaVinci Resolve video editing",
-                    "must_haves": ["32GB RAM 선호", "외장 GPU", "휴대성"],
-                    "exclusions": ["RAM 8GB", "리퍼"],
-                },
-            },
-        ]
-    }
+@app.get("/demo/scenarios", response_model=DemoScenarioGallery)
+def demo_scenarios() -> DemoScenarioGallery:
+    return build_demo_scenario_gallery()
 
 
 @app.get("/categories")

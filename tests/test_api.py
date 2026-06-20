@@ -111,6 +111,30 @@ def test_admin_page_exposes_review_console() -> None:
     assert "운영 상태" in response.text
 
 
+def test_demo_scenario_gallery_exposes_launch_ready_presets() -> None:
+    response = client.get("/demo/scenarios")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["gallery_version"] == "specpilot.demo_gallery.v1"
+    assert "10초" in payload["headline"]
+    assert "공유 가능한 리포트" in payload["primary_metric"]
+    assert len(payload["scenarios"]) >= 3
+    scenario_ids = {item["scenario_id"] for item in payload["scenarios"]}
+    assert {"creator-qhd-desktop", "portable-creator-laptop", "team-office-refresh"} <= (
+        scenario_ids
+    )
+    desktop = next(
+        item for item in payload["scenarios"] if item["scenario_id"] == "creator-qhd-desktop"
+    )
+    assert desktop["request"]["category"] == "desktop_pc"
+    assert desktop["request"]["budget_krw"] == 2_000_000
+    assert "QHD 144Hz" in desktop["request"]["must_haves"]
+    assert desktop["demo_cta"] == "데스크톱 데모 적용"
+    assert desktop["proof_points"]
+    assert "공개 리포트" in desktop["share_angle"]
+
+
 def test_pricing_plans_subscription_intents_and_dashboard() -> None:
     workspace_a = {"X-SpecPilot-Key": f"pytest-pricing-a-{uuid4().hex}"}
     workspace_b = {"X-SpecPilot-Key": f"pytest-pricing-b-{uuid4().hex}"}
