@@ -3,6 +3,9 @@ import re
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import RLock
+from time import monotonic
+from typing import TypeVar, cast
 from uuid import uuid4
 
 from specpilot_ai.core.config import Settings
@@ -297,13 +300,85 @@ DATA_INVENTORY_SPECS = [
     },
 ]
 
+_CachedDashboard = TypeVar("_CachedDashboard")
+
 
 class SpecPilotStore:
+    _LAUNCH_DASHBOARD_CACHE_TTL_SECONDS = 15.0
+    _LAUNCH_DASHBOARD_CACHE_MAX_ITEMS = 512
+    _LAUNCH_DASHBOARD_CACHE: dict[
+        tuple[str, str, str, str, int],
+        tuple[float, object],
+    ] = {}
+    _LAUNCH_DASHBOARD_CACHE_LOCK = RLock()
+
     def __init__(self, settings: Settings) -> None:
         self.db_path = Path(settings.storage_path)
         self.public_site_url = settings.public_site_url.strip().rstrip("/")
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._ensure_schema()
+
+    def _launch_cache_key(
+        self,
+        workspace_id: str,
+        dashboard_name: str,
+        limit: int = 0,
+    ) -> tuple[str, str, str, str, int]:
+        return (
+            str(self.db_path),
+            self.public_site_url,
+            workspace_id,
+            dashboard_name,
+            int(limit),
+        )
+
+    def _cached_launch_dashboard(
+        self,
+        workspace_id: str,
+        dashboard_name: str,
+        expected_type: type[_CachedDashboard],
+        limit: int = 0,
+    ) -> _CachedDashboard | None:
+        key = self._launch_cache_key(workspace_id, dashboard_name, limit)
+        now = monotonic()
+        with self._LAUNCH_DASHBOARD_CACHE_LOCK:
+            entry = self._LAUNCH_DASHBOARD_CACHE.get(key)
+            if entry is None:
+                return None
+            created_at, dashboard = entry
+            if now - created_at > self._LAUNCH_DASHBOARD_CACHE_TTL_SECONDS:
+                self._LAUNCH_DASHBOARD_CACHE.pop(key, None)
+                return None
+            if not isinstance(dashboard, expected_type):
+                self._LAUNCH_DASHBOARD_CACHE.pop(key, None)
+                return None
+            return cast(_CachedDashboard, dashboard)
+
+    def _remember_launch_dashboard(
+        self,
+        workspace_id: str,
+        dashboard_name: str,
+        dashboard: _CachedDashboard,
+        limit: int = 0,
+    ) -> _CachedDashboard:
+        key = self._launch_cache_key(workspace_id, dashboard_name, limit)
+        with self._LAUNCH_DASHBOARD_CACHE_LOCK:
+            if len(self._LAUNCH_DASHBOARD_CACHE) >= self._LAUNCH_DASHBOARD_CACHE_MAX_ITEMS:
+                self._LAUNCH_DASHBOARD_CACHE.pop(
+                    next(iter(self._LAUNCH_DASHBOARD_CACHE)),
+                    None,
+                )
+            self._LAUNCH_DASHBOARD_CACHE[key] = (monotonic(), dashboard)
+        return dashboard
+
+    def _invalidate_launch_dashboard_cache(self, workspace_id: str | None = None) -> None:
+        prefix = (str(self.db_path), self.public_site_url)
+        with self._LAUNCH_DASHBOARD_CACHE_LOCK:
+            for key in list(self._LAUNCH_DASHBOARD_CACHE):
+                same_store = key[:2] == prefix
+                same_workspace = workspace_id is None or key[2] == workspace_id
+                if same_store and same_workspace:
+                    self._LAUNCH_DASHBOARD_CACHE.pop(key, None)
 
     def save_analysis(self, response: AnalyzeResponse) -> None:
         self.save_analysis_for_workspace("demo", response)
@@ -371,6 +446,7 @@ class SpecPilotStore:
                 response.graph_trace_id,
                 response.trace_events,
             )
+        self._invalidate_launch_dashboard_cache(workspace_id)
 
     def get_analysis(self, trace_id: str) -> AnalyzeResponse | None:
         return self.get_analysis_for_workspace("demo", trace_id)
@@ -2455,6 +2531,7 @@ class SpecPilotStore:
                     record.created_at,
                 ),
             )
+        self._invalidate_launch_dashboard_cache(workspace_id)
         return record
 
     def list_observability_exports_for_workspace(
@@ -2580,6 +2657,7 @@ class SpecPilotStore:
                     record.created_at,
                 ),
             )
+        self._invalidate_launch_dashboard_cache(workspace_id)
         return record
 
     def list_feedback_for_workspace(
@@ -2642,6 +2720,7 @@ class SpecPilotStore:
                     event.created_at,
                 ),
             )
+        self._invalidate_launch_dashboard_cache(workspace_id)
         return event
 
     def list_growth_events_for_workspace(
@@ -2825,6 +2904,7 @@ class SpecPilotStore:
                 (workspace_id, experiment_id),
             ).fetchone()
             stats = _launch_experiment_variant_stats(conn, workspace_id, experiment_id)
+        self._invalidate_launch_dashboard_cache(workspace_id)
         return _launch_experiment_from_row(row, stats)
 
     def list_launch_experiments_for_workspace(
@@ -2953,6 +3033,7 @@ class SpecPilotStore:
                         now,
                     ),
                 )
+        self._invalidate_launch_dashboard_cache(workspace_id)
         return event
 
     def list_launch_experiment_events_for_workspace(
@@ -3039,6 +3120,14 @@ class SpecPilotStore:
         workspace_id: str,
         limit: int = 12,
     ) -> LaunchPulseDashboard:
+        cached = self._cached_launch_dashboard(
+            workspace_id,
+            "launch_pulse",
+            LaunchPulseDashboard,
+            limit,
+        )
+        if cached is not None:
+            return cached
         metrics = self.metrics_for_workspace(workspace_id)
         growth = self.growth_funnel_for_workspace(workspace_id, limit=limit)
         referrals = self.waitlist_referral_dashboard_for_workspace(workspace_id, limit=limit)
@@ -3194,7 +3283,7 @@ class SpecPilotStore:
                 "초대 링크 기반 공개 전 대기 수요",
             ),
         ]
-        return LaunchPulseDashboard(
+        dashboard = LaunchPulseDashboard(
             workspace_id=workspace_id,
             generated_at=_now(),
             pulse_score=pulse_score,
@@ -3208,12 +3297,26 @@ class SpecPilotStore:
             recent_feedback=feedback,
             recent_growth_events=growth.recent_events,
         )
+        return self._remember_launch_dashboard(
+            workspace_id,
+            "launch_pulse",
+            dashboard,
+            limit,
+        )
 
     def public_acquisition_hub_for_workspace(
         self,
         workspace_id: str,
         limit: int = 12,
     ) -> PublicAcquisitionHub:
+        cached = self._cached_launch_dashboard(
+            workspace_id,
+            "public_acquisition_hub",
+            PublicAcquisitionHub,
+            limit,
+        )
+        if cached is not None:
+            return cached
         metrics = self.metrics_for_workspace(workspace_id)
         growth = self.growth_funnel_for_workspace(workspace_id, limit=limit)
         referrals = self.waitlist_referral_dashboard_for_workspace(workspace_id, limit=limit)
@@ -3231,7 +3334,7 @@ class SpecPilotStore:
             1,
         )
         status = _score_status(launch_score, warning=55, ok=75)
-        return PublicAcquisitionHub(
+        dashboard = PublicAcquisitionHub(
             workspace_id=workspace_id,
             generated_at=_now(),
             status=status,
@@ -3251,12 +3354,26 @@ class SpecPilotStore:
             next_actions=_public_acquisition_next_actions(surfaces, growth, referrals),
             recent_growth_events=growth.recent_events,
         )
+        return self._remember_launch_dashboard(
+            workspace_id,
+            "public_acquisition_hub",
+            dashboard,
+            limit,
+        )
 
     def public_conversion_board_for_workspace(
         self,
         workspace_id: str,
         limit: int = 12,
     ) -> PublicConversionBoard:
+        cached = self._cached_launch_dashboard(
+            workspace_id,
+            "public_conversion_board",
+            PublicConversionBoard,
+            limit,
+        )
+        if cached is not None:
+            return cached
         metrics = self.metrics_for_workspace(workspace_id)
         growth = self.growth_funnel_for_workspace(workspace_id, limit=limit)
         acquisition = self.public_acquisition_hub_for_workspace(
@@ -3295,7 +3412,7 @@ class SpecPilotStore:
             readiness=readiness,
             metrics=metrics,
         )
-        return PublicConversionBoard(
+        dashboard = PublicConversionBoard(
             workspace_id=workspace_id,
             generated_at=_now(),
             status=status,
@@ -3338,12 +3455,26 @@ class SpecPilotStore:
             ),
             recent_growth_events=growth.recent_events[:limit],
         )
+        return self._remember_launch_dashboard(
+            workspace_id,
+            "public_conversion_board",
+            dashboard,
+            limit,
+        )
 
     def launch_war_room_for_workspace(
         self,
         workspace_id: str,
         limit: int = 12,
     ) -> LaunchWarRoomDashboard:
+        cached = self._cached_launch_dashboard(
+            workspace_id,
+            "launch_war_room",
+            LaunchWarRoomDashboard,
+            limit,
+        )
+        if cached is not None:
+            return cached
         metrics = self.metrics_for_workspace(workspace_id)
         pulse = self.launch_pulse_for_workspace(workspace_id, limit=limit)
         smoke = self.public_launch_smoke_dashboard_for_workspace(
@@ -3387,7 +3518,7 @@ class SpecPilotStore:
         )
         status = _launch_war_room_status(signals, command_score)
         decision = _launch_war_room_decision(status, command_score, signals)
-        return LaunchWarRoomDashboard(
+        dashboard = LaunchWarRoomDashboard(
             workspace_id=workspace_id,
             generated_at=_now(),
             status=status,
@@ -3410,6 +3541,12 @@ class SpecPilotStore:
             plays=plays,
             escalation_paths=_launch_war_room_escalation_paths(signals),
             next_actions=_launch_war_room_next_actions(signals, plays),
+        )
+        return self._remember_launch_dashboard(
+            workspace_id,
+            "launch_war_room",
+            dashboard,
+            limit,
         )
 
     def launch_incident_center_for_workspace(
@@ -3498,6 +3635,14 @@ class SpecPilotStore:
         workspace_id: str,
         limit: int = 12,
     ) -> LaunchWeekRecapDashboard:
+        cached = self._cached_launch_dashboard(
+            workspace_id,
+            "launch_week_recap",
+            LaunchWeekRecapDashboard,
+            limit,
+        )
+        if cached is not None:
+            return cached
         metrics = self.metrics_for_workspace(workspace_id)
         pulse = self.launch_pulse_for_workspace(workspace_id, limit=limit)
         smoke = self.public_launch_smoke_dashboard_for_workspace(
@@ -3557,7 +3702,7 @@ class SpecPilotStore:
             experiments=experiments,
             regression=regression,
         )
-        return LaunchWeekRecapDashboard(
+        dashboard = LaunchWeekRecapDashboard(
             workspace_id=workspace_id,
             generated_at=_now(),
             status=status,
@@ -3594,12 +3739,26 @@ class SpecPilotStore:
             ),
             next_actions=_launch_week_recap_next_actions(wins, risks, war_room),
         )
+        return self._remember_launch_dashboard(
+            workspace_id,
+            "launch_week_recap",
+            dashboard,
+            limit,
+        )
 
     def launch_community_kit_for_workspace(
         self,
         workspace_id: str,
         limit: int = 12,
     ) -> LaunchCommunityKit:
+        cached = self._cached_launch_dashboard(
+            workspace_id,
+            "launch_community_kit",
+            LaunchCommunityKit,
+            limit,
+        )
+        if cached is not None:
+            return cached
         metrics = self.metrics_for_workspace(workspace_id)
         recap = self.launch_week_recap_for_workspace(workspace_id, limit=limit)
         objections = self.public_launch_objection_kit_for_workspace(workspace_id)
@@ -3635,7 +3794,7 @@ class SpecPilotStore:
             smoke=smoke,
             recap=recap,
         )
-        return LaunchCommunityKit(
+        dashboard = LaunchCommunityKit(
             workspace_id=workspace_id,
             generated_at=_now(),
             status=status,
@@ -3664,12 +3823,26 @@ class SpecPilotStore:
             ],
             next_actions=_launch_community_next_actions(templates, risks, recap),
         )
+        return self._remember_launch_dashboard(
+            workspace_id,
+            "launch_community_kit",
+            dashboard,
+            limit,
+        )
 
     def launch_media_kit_for_workspace(
         self,
         workspace_id: str,
         limit: int = 12,
     ) -> LaunchMediaKit:
+        cached = self._cached_launch_dashboard(
+            workspace_id,
+            "launch_media_kit",
+            LaunchMediaKit,
+            limit,
+        )
+        if cached is not None:
+            return cached
         metrics = self.metrics_for_workspace(workspace_id)
         proof = self.public_proof_hub_for_workspace(workspace_id, limit=limit)
         acquisition = self.public_acquisition_hub_for_workspace(
@@ -3697,7 +3870,7 @@ class SpecPilotStore:
         status = _launch_media_status(media_score, acquisition, proof, smoke)
         assets = _launch_media_assets(proof, social)
         pitches = _launch_media_pitches(recap, community)
-        return LaunchMediaKit(
+        dashboard = LaunchMediaKit(
             workspace_id=workspace_id,
             generated_at=_now(),
             status=status,
@@ -3728,6 +3901,12 @@ class SpecPilotStore:
                 "launch_community_reply_copy",
             ],
             next_actions=_launch_media_next_actions(status, assets, pitches, community),
+        )
+        return self._remember_launch_dashboard(
+            workspace_id,
+            "launch_media_kit",
+            dashboard,
+            limit,
         )
 
     def launch_activation_offer_for_workspace(
@@ -3959,6 +4138,14 @@ class SpecPilotStore:
         workspace_id: str,
         limit: int = 8,
     ) -> PublicProofHub:
+        cached = self._cached_launch_dashboard(
+            workspace_id,
+            "public_proof_hub",
+            PublicProofHub,
+            limit,
+        )
+        if cached is not None:
+            return cached
         metrics = self.metrics_for_workspace(workspace_id)
         acquisition = self.public_acquisition_hub_for_workspace(
             workspace_id,
@@ -3972,7 +4159,7 @@ class SpecPilotStore:
         proof_assets = _public_proof_assets(metrics, acquisition, experiments)
         proof_score = _public_proof_score(metrics, proof_assets, experiments)
         status = _score_status(proof_score, warning=55, ok=78)
-        return PublicProofHub(
+        dashboard = PublicProofHub(
             workspace_id=workspace_id,
             generated_at=_now(),
             status=status,
@@ -3997,12 +4184,26 @@ class SpecPilotStore:
             recent_feedback=feedback[:5],
             next_actions=_public_proof_next_actions(status, proof_assets, experiments),
         )
+        return self._remember_launch_dashboard(
+            workspace_id,
+            "public_proof_hub",
+            dashboard,
+            limit,
+        )
 
     def public_social_proof_wall_for_workspace(
         self,
         workspace_id: str,
         limit: int = 8,
     ) -> PublicSocialProofWall:
+        cached = self._cached_launch_dashboard(
+            workspace_id,
+            "public_social_proof_wall",
+            PublicSocialProofWall,
+            limit,
+        )
+        if cached is not None:
+            return cached
         metrics = self.metrics_for_workspace(workspace_id)
         feedback = self.list_feedback_for_workspace(workspace_id, limit=max(limit, 12))
         outcomes = self.list_purchase_outcomes_for_workspace(
@@ -4021,7 +4222,7 @@ class SpecPilotStore:
         )
         proof_score = _public_social_proof_score(metrics, items)
         status = _score_status(proof_score, warning=45, ok=72)
-        return PublicSocialProofWall(
+        dashboard = PublicSocialProofWall(
             workspace_id=workspace_id,
             generated_at=_now(),
             status=status,
@@ -4035,12 +4236,26 @@ class SpecPilotStore:
             cta_cards=_public_social_proof_cta_cards(metrics),
             next_actions=_public_social_proof_next_actions(status, items),
         )
+        return self._remember_launch_dashboard(
+            workspace_id,
+            "public_social_proof_wall",
+            dashboard,
+            limit,
+        )
 
     def public_launch_objection_kit_for_workspace(
         self,
         workspace_id: str,
         limit: int = 8,
     ) -> PublicLaunchObjectionKit:
+        cached = self._cached_launch_dashboard(
+            workspace_id,
+            "public_launch_objection_kit",
+            PublicLaunchObjectionKit,
+            limit,
+        )
+        if cached is not None:
+            return cached
         metrics = self.metrics_for_workspace(workspace_id)
         proof = self.public_proof_hub_for_workspace(workspace_id, limit=limit)
         social = self.public_social_proof_wall_for_workspace(workspace_id, limit=limit)
@@ -4060,7 +4275,7 @@ class SpecPilotStore:
             1,
         )
         status = _score_status(objection_score, warning=55, ok=75)
-        return PublicLaunchObjectionKit(
+        dashboard = PublicLaunchObjectionKit(
             workspace_id=workspace_id,
             generated_at=_now(),
             status=status,
@@ -4083,12 +4298,26 @@ class SpecPilotStore:
             channel_replies=_public_objection_channel_replies(metrics),
             next_actions=_public_objection_next_actions(status, proof, social),
         )
+        return self._remember_launch_dashboard(
+            workspace_id,
+            "public_launch_objection_kit",
+            dashboard,
+            limit,
+        )
 
     def public_launch_share_pack_for_workspace(
         self,
         workspace_id: str,
         limit: int = 8,
     ) -> PublicLaunchSharePack:
+        cached = self._cached_launch_dashboard(
+            workspace_id,
+            "public_launch_share_pack",
+            PublicLaunchSharePack,
+            limit,
+        )
+        if cached is not None:
+            return cached
         metrics = self.metrics_for_workspace(workspace_id)
         proof = self.public_proof_hub_for_workspace(workspace_id, limit=limit)
         objections = self.public_launch_objection_kit_for_workspace(
@@ -4118,7 +4347,7 @@ class SpecPilotStore:
             proof=proof,
             objections=objections,
         )
-        return PublicLaunchSharePack(
+        dashboard = PublicLaunchSharePack(
             workspace_id=workspace_id,
             generated_at=_now(),
             status=status,
@@ -4150,6 +4379,12 @@ class SpecPilotStore:
             ],
             next_actions=_public_share_pack_next_actions(status, referrals, pulse),
         )
+        return self._remember_launch_dashboard(
+            workspace_id,
+            "public_launch_share_pack",
+            dashboard,
+            limit,
+        )
 
     def _public_path_url(self, path: str) -> str:
         if not self.public_site_url:
@@ -4161,6 +4396,14 @@ class SpecPilotStore:
         workspace_id: str,
         limit: int = 8,
     ) -> PublicLaunchActionRouter:
+        cached = self._cached_launch_dashboard(
+            workspace_id,
+            "public_launch_action_router",
+            PublicLaunchActionRouter,
+            limit,
+        )
+        if cached is not None:
+            return cached
         metrics = self.metrics_for_workspace(workspace_id)
         proof = self.public_proof_hub_for_workspace(workspace_id, limit=limit)
         objections = self.public_launch_objection_kit_for_workspace(
@@ -4189,7 +4432,7 @@ class SpecPilotStore:
         )
         status = _score_status(routing_score, warning=55, ok=76)
         default_route = max(routes, key=lambda route: route.priority_score)
-        return PublicLaunchActionRouter(
+        dashboard = PublicLaunchActionRouter(
             workspace_id=workspace_id,
             generated_at=_now(),
             status=status,
@@ -4213,12 +4456,26 @@ class SpecPilotStore:
             ],
             next_actions=_public_action_router_next_actions(status, routes),
         )
+        return self._remember_launch_dashboard(
+            workspace_id,
+            "public_launch_action_router",
+            dashboard,
+            limit,
+        )
 
     def public_launch_smoke_dashboard_for_workspace(
         self,
         workspace_id: str,
         limit: int = 8,
     ) -> PublicLaunchSmokeDashboard:
+        cached = self._cached_launch_dashboard(
+            workspace_id,
+            "public_launch_smoke",
+            PublicLaunchSmokeDashboard,
+            limit,
+        )
+        if cached is not None:
+            return cached
         metrics = self.metrics_for_workspace(workspace_id)
         proof = self.public_proof_hub_for_workspace(workspace_id, limit=limit)
         acquisition = self.public_acquisition_hub_for_workspace(workspace_id, limit=limit)
@@ -4389,7 +4646,7 @@ class SpecPilotStore:
         ]
         smoke_score = _public_launch_smoke_score(checks)
         status = _public_launch_smoke_status(checks, smoke_score)
-        return PublicLaunchSmokeDashboard(
+        dashboard = PublicLaunchSmokeDashboard(
             workspace_id=workspace_id,
             generated_at=_now(),
             status=status,
@@ -4411,6 +4668,12 @@ class SpecPilotStore:
                 "subscription_cta",
             ],
             next_actions=_public_launch_smoke_next_actions(checks),
+        )
+        return self._remember_launch_dashboard(
+            workspace_id,
+            "public_launch_smoke",
+            dashboard,
+            limit,
         )
 
     def create_beta_lead_for_workspace(
@@ -4451,6 +4714,7 @@ class SpecPilotStore:
                     lead.created_at,
                 ),
             )
+        self._invalidate_launch_dashboard_cache(workspace_id)
         return lead
 
     def list_beta_leads_for_workspace(
@@ -4517,6 +4781,7 @@ class SpecPilotStore:
                     referral.created_at,
                 ),
             )
+        self._invalidate_launch_dashboard_cache(workspace_id)
         return referral
 
     def _referral_url(self, referral_code: str) -> str:
@@ -4877,6 +5142,7 @@ class SpecPilotStore:
                     intent.created_at,
                 ),
             )
+        self._invalidate_launch_dashboard_cache(workspace_id)
         return intent
 
     def list_subscription_intents_for_workspace(

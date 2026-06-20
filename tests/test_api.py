@@ -4,7 +4,11 @@ from fastapi.testclient import TestClient
 
 from specpilot_ai.api.main import app
 from specpilot_ai.core.config import Settings
-from specpilot_ai.core.models import WaitlistReferralRequest
+from specpilot_ai.core.models import (
+    GrowthEventRequest,
+    GrowthEventType,
+    WaitlistReferralRequest,
+)
 from specpilot_ai.storage.sqlite_store import SpecPilotStore
 
 client = TestClient(app)
@@ -2266,6 +2270,49 @@ def test_growth_launch_activation_offer_does_not_regenerate_heavy_launch_kits(
     assert payload["metric_cards"]["media_score"] >= 0
     assert payload["metric_cards"]["response_score"] >= 0
     assert payload["offers"]
+
+
+def test_launch_dashboard_cache_reuses_and_invalidates_public_smoke(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    store = SpecPilotStore(Settings(storage_path=str(tmp_path / "launch-cache.sqlite3")))
+    workspace_id = f"pytest-launch-cache-{uuid4().hex}"
+    first = store.public_launch_smoke_dashboard_for_workspace(workspace_id, limit=4)
+
+    proof_calls = 0
+    original_proof = SpecPilotStore.public_proof_hub_for_workspace
+
+    def tracked_proof(self, workspace_id, limit=8):  # noqa: ANN001
+        nonlocal proof_calls
+        proof_calls += 1
+        return original_proof(self, workspace_id, limit=limit)
+
+    monkeypatch.setattr(
+        SpecPilotStore,
+        "public_proof_hub_for_workspace",
+        tracked_proof,
+    )
+
+    second = store.public_launch_smoke_dashboard_for_workspace(workspace_id, limit=4)
+
+    assert second.smoke_score == first.smoke_score
+    assert proof_calls == 0
+
+    store.create_growth_event_for_workspace(
+        workspace_id,
+        GrowthEventRequest(
+            event_type=GrowthEventType.share_cta,
+            source="pytest-launch-cache",
+            surface="launch-smoke",
+            label="캐시 무효화 검증",
+            metadata={"test": "launch-cache"},
+        ),
+    )
+    refreshed = store.public_launch_smoke_dashboard_for_workspace(workspace_id, limit=4)
+
+    assert refreshed.smoke_version == "specpilot.public_launch_smoke.v1"
+    assert proof_calls >= 1
 
 
 def test_growth_launch_response_loop_turns_reactions_into_followups() -> None:
