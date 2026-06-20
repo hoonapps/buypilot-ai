@@ -62,6 +62,7 @@ from specpilot_ai.core.models import (
     IntegrationProviderRequest,
     IntegrationReadinessDashboard,
     LaunchCampaignKit,
+    LaunchDistributionPlan,
     LaunchExperiment,
     LaunchExperimentDashboard,
     LaunchExperimentEvent,
@@ -144,7 +145,10 @@ from specpilot_ai.graph.neo4j_client import Neo4jRepository
 from specpilot_ai.graph.product_graph import pc_purchase_graph_schema
 from specpilot_ai.services.demo_gallery import build_demo_scenario_gallery
 from specpilot_ai.services.intake import diagnose_intake
-from specpilot_ai.services.launch_campaign import build_launch_campaign_kit
+from specpilot_ai.services.launch_campaign import (
+    build_launch_campaign_kit,
+    build_launch_distribution_plan,
+)
 from specpilot_ai.services.market import build_category_market_report
 from specpilot_ai.services.onboarding import purchase_onboarding_playbooks
 from specpilot_ai.services.start_concierge import build_start_concierge
@@ -1439,6 +1443,38 @@ def growth_launch_kit(
     audience: str = "creator",
 ) -> LaunchCampaignKit:
     return build_launch_campaign_kit(category=category, audience=audience)
+
+
+@app.get("/growth/launch-distribution-plan", response_model=LaunchDistributionPlan)
+def growth_launch_distribution_plan(
+    category: Category | None = None,
+    audience: str = "creator",
+    limit: int = 12,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> LaunchDistributionPlan:
+    store = _store()
+    kit = build_launch_campaign_kit(category=category, audience=audience)
+    board = store.public_conversion_board_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+    pulse = store.launch_pulse_for_workspace(workspace.workspace_id, limit=limit)
+    experiments = store.launch_experiment_dashboard_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+    referrals = store.waitlist_referral_dashboard_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+    return build_launch_distribution_plan(
+        workspace_id=workspace.workspace_id,
+        kit=kit,
+        board=board,
+        pulse=pulse,
+        experiments=experiments,
+        referrals=referrals,
+    )
 
 
 @app.post("/growth/launch-experiments", response_model=LaunchExperiment)

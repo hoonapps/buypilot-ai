@@ -565,6 +565,63 @@ def test_growth_launch_kit_exposes_campaign_copy_and_measurement_plan() -> None:
     assert "추천 만족도와 구매 의향률" in payload["measurement_plan"]
 
 
+def test_growth_launch_distribution_plan_prioritizes_launch_channels() -> None:
+    workspace = {"X-SpecPilot-Key": f"pytest-launch-plan-{uuid4().hex}"}
+    other_workspace = {"X-SpecPilot-Key": f"pytest-launch-plan-other-{uuid4().hex}"}
+
+    client.post(
+        "/growth/events",
+        headers=workspace,
+        json={
+            "event_type": "share_cta",
+            "source": "pytest-launch-plan",
+            "surface": "public-report",
+            "label": "공유 리포트 CTA",
+        },
+    )
+    client.post(
+        "/growth/waitlist-referrals",
+        headers=workspace,
+        json={
+            "email": "launch-plan@example.com",
+            "persona": "creator",
+            "use_case": "출시 배포 전 추천 링크를 공유합니다.",
+            "source": "pytest-launch-plan",
+        },
+    )
+
+    response = client.get(
+        "/growth/launch-distribution-plan?category=desktop_pc&audience=creator",
+        headers=workspace,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["plan_version"] == "specpilot.launch_distribution_plan.v1"
+    assert payload["category"] == "desktop_pc"
+    assert payload["audience"] == "creator"
+    assert payload["workspace_id"] != "demo"
+    assert payload["distribution_score"] > 0
+    assert payload["status"] in {"ok", "warning", "blocker"}
+    assert {"community", "seo", "referral"} <= set(payload["priority_channels"])
+    assert {slot["channel"] for slot in payload["slots"]} >= {
+        "community",
+        "seo",
+        "referral",
+    }
+    assert all(slot["copy_text"] and slot["cta_path"] for slot in payload["slots"])
+    assert any("share_cta" in item for item in payload["measurement_events"])
+    assert payload["risk_controls"]
+    assert payload["next_actions"]
+
+    isolated = client.get(
+        "/growth/launch-distribution-plan?category=desktop_pc&audience=creator",
+        headers=other_workspace,
+    )
+    assert isolated.status_code == 200
+    assert isolated.json()["workspace_id"] != payload["workspace_id"]
+
+
 def test_growth_launch_pulse_summarizes_public_reaction_signals() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-pulse-{uuid4().hex}"}
 

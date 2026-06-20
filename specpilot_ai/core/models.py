@@ -1171,6 +1171,45 @@ class LaunchCampaignKit(BaseModel):
     measurement_plan: list[str] = Field(default_factory=list)
 
 
+class LaunchDistributionSlot(BaseModel):
+    slot_id: str
+    phase: str
+    channel: str
+    timing: str
+    audience: str
+    priority: int = Field(ge=1, le=10)
+    status: CheckStatus
+    headline: str
+    body: str
+    cta_label: str
+    cta_path: str
+    copy_text: str
+    tracking_event: GrowthEventType = GrowthEventType.share_cta
+    success_metric: str
+    proof_to_attach: list[str] = Field(default_factory=list)
+    checklist: list[str] = Field(default_factory=list)
+
+
+class LaunchDistributionPlan(BaseModel):
+    plan_version: str = "specpilot.launch_distribution_plan.v1"
+    workspace_id: str
+    generated_at: str
+    category: Category | None = None
+    audience: str
+    launch_window: str
+    status: CheckStatus
+    distribution_score: float = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    primary_cta: str
+    priority_channels: list[str] = Field(default_factory=list)
+    experiment_to_promote: str = ""
+    slots: list[LaunchDistributionSlot] = Field(default_factory=list)
+    measurement_events: list[str] = Field(default_factory=list)
+    risk_controls: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class LaunchExperimentVariantRequest(BaseModel):
     label: str = Field(min_length=1)
     headline: str = Field(min_length=2)

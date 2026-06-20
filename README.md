@@ -60,6 +60,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 런치 반응 Pulse: 성장 이벤트, 만족도, 구매 의향, 추천 대기열, 요금제 관심, readiness를 합성해 공개 반응 온도와 다음 액션을 반환
 - 출시 실험 허브: 공개 CTA 카피 variant를 만들고 노출/전환 이벤트, 승자 후보, 다음 실험 액션을 워크스페이스별로 집계
 - 출시 캠페인 키트: 커뮤니티/검색/추천 채널별 공개 베타 카피, CTA 실험, 출시 체크리스트, 위험 고지, 측정 계획 생성
+- 출시 배포 플래너: 런치 키트, 공개 전환 보드, Pulse, CTA 실험, 추천 대기열을 합쳐 D-day부터 D+7까지 채널별 배포 슬롯과 복사 문구 생성
 - 공개 데모 갤러리: 데스크톱/크리에이터 노트북/팀 구매 시나리오를 한 번에 폼 적용 가능한 출시용 preset으로 제공
 - 출처 신뢰도, 캐시 만료 기준, 제휴 고지 정책
 - Agent trace 조회와 SQLite span 저장
@@ -983,6 +984,12 @@ curl http://127.0.0.1:8000/growth/launch-experiment-dashboard \
 ```bash
 curl 'http://127.0.0.1:8000/growth/launch-kit?category=desktop_pc&audience=creator'
 ```
+
+출시 배포 플랜:
+
+```bash
+curl 'http://127.0.0.1:8000/growth/launch-distribution-plan?category=desktop_pc&audience=creator' \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
 분석 품질/비용 감사:
@@ -1238,6 +1245,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/growth/launch-pulse`: 성장 이벤트, 피드백, 추천 대기열, 요금제 관심, readiness를 합성해 공개 반응 Pulse 점수와 다음 액션을 반환
 - `/growth/launch-experiments`, `/growth/launch-experiments/{experiment_id}/events`, `/growth/launch-experiment-dashboard`: 공개 CTA variant, 노출/전환 이벤트, 승자 후보, 다음 실험 액션을 관리
 - `/growth/launch-kit`: 공개 베타 채널별 카피, CTA 실험, 출시 체크리스트, 위험 고지, 측정 계획을 반환
+- `/growth/launch-distribution-plan`: 런치 키트, 공개 전환 보드, 런치 Pulse, CTA 실험, 추천 대기열을 합성해 첫 주 채널 배포 슬롯, 복사 문구, 측정 이벤트, 위험 통제를 반환
 - `/beta/launch-gate`: readiness, 품질 회귀, 학습 인사이트, 백로그 SLA, 전환/성장/발송/외부 연동/데이터 거버넌스 운영 상태를 공개 go/no-go 판정과 필수 액션으로 집계
 - `feedback_count`, `average_satisfaction`, `purchase_intent_rate`: 추천 결과가 실제 구매 판단으로 이어지는지 보는 운영 지표
 - `beta_leads`: 베타 신청 리드 수

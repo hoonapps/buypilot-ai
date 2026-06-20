@@ -2,10 +2,18 @@ from datetime import UTC, datetime
 
 from specpilot_ai.core.models import (
     Category,
+    CheckStatus,
     GrowthEventType,
     LaunchCampaignKit,
     LaunchChannelPlaybook,
     LaunchCopyVariant,
+    LaunchDistributionPlan,
+    LaunchDistributionSlot,
+    LaunchExperimentDashboard,
+    LaunchPulseDashboard,
+    PublicAcquisitionSurface,
+    PublicConversionBoard,
+    WaitlistReferralDashboard,
 )
 
 
@@ -71,6 +79,213 @@ def build_launch_campaign_kit(
             "추천 대기열 추천 유입 수와 리더보드 상위 코드",
         ],
     )
+
+
+def build_launch_distribution_plan(
+    *,
+    workspace_id: str,
+    kit: LaunchCampaignKit,
+    board: PublicConversionBoard,
+    pulse: LaunchPulseDashboard,
+    experiments: LaunchExperimentDashboard,
+    referrals: WaitlistReferralDashboard,
+) -> LaunchDistributionPlan:
+    distribution_score = round(
+        board.conversion_score * 0.42
+        + pulse.pulse_score * 0.28
+        + min(100.0, experiments.total_impressions * 1.5 + experiments.total_conversions * 16)
+        * 0.16
+        + min(100.0, referrals.total_referrals * 12 + referrals.referred_signup_count * 22)
+        * 0.14,
+        1,
+    )
+    status = _distribution_status(distribution_score, board.status, pulse.status)
+    priority_channels = _priority_channels(board, kit)
+    slots = _distribution_slots(
+        kit=kit,
+        board=board,
+        priority_channels=priority_channels,
+        best_variant_label=experiments.best_variant_label,
+    )
+    experiment_to_promote = experiments.best_variant_label or (
+        experiments.recommended_experiments[0].name
+        if experiments.recommended_experiments
+        else ""
+    )
+    return LaunchDistributionPlan(
+        workspace_id=workspace_id,
+        generated_at=datetime.now(UTC).isoformat(),
+        category=kit.category,
+        audience=kit.audience,
+        launch_window="D-day부터 D+7까지",
+        status=status,
+        distribution_score=distribution_score,
+        headline=_distribution_headline(status, distribution_score),
+        summary=(
+            f"전환 보드 {board.conversion_score}점, Pulse {pulse.pulse_score}점, "
+            f"추천 대기열 {referrals.total_referrals}명, CTA 실험 전환 "
+            f"{experiments.total_conversions}건을 기준으로 첫 주 배포 순서를 정했습니다."
+        ),
+        primary_cta=kit.primary_cta,
+        priority_channels=priority_channels,
+        experiment_to_promote=experiment_to_promote,
+        slots=slots,
+        measurement_events=_distribution_measurement_events(kit, board),
+        risk_controls=[
+            "가격과 쿠폰 변동 가능성을 모든 외부 문구 하단에 고지",
+            "제휴 링크와 추천 순위 계산 기준을 Trust Center로 연결",
+            "커뮤니티 반응은 성장 이벤트와 피드백으로만 기록하고 원문 연락처는 저장하지 않기",
+        ],
+        next_actions=_distribution_next_actions(
+            status=status,
+            board=board,
+            pulse=pulse,
+            experiments=experiments,
+            referrals=referrals,
+        ),
+    )
+
+
+def _distribution_slots(
+    *,
+    kit: LaunchCampaignKit,
+    board: PublicConversionBoard,
+    priority_channels: list[str],
+    best_variant_label: str,
+) -> list[LaunchDistributionSlot]:
+    phases = ["D-day 오전", "D-day 저녁", "D+1", "D+3", "D+7"]
+    surface_by_channel = {surface.channel: surface for surface in board.priority_surfaces}
+    slots: list[LaunchDistributionSlot] = []
+    ordered_playbooks = sorted(
+        kit.channel_playbooks,
+        key=lambda playbook: (
+            priority_channels.index(playbook.channel)
+            if playbook.channel in priority_channels
+            else 99
+        ),
+    )
+    for index, playbook in enumerate(ordered_playbooks[:5]):
+        variant = _slot_variant(playbook)
+        if variant is None:
+            continue
+        surface = surface_by_channel.get(playbook.channel)
+        cta_path = surface.path if surface else variant.cta_path
+        priority = max(1, 10 - index * 2)
+        status = surface.status if surface else CheckStatus.warning
+        headline = (
+            f"{best_variant_label}: {variant.headline}"
+            if best_variant_label and index == 0
+            else variant.headline
+        )
+        copy_text = (
+            f"{headline}\n\n{variant.body}\n\n"
+            f"{variant.cta_label}: {cta_path}\n"
+            f"측정 이벤트: {variant.tracking_event.value}"
+        )
+        slots.append(
+            LaunchDistributionSlot(
+                slot_id=f"{playbook.channel}-{index + 1}",
+                phase=phases[index],
+                channel=playbook.channel,
+                timing=playbook.post_timing,
+                audience=playbook.audience,
+                priority=priority,
+                status=status,
+                headline=headline,
+                body=variant.body,
+                cta_label=variant.cta_label,
+                cta_path=cta_path,
+                copy_text=copy_text,
+                tracking_event=variant.tracking_event,
+                success_metric=playbook.success_metric,
+                proof_to_attach=_slot_proof(kit, surface),
+                checklist=playbook.checklist[:3],
+            )
+        )
+    return slots
+
+
+def _slot_variant(playbook: LaunchChannelPlaybook) -> LaunchCopyVariant | None:
+    if not playbook.copy_variants:
+        return None
+    return playbook.copy_variants[0]
+
+
+def _slot_proof(
+    kit: LaunchCampaignKit,
+    surface: PublicAcquisitionSurface | None,
+) -> list[str]:
+    proof = kit.proof_points[:2]
+    if surface is not None:
+        proof.append(f"{surface.label}: {surface.metric}")
+        proof.append(surface.proof)
+    return list(dict.fromkeys(proof))[:4]
+
+
+def _priority_channels(
+    board: PublicConversionBoard,
+    kit: LaunchCampaignKit,
+) -> list[str]:
+    channels = [surface.channel for surface in board.priority_surfaces]
+    channels.extend(playbook.channel for playbook in kit.channel_playbooks)
+    return list(dict.fromkeys(channels))
+
+
+def _distribution_status(
+    score: float,
+    board_status: CheckStatus,
+    pulse_status: CheckStatus,
+) -> CheckStatus:
+    if score >= 72 and board_status != CheckStatus.blocker and pulse_status != CheckStatus.blocker:
+        return CheckStatus.ok
+    if score >= 45 and board_status != CheckStatus.blocker:
+        return CheckStatus.warning
+    return CheckStatus.blocker
+
+
+def _distribution_headline(status: CheckStatus, score: float) -> str:
+    if status == CheckStatus.ok:
+        return f"출시 배포 플랜 {score}점, 첫 주 채널 배포를 시작할 수 있습니다."
+    if status == CheckStatus.warning:
+        return f"출시 배포 플랜 {score}점, 우선 채널부터 제한 배포하세요."
+    return f"출시 배포 플랜 {score}점, 공개 배포 전 증거 보강이 필요합니다."
+
+
+def _distribution_measurement_events(
+    kit: LaunchCampaignKit,
+    board: PublicConversionBoard,
+) -> list[str]:
+    events = [
+        f"{playbook.channel}: {variant.tracking_event.value}"
+        for playbook in kit.channel_playbooks
+        for variant in playbook.copy_variants[:1]
+    ]
+    events.extend(f"stage:{stage.key}={stage.metric}" for stage in board.stages[:3])
+    return list(dict.fromkeys(events))[:8]
+
+
+def _distribution_next_actions(
+    *,
+    status: CheckStatus,
+    board: PublicConversionBoard,
+    pulse: LaunchPulseDashboard,
+    experiments: LaunchExperimentDashboard,
+    referrals: WaitlistReferralDashboard,
+) -> list[str]:
+    actions: list[str] = []
+    if experiments.best_variant_label:
+        actions.append(f"{experiments.best_variant_label} CTA를 첫 번째 배포 슬롯에 적용하세요.")
+    else:
+        actions.append("출시 실험 허브에서 커뮤니티 CTA variant를 먼저 seed 하세요.")
+    actions.extend(board.next_actions[:2])
+    actions.extend(pulse.top_actions[:1])
+    if referrals.total_referrals < 5:
+        actions.append("추천 초대 공유 키트를 대기열 가입 직후 화면에 노출해 첫 5명을 확보하세요.")
+    if status == CheckStatus.blocker:
+        actions.append(
+            "공개 채널 배포 전 Trust Center, 공개 리포트, 추천 대기열 CTA를 먼저 점검하세요."
+        )
+    return list(dict.fromkeys(actions))[:6]
 
 
 def _community_playbook(
