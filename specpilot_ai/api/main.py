@@ -100,6 +100,7 @@ from specpilot_ai.core.models import (
     PublicLaunchRoomCard,
     PublicLaunchRoomMarketLink,
     PublicLaunchSharePack,
+    PublicLaunchSmokeDashboard,
     PublicMistakeCostCalculator,
     PublicProofHub,
     PublicReferralLaunchKit,
@@ -1267,6 +1268,17 @@ def public_launch_action_router(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> PublicLaunchActionRouter:
     return _store().public_launch_action_router_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+
+
+@app.get("/public/launch-smoke", response_model=PublicLaunchSmokeDashboard)
+def public_launch_smoke(
+    limit: int = 8,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> PublicLaunchSmokeDashboard:
+    return _store().public_launch_smoke_dashboard_for_workspace(
         workspace.workspace_id,
         limit=limit,
     )

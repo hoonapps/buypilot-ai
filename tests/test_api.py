@@ -1778,6 +1778,50 @@ def test_public_launch_action_router_prioritizes_visitor_next_steps() -> None:
     assert payload["next_actions"]
 
 
+def test_public_launch_smoke_dashboard_checks_publish_surfaces() -> None:
+    workspace = {"X-SpecPilot-Key": f"pytest-launch-smoke-{uuid4().hex}"}
+    event = client.post(
+        "/growth/events",
+        headers=workspace,
+        json={
+            "event_type": "analysis_view",
+            "source": "pytest-launch-smoke",
+            "surface": "launch-smoke",
+            "label": "런칭 스모크 분석 CTA",
+            "metadata": {"route_key": "first_purchase_analysis"},
+        },
+    )
+    assert event.status_code == 200
+
+    response = client.get("/public/launch-smoke?limit=6", headers=workspace)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["smoke_version"] == "specpilot.public_launch_smoke.v1"
+    assert payload["workspace_id"].startswith("workspace_")
+    assert payload["status"] in {"ok", "warning", "blocker"}
+    assert payload["smoke_score"] > 0
+    assert payload["ok_count"] + payload["warning_count"] + payload["blocker_count"] == len(
+        payload["checks"],
+    )
+    check_keys = {check["key"] for check in payload["checks"]}
+    assert {
+        "launch_room",
+        "market_reports",
+        "proof_hub",
+        "objection_kit",
+        "share_pack",
+        "action_router",
+        "conversion_board",
+        "launch_gate",
+        "seo_distribution",
+        "measurement",
+    } <= check_keys
+    assert any(check["public_path"].endswith("/launch") for check in payload["checks"])
+    assert "launch_smoke_view" in payload["measurement_events"]
+    assert payload["publish_ready_paths"]
+    assert payload["next_actions"]
+
+
 def test_public_launch_room_packages_demo_proof_and_growth_ctas() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-launch-room-{uuid4().hex}"}
     referral = client.post(

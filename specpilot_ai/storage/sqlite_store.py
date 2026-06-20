@@ -94,6 +94,8 @@ from specpilot_ai.core.models import (
     PublicLaunchObjectionKit,
     PublicLaunchSharePack,
     PublicLaunchShareVariant,
+    PublicLaunchSmokeCheck,
+    PublicLaunchSmokeDashboard,
     PublicObjectionAnswer,
     PublicObjectionCard,
     PublicObjectionComparison,
@@ -3612,6 +3614,205 @@ class SpecPilotStore:
                 "launch_action_pricing_intent",
             ],
             next_actions=_public_action_router_next_actions(status, routes),
+        )
+
+    def public_launch_smoke_dashboard_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 8,
+    ) -> PublicLaunchSmokeDashboard:
+        metrics = self.metrics_for_workspace(workspace_id)
+        proof = self.public_proof_hub_for_workspace(workspace_id, limit=limit)
+        acquisition = self.public_acquisition_hub_for_workspace(workspace_id, limit=limit)
+        pulse = self.launch_pulse_for_workspace(workspace_id, limit=limit)
+        objections = self.public_launch_objection_kit_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        share_pack = self.public_launch_share_pack_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        router = self.public_launch_action_router_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        referrals = self.waitlist_referral_dashboard_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        conversion = self.public_conversion_board_for_workspace(workspace_id, limit=limit)
+        gate = self.launch_gate_for_workspace(workspace_id)
+        seo_status = CheckStatus.ok if self.public_site_url else CheckStatus.warning
+        launch_room_score = round(
+            (proof.proof_score + acquisition.launch_score + pulse.pulse_score) / 3,
+            1,
+        )
+        launch_room_status = _score_status(launch_room_score, warning=55, ok=75)
+        checks = [
+            _public_launch_smoke_check(
+                key="launch_room",
+                label="공개 런칭룸",
+                status=launch_room_status,
+                public_path=self._public_path_url("/launch"),
+                expected_signal="hero, 데모 카드, 시장 리포트, proof strip",
+                metric=(
+                    f"런칭 점수 {round(launch_room_score)}점 · "
+                    f"proof {round(proof.proof_score)}점 · "
+                    f"유입 {round(acquisition.launch_score)}점"
+                ),
+                recommendation=(
+                    "런칭룸 hero와 첫 분석 CTA를 유지하세요."
+                    if launch_room_status == CheckStatus.ok
+                    else acquisition.next_actions[0]
+                    if acquisition.next_actions
+                    else "런칭룸 proof와 CTA를 보강하세요."
+                ),
+            ),
+            _public_launch_smoke_check(
+                key="market_reports",
+                label="공개 카테고리 리포트",
+                status=CheckStatus.ok,
+                public_path=self._public_path_url("/market/desktop-pc"),
+                expected_signal="desktop-pc, laptop SEO 리포트",
+                metric="시장 리포트 2개 · desktop-pc/laptop",
+                recommendation=(
+                    "데스크톱 PC와 노트북 리포트를 런칭룸에서 계속 연결하세요."
+                ),
+            ),
+            _public_launch_smoke_check(
+                key="proof_hub",
+                label="공개 검증 허브",
+                status=proof.status,
+                public_path=self._public_path_url("/launch#launch-proof-hub"),
+                expected_signal="Trust Center, evidence kit, 공개 proof",
+                metric=f"proof {round(proof.proof_score)}점 · 근거 {len(proof.evidence_kit)}개",
+                recommendation=proof.next_actions[0]
+                if proof.next_actions
+                else "추천 기준과 공개 proof를 유지하세요.",
+            ),
+            _public_launch_smoke_check(
+                key="objection_kit",
+                label="런칭 반박 FAQ",
+                status=objections.status,
+                public_path=self._public_path_url("/launch#launch-objection-kit"),
+                expected_signal="최저가 비교, 제휴, 가격 최신성, 개인정보 답변",
+                metric=(
+                    f"반박 점수 {round(objections.objection_score)}점 · "
+                    f"답변 {len(objections.objections)}개"
+                ),
+                recommendation=objections.next_actions[0]
+                if objections.next_actions
+                else "첫 방문자의 핵심 반박 답변을 유지하세요.",
+            ),
+            _public_launch_smoke_check(
+                key="share_pack",
+                label="공유 확산팩",
+                status=share_pack.status,
+                public_path=share_pack.primary_url,
+                expected_signal="카카오톡, 커뮤니티, 팀, 이메일 복사용 문구",
+                metric=f"공유 점수 {round(share_pack.share_score)}점 · 문구 {len(share_pack.variants)}개",
+                recommendation=share_pack.next_actions[0]
+                if share_pack.next_actions
+                else "공유 복사와 추천 링크 이벤트를 계속 측정하세요.",
+            ),
+            _public_launch_smoke_check(
+                key="action_router",
+                label="방문자 액션 라우터",
+                status=router.status,
+                public_path=self._public_path_url("/launch#launch-action-router"),
+                expected_signal="방문자 유형별 CTA와 성장 이벤트",
+                metric=f"라우팅 {round(router.routing_score)}점 · route {len(router.routes)}개",
+                recommendation=router.next_actions[0]
+                if router.next_actions
+                else "route 선택과 CTA 클릭을 성장 퍼널에 남기세요.",
+            ),
+            _public_launch_smoke_check(
+                key="conversion_board",
+                label="공개 전환 보드",
+                status=conversion.status,
+                public_path=self._public_path_url("/launch#launch-public-ops"),
+                expected_signal="유입, 활성화, 공유, 추천, 수익화, 안정성 단계",
+                metric=(
+                    f"전환 점수 {round(conversion.conversion_score)}점 · "
+                    f"단계 {len(conversion.stages)}개"
+                ),
+                recommendation=conversion.next_actions[0]
+                if conversion.next_actions
+                else "전환 병목과 채널 액션을 계속 확인하세요.",
+            ),
+            _public_launch_smoke_check(
+                key="launch_gate",
+                label="공개 출시 게이트",
+                status=gate.status,
+                public_path=self._public_path_url("/launch#launch-readiness-gate"),
+                expected_signal="readiness, 품질, 연동, 데이터 거버넌스 go/no-go",
+                metric=f"{gate.decision} · readiness {round(gate.launch_readiness_score)}점",
+                recommendation=gate.required_actions[0]
+                if gate.required_actions
+                else "출시 게이트 상태를 유지하세요.",
+            ),
+            _public_launch_smoke_check(
+                key="seo_distribution",
+                label="검색/공유 배포 메타",
+                status=seo_status,
+                public_path=self._public_path_url("/sitemap.xml"),
+                expected_signal="robots, sitemap, manifest, canonical, Twitter, JSON-LD",
+                metric=(
+                    "PUBLIC_SITE_URL 설정됨"
+                    if self.public_site_url
+                    else "PUBLIC_SITE_URL 미설정 · 상대 경로 기준"
+                ),
+                recommendation=(
+                    "검색 색인과 공유 미리보기 검수를 배포 후 한 번 더 확인하세요."
+                    if self.public_site_url
+                    else "배포 도메인을 PUBLIC_SITE_URL에 설정해 절대 sitemap URL을 고정하세요."
+                ),
+            ),
+            _public_launch_smoke_check(
+                key="measurement",
+                label="공개 반응 측정",
+                status=CheckStatus.ok
+                if metrics.growth_events >= 1
+                else CheckStatus.warning,
+                public_path=self._public_path_url("/launch#launch-public-ops"),
+                expected_signal="growth_events, CTA 클릭, 추천 대기열, 요금제 관심",
+                metric=(
+                    f"성장 이벤트 {metrics.growth_events}건 · "
+                    f"추천 대기열 {referrals.total_referrals}명 · "
+                    f"요금제 관심 {metrics.subscription_intents}건"
+                ),
+                recommendation=(
+                    "런칭 페이지 CTA 이벤트를 계속 성장 퍼널에 저장하세요."
+                    if metrics.growth_events >= 1
+                    else "첫 공개 CTA 클릭을 growth event로 남겨 운영 판단 표본을 만드세요."
+                ),
+            ),
+        ]
+        smoke_score = _public_launch_smoke_score(checks)
+        status = _public_launch_smoke_status(checks, smoke_score)
+        return PublicLaunchSmokeDashboard(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            status=status,
+            smoke_score=smoke_score,
+            headline=_public_launch_smoke_headline(status, smoke_score),
+            summary=_public_launch_smoke_summary(checks, smoke_score),
+            ok_count=sum(1 for check in checks if check.status == CheckStatus.ok),
+            warning_count=sum(1 for check in checks if check.status == CheckStatus.warning),
+            blocker_count=sum(1 for check in checks if check.status == CheckStatus.blocker),
+            publish_ready_paths=[
+                check.public_path for check in checks if check.status == CheckStatus.ok
+            ],
+            checks=checks,
+            measurement_events=[
+                "launch_smoke_view",
+                "launch_smoke_check_click",
+                "launch_action_route_click",
+                "launch_share_copy_click",
+                "subscription_cta",
+            ],
+            next_actions=_public_launch_smoke_next_actions(checks),
         )
 
     def create_beta_lead_for_workspace(
@@ -12055,6 +12256,84 @@ def _public_action_router_next_actions(
     )
     if status == CheckStatus.ok:
         actions.append("가장 높은 route를 hero 보조 CTA와 공유 확산팩 상단에 반영하세요.")
+    return list(dict.fromkeys(actions))[:6]
+
+
+def _public_launch_smoke_check(
+    *,
+    key: str,
+    label: str,
+    status: CheckStatus,
+    public_path: str,
+    expected_signal: str,
+    metric: str,
+    recommendation: str,
+) -> PublicLaunchSmokeCheck:
+    return PublicLaunchSmokeCheck(
+        key=key,
+        label=label,
+        status=status,
+        public_path=public_path,
+        expected_signal=expected_signal,
+        metric=metric,
+        recommendation=recommendation,
+    )
+
+
+def _public_launch_smoke_score(checks: list[PublicLaunchSmokeCheck]) -> float:
+    weights = {
+        CheckStatus.ok: 100.0,
+        CheckStatus.warning: 62.0,
+        CheckStatus.blocker: 18.0,
+    }
+    if not checks:
+        return 0.0
+    return round(sum(weights[check.status] for check in checks) / len(checks), 1)
+
+
+def _public_launch_smoke_status(
+    checks: list[PublicLaunchSmokeCheck],
+    smoke_score: float,
+) -> CheckStatus:
+    if any(check.status == CheckStatus.blocker for check in checks) or smoke_score < 45:
+        return CheckStatus.blocker
+    if smoke_score < 76 or any(check.status == CheckStatus.warning for check in checks):
+        return CheckStatus.warning
+    return CheckStatus.ok
+
+
+def _public_launch_smoke_headline(status: CheckStatus, smoke_score: float) -> str:
+    if status == CheckStatus.ok:
+        return f"공개 런칭 스모크 {round(smoke_score)}점, 배포 확대가 가능합니다."
+    if status == CheckStatus.warning:
+        return f"공개 런칭 스모크 {round(smoke_score)}점, 일부 표면을 보강하세요."
+    return f"공개 런칭 스모크 {round(smoke_score)}점, 공개 확대 전 차단 항목을 닫아야 합니다."
+
+
+def _public_launch_smoke_summary(
+    checks: list[PublicLaunchSmokeCheck],
+    smoke_score: float,
+) -> str:
+    ok_count = sum(1 for check in checks if check.status == CheckStatus.ok)
+    warning_count = sum(1 for check in checks if check.status == CheckStatus.warning)
+    blocker_count = sum(1 for check in checks if check.status == CheckStatus.blocker)
+    return (
+        f"공개 런칭룸, 시장 리포트, proof, 반박 FAQ, 공유 확산팩, 액션 라우터, "
+        f"전환 보드, 출시 게이트, SEO 배포 메타, 측정 이벤트를 {round(smoke_score)}점으로 "
+        f"점검했습니다. ok {ok_count}개, warning {warning_count}개, blocker {blocker_count}개입니다."
+    )
+
+
+def _public_launch_smoke_next_actions(
+    checks: list[PublicLaunchSmokeCheck],
+) -> list[str]:
+    actions = [
+        check.recommendation for check in checks if check.status != CheckStatus.ok
+    ]
+    if not actions:
+        actions.append("런칭 직후 24시간 동안 공유, 액션 라우터, 요금제 관심 이벤트를 계속 확인하세요.")
+    actions.append("공개 URL을 커뮤니티와 메신저에 붙여 미리보기 제목/이미지/설명을 실제로 확인하세요.")
+    actions.append("스모크 warning 항목은 출시 배포 플랜의 D-day 체크리스트에 반영하세요.")
     return list(dict.fromkeys(actions))[:6]
 
 

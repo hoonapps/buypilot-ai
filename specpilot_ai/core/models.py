@@ -1235,6 +1235,33 @@ class PublicLaunchRoom(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class PublicLaunchSmokeCheck(BaseModel):
+    key: str
+    label: str
+    status: CheckStatus
+    public_path: str
+    expected_signal: str
+    metric: str
+    recommendation: str
+
+
+class PublicLaunchSmokeDashboard(BaseModel):
+    smoke_version: str = "specpilot.public_launch_smoke.v1"
+    workspace_id: str
+    generated_at: str
+    status: CheckStatus
+    smoke_score: float = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    ok_count: int = 0
+    warning_count: int = 0
+    blocker_count: int = 0
+    publish_ready_paths: list[str] = Field(default_factory=list)
+    checks: list[PublicLaunchSmokeCheck] = Field(default_factory=list)
+    measurement_events: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PurchaseOnboardingStep(BaseModel):
     title: str
     description: str
