@@ -503,6 +503,93 @@ def test_public_buyer_challenge_kit_packages_shareable_launch_loop() -> None:
     assert payload["next_actions"]
 
 
+def test_public_spec_risk_scanner_checks_checkout_options_before_purchase() -> None:
+    scanner = client.get("/public/spec-risk-scanner")
+
+    assert scanner.status_code == 200
+    scanner_payload = scanner.json()
+    assert scanner_payload["scanner_version"] == "specpilot.public_spec_risk_scanner.v1"
+    assert scanner_payload["result_endpoint"] == "/public/spec-risk-scanner/result"
+    assert scanner_payload["example_request"]["category"] == "desktop_pc"
+    assert scanner_payload["required_evidence"]
+    assert scanner_payload["next_actions"]
+
+    ok_result = client.post(
+        "/public/spec-risk-scanner/result",
+        json={
+            "category": "desktop_pc",
+            "product_title": "Creator RTX 4070 SUPER Build",
+            "option_text": (
+                "장바구니 옵션: Ryzen 7 7800X3D / RTX 4070 SUPER / "
+                "RAM 32GB / SSD 1TB / Windows 11 Pro"
+            ),
+            "cart_total_krw": 2_185_000,
+            "budget_krw": 2_200_000,
+            "expected_cpu": "Ryzen 7 7800X3D",
+            "expected_gpu": "RTX 4070 SUPER",
+            "expected_ram_gb": 32,
+            "expected_storage_gb": 1000,
+            "expected_os": "Windows 11 Pro",
+            "evidence_text": (
+                "최종 결제 총액 2,185,000원, 배송 내일 출고, 반품 7일, "
+                "AS 1년, 판매자 문의 답변 확보"
+            ),
+            "source": "pytest",
+        },
+    )
+
+    assert ok_result.status_code == 200
+    ok_payload = ok_result.json()
+    assert ok_payload["result_version"] == "specpilot.spec_risk_scanner_result.v1"
+    assert ok_payload["verdict"] in {"ready", "verify"}
+    assert ok_payload["blocker_count"] == 0
+    assert ok_payload["readiness_score"] >= 80
+    assert not ok_payload["missing_evidence"]
+    assert {check["check_id"] for check in ok_payload["checks"]} >= {
+        "price",
+        "option_name",
+        "cpu",
+        "gpu",
+        "ram",
+        "storage",
+        "os",
+    }
+    assert "Creator RTX 4070 SUPER Build" in ok_payload["analysis_prefill"]
+    assert "SpecPilot AI 옵션/사양 빠른 검수 결과" in ok_payload["share_copy"]
+
+    hold_result = client.post(
+        "/public/spec-risk-scanner/result",
+        json={
+            "category": "desktop_pc",
+            "product_title": "Creator RTX 4070 SUPER Build",
+            "option_text": "장바구니 옵션: Ryzen 5 7500F / RTX 4070 / RAM 16GB / SSD 512GB",
+            "cart_total_krw": 2_340_000,
+            "budget_krw": 2_200_000,
+            "expected_cpu": "Ryzen 7 7800X3D",
+            "expected_gpu": "RTX 4070 SUPER",
+            "expected_ram_gb": 32,
+            "expected_storage_gb": 1000,
+            "expected_os": "Windows 11 Pro",
+            "source": "pytest",
+        },
+    )
+
+    assert hold_result.status_code == 200
+    hold_payload = hold_result.json()
+    assert hold_payload["verdict"] == "hold"
+    assert hold_payload["blocker_count"] >= 4
+    assert hold_payload["warning_count"] >= 1
+    assert hold_payload["readiness_score"] < 50
+    assert "결제 보류" in hold_payload["headline"]
+    assert "배송 예정일" in hold_payload["missing_evidence"]
+    assert any(
+        check["check_id"] == "price" and check["status"] == "blocker"
+        for check in hold_payload["checks"]
+    )
+    assert "검수 결과로 분석 시작" == hold_payload["primary_cta_label"]
+    assert hold_payload["next_actions"]
+
+
 def test_growth_funnel_tracks_product_reaction_events() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-growth-{uuid4().hex}"}
     other_workspace = {"X-SpecPilot-Key": f"pytest-growth-other-{uuid4().hex}"}

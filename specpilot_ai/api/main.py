@@ -100,6 +100,7 @@ from specpilot_ai.core.models import (
     PublicReferralLeaderboard,
     PublicReport,
     PublicSocialProofWall,
+    PublicSpecRiskScanner,
     PurchaseDecisionBoard,
     PurchaseLink,
     PurchaseLinkGovernance,
@@ -140,6 +141,8 @@ from specpilot_ai.core.models import (
     SourceSchedulePreview,
     SourceUrlIngestRequest,
     SourceUrlIngestResponse,
+    SpecRiskScannerRequest,
+    SpecRiskScannerResult,
     SubscriptionIntent,
     SubscriptionIntentRequest,
     TeamPurchaseConsultKit,
@@ -173,6 +176,10 @@ from specpilot_ai.services.mistake_cost import (
     estimate_mistake_cost,
 )
 from specpilot_ai.services.onboarding import purchase_onboarding_playbooks
+from specpilot_ai.services.spec_risk_scanner import (
+    build_public_spec_risk_scanner,
+    scan_spec_risk,
+)
 from specpilot_ai.services.start_concierge import build_start_concierge
 from specpilot_ai.services.trust import build_privacy_policy, build_trust_center, build_trust_policy
 from specpilot_ai.sources.collector import SourceCollector
@@ -1159,6 +1166,21 @@ def public_buyer_challenge_kit(
         budget_krw=budget_krw,
         persona=persona,
     )
+
+
+@app.get("/public/spec-risk-scanner", response_model=PublicSpecRiskScanner)
+def public_spec_risk_scanner() -> PublicSpecRiskScanner:
+    return build_public_spec_risk_scanner()
+
+
+@app.post(
+    "/public/spec-risk-scanner/result",
+    response_model=SpecRiskScannerResult,
+)
+def public_spec_risk_scanner_result(
+    request: SpecRiskScannerRequest,
+) -> SpecRiskScannerResult:
+    return scan_spec_risk(request)
 
 
 @app.get("/public/proof-hub", response_model=PublicProofHub)

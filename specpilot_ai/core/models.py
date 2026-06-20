@@ -1334,6 +1334,65 @@ class PublicBuyerChallengeKit(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class PublicSpecRiskScanner(BaseModel):
+    scanner_version: str = "specpilot.public_spec_risk_scanner.v1"
+    generated_at: str
+    headline: str
+    summary: str
+    default_category: Category = Category.desktop_pc
+    default_budget_krw: int = 2_200_000
+    result_endpoint: str = "/public/spec-risk-scanner/result"
+    example_request: dict[str, str | int] = Field(default_factory=dict)
+    required_evidence: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
+class SpecRiskScannerRequest(BaseModel):
+    category: Category = Category.desktop_pc
+    product_title: str = "데스크톱 PC 견적"
+    option_text: str = ""
+    cart_total_krw: int | None = Field(default=None, ge=0, le=30_000_000)
+    budget_krw: int = Field(default=2_200_000, ge=300_000, le=30_000_000)
+    expected_cpu: str = ""
+    expected_gpu: str = ""
+    expected_ram_gb: int | None = Field(default=None, ge=0, le=1024)
+    expected_storage_gb: int | None = Field(default=None, ge=0, le=16384)
+    expected_os: str = ""
+    evidence_text: str = ""
+    source: str = "web"
+
+
+class SpecRiskCheck(BaseModel):
+    check_id: str
+    label: str
+    status: CheckStatus
+    expected: str
+    observed: str
+    recommendation: str
+
+
+class SpecRiskScannerResult(BaseModel):
+    result_version: str = "specpilot.spec_risk_scanner_result.v1"
+    generated_at: str
+    category: Category
+    product_title: str
+    budget_krw: int
+    cart_total_krw: int | None = None
+    verdict: str
+    readiness_score: float = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    checks: list[SpecRiskCheck] = Field(default_factory=list)
+    blocker_count: int = 0
+    warning_count: int = 0
+    missing_evidence: list[str] = Field(default_factory=list)
+    analysis_prefill: str
+    share_copy: str
+    primary_cta_label: str = "검수 결과로 분석 시작"
+    primary_cta_path: str = "#analysis"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class StartConciergeMilestone(BaseModel):
     step: str
     title: str
