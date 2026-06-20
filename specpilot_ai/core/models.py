@@ -1838,6 +1838,68 @@ class PublicSellerEvidenceKit(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class SellerNegotiationRequest(BaseModel):
+    category: Category = Category.desktop_pc
+    product_title: str = "구매 후보"
+    seller_name: str = "판매자"
+    current_price_krw: int = Field(default=2_000_000, ge=0, le=200_000_000)
+    target_price_krw: int | None = Field(default=None, ge=0, le=200_000_000)
+    budget_krw: int | None = Field(default=None, ge=0, le=200_000_000)
+    competing_price_krw: int | None = Field(default=None, ge=0, le=200_000_000)
+    shipping_fee_krw: int = Field(default=0, ge=0, le=5_000_000)
+    assembly_fee_krw: int = Field(default=0, ge=0, le=5_000_000)
+    os_fee_krw: int = Field(default=0, ge=0, le=5_000_000)
+    desired_ship_days: int | None = Field(default=None, ge=0, le=90)
+    stock_count: int | None = Field(default=None, ge=0, le=100_000)
+    urgency: str = "within_7_days"
+    risk_terms: list[str] = Field(default_factory=list)
+    must_keep_conditions: list[str] = Field(default_factory=list)
+    source: str = "web"
+
+
+class SellerNegotiationLever(BaseModel):
+    lever_id: str
+    label: str
+    priority: CheckStatus
+    ask: str
+    expected_value_krw: int
+    proof_to_attach: str
+    fallback: str
+
+
+class SellerNegotiationMessage(BaseModel):
+    channel: str
+    label: str
+    tone: str
+    copy_text: str
+    cta_label: str
+
+
+class PublicSellerNegotiationKit(BaseModel):
+    kit_version: str = "specpilot.public_seller_negotiation_kit.v1"
+    generated_at: str
+    category: Category
+    product_title: str
+    seller_name: str
+    priority: CheckStatus
+    negotiation_score: int = Field(ge=0, le=100)
+    expected_saving_krw: int
+    fair_offer_krw: int
+    max_acceptable_price_krw: int
+    headline: str
+    summary: str
+    levers: list[SellerNegotiationLever] = Field(default_factory=list)
+    message_variants: list[SellerNegotiationMessage] = Field(default_factory=list)
+    guardrails: list[str] = Field(default_factory=list)
+    evidence_checklist: list[str] = Field(default_factory=list)
+    seller_questions: list[str] = Field(default_factory=list)
+    analysis_prefill: str
+    share_copy: str
+    primary_cta_label: str = "협상 조건으로 분석 시작"
+    primary_cta_path: str = "#analysis"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PurchaseAftercareRequest(BaseModel):
     category: Category = Category.desktop_pc
     product_title: str = "구매한 제품"

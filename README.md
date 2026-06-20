@@ -62,6 +62,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 공개 보증/반품 정책 검수 키트: 반품/교환 기간, 초기 불량 예외, 개봉 후 반품, 보증 주체, 반품 비용, 위험 약관을 결제 전 보호 점수로 변환
 - 공개 실구매가 분해 키트: 표시가, 배송비, 조립비, OS 비용, 쿠폰, 카드 할인, 포인트, 수량을 최종 실구매가와 예산/리포트 가격 차이로 변환
 - 공개 구매 실행 패키지: 최종가, 예산, blocker/warning, 누락 증거, 판매자 질문을 결제 전 실행 단계, 증거 게이트, 중단 조건, 공유 문구로 변환
+- 공개 판매자 조건 협상 키트: 현재가, 목표가, 경쟁가, 배송/조립/OS 비용, 재고, 위험 조건을 조건 안전 협상 메시지와 guardrail로 변환
 - 공개 상품명 해석 키트: 쇼핑몰 상품명/옵션명에서 CPU/GPU/RAM/SSD/OS와 리퍼·전시·해외 조건을 구조화하고 검수 prefill을 제공
 - 공개 옵션/사양 빠른 검수기: 판매 페이지 옵션명, 장바구니 문구, 최종 결제 금액을 붙여 넣으면 예산 초과, 사양 불일치, 증거 누락을 결제 전 blocker/warning으로 판정하고 구매 세이프티 브리프, 판매자 확인 질문, 승인/공유 요약, 캡처 체크리스트를 반환
 - 공개 후보 비교 스냅샷: 데스크톱/노트북 후보 5개를 가격, 목적 적합도, 리뷰 신뢰, 구매 안정성으로 정렬하고 예산/성능/안전 우선 대안 시나리오를 제공
@@ -483,6 +484,30 @@ curl -X POST http://127.0.0.1:8000/public/seller-evidence-kit \
     "risk_terms": ["FreeDOS"],
     "missing_evidence": ["배송 예정일", "반품 조건", "AS 조건"],
     "must_confirm": ["실제 출고 사양", "파워 용량"]
+  }'
+```
+
+공개 판매자 조건 협상 키트는 현재가, 목표가, 경쟁가, 배송/조립/OS 비용, 재고, 위험 조건을 조건 안전 협상 메시지와 guardrail로 변환합니다.
+
+```bash
+curl -X POST http://127.0.0.1:8000/public/seller-negotiation-kit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "category": "desktop_pc",
+    "product_title": "Creator RTX 4070 SUPER Build",
+    "seller_name": "PC Mall",
+    "current_price_krw": 2165000,
+    "target_price_krw": 2100000,
+    "budget_krw": 2200000,
+    "competing_price_krw": 2120000,
+    "shipping_fee_krw": 10000,
+    "assembly_fee_krw": 30000,
+    "os_fee_krw": 0,
+    "desired_ship_days": 2,
+    "stock_count": 8,
+    "urgency": "within_7_days",
+    "risk_terms": ["카드 할인"],
+    "must_keep_conditions": ["실제 출고 사양", "국내 AS", "반품 7일"]
   }'
 ```
 
@@ -1773,6 +1798,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/public/spec-risk-scanner`, `/public/spec-risk-scanner/result`: 공개 옵션/사양 빠른 검수 메타와 결제 전 예산 초과, CPU/GPU/RAM/SSD/OS 불일치, 배송/반품/AS 증거 누락 판정, 구매 세이프티 브리프, 판매자 질문, 승인 요약, 캡처 체크리스트 조회
 - `/public/purchase-approval-brief-kit`: 공개 장바구니 검수 결과를 가족/팀/커뮤니티용 승인 질문, 찬성/반대 투표 옵션, 채널별 복사 문구, 분석 prefill로 변환
 - `/public/seller-evidence-kit`: 공개 판매자 확인 질문, 복사용 문의 문구, 답변 판정 기준, 캡처 체크리스트, 구매 승인 prefill 조회
+- `/public/seller-negotiation-kit`: 공개 현재가, 목표가, 경쟁가, 배송/조립/OS 비용, 재고, 위험 조건을 조건 안전 협상 메시지, 절감 예상, guardrail, 판매자 질문으로 변환
 - `/public/checkout-nudge-kit`: 공개 장바구니 검수 결과를 후속 알림 문구, 다음 행동, 판매자 답변/가격 재확인/구매 결과 회수 단계, 분석 prefill, 대기열 prefill로 변환
 - `/public/purchase-aftercare-kit`: 공개 구매일/배송완료일/최종 결제 금액/이슈를 반품·교환 마감, 보증 만료, 초기 불량 대응, 구매 결과 기록 prefill, 채널별 후속 문구로 변환
 - `/public/first-boot-setup-kit`: 공개 첫 부팅 OS/포트/디스플레이/드라이버/벤치마크/보증 등록 상태를 세팅 점수, 점검표, 문의 문구, 분석 prefill로 변환

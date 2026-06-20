@@ -130,6 +130,7 @@ from specpilot_ai.core.models import (
     PublicReferralLeaderboard,
     PublicReport,
     PublicSellerEvidenceKit,
+    PublicSellerNegotiationKit,
     PublicSetupCompatibilityKit,
     PublicShoppingCartIntakeKit,
     PublicSocialProofWall,
@@ -164,6 +165,7 @@ from specpilot_ai.core.models import (
     SavedReportSummary,
     SaveReportRequest,
     SellerEvidenceRequest,
+    SellerNegotiationRequest,
     SetupCompatibilityRequest,
     ShoppingCartIntakeRequest,
     SourceAdapterStatus,
@@ -232,6 +234,7 @@ from specpilot_ai.services.purchase_aftercare import build_public_purchase_after
 from specpilot_ai.services.purchase_approval import build_public_purchase_approval_brief_kit
 from specpilot_ai.services.purchase_execution import build_public_purchase_execution_kit
 from specpilot_ai.services.seller_evidence import build_public_seller_evidence_kit
+from specpilot_ai.services.seller_negotiation import build_public_seller_negotiation_kit
 from specpilot_ai.services.setup_compatibility import build_public_setup_compatibility_kit
 from specpilot_ai.services.shopping_cart_intake import build_public_shopping_cart_intake_kit
 from specpilot_ai.services.spec_rescue import build_public_spec_rescue_kit
@@ -1299,6 +1302,16 @@ def public_seller_evidence_kit(
     request: SellerEvidenceRequest,
 ) -> PublicSellerEvidenceKit:
     return build_public_seller_evidence_kit(request)
+
+
+@app.post(
+    "/public/seller-negotiation-kit",
+    response_model=PublicSellerNegotiationKit,
+)
+def public_seller_negotiation_kit(
+    request: SellerNegotiationRequest,
+) -> PublicSellerNegotiationKit:
+    return build_public_seller_negotiation_kit(request)
 
 
 @app.post(

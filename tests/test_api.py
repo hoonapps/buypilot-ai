@@ -956,6 +956,83 @@ def test_public_seller_evidence_kit_builds_questions_and_scores_answer() -> None
     assert any("판매자 답변" in item for item in answered_payload["evidence_checklist"])
 
 
+def test_public_seller_negotiation_kit_builds_condition_safe_offer_messages() -> None:
+    response = client.post(
+        "/public/seller-negotiation-kit",
+        json={
+            "category": "desktop_pc",
+            "product_title": "Creator RTX 4070 SUPER Build",
+            "seller_name": "PC Mall",
+            "current_price_krw": 2_165_000,
+            "target_price_krw": 2_100_000,
+            "budget_krw": 2_200_000,
+            "competing_price_krw": 2_120_000,
+            "shipping_fee_krw": 10_000,
+            "assembly_fee_krw": 30_000,
+            "os_fee_krw": 0,
+            "desired_ship_days": 2,
+            "stock_count": 8,
+            "urgency": "within_7_days",
+            "risk_terms": ["카드 할인"],
+            "must_keep_conditions": ["실제 출고 사양", "국내 AS", "반품 7일"],
+            "source": "pytest",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kit_version"] == "specpilot.public_seller_negotiation_kit.v1"
+    assert payload["category"] == "desktop_pc"
+    assert payload["seller_name"] == "PC Mall"
+    assert payload["priority"] == "ok"
+    assert payload["negotiation_score"] >= 70
+    assert payload["expected_saving_krw"] > 0
+    assert payload["fair_offer_krw"] <= 2_100_000
+    assert payload["max_acceptable_price_krw"] >= payload["fair_offer_krw"]
+    assert {lever["lever_id"] for lever in payload["levers"]} >= {
+        "price_match",
+        "shipping_waiver",
+        "assembly_os_bundle",
+        "condition_lock",
+    }
+    assert {message["channel"] for message in payload["message_variants"]} == {
+        "seller_chat",
+        "team_approval",
+        "community_check",
+    }
+    assert any("조건" in guardrail for guardrail in payload["guardrails"])
+    assert any("경쟁 상품" in item for item in payload["evidence_checklist"])
+    assert any("가격" in question for question in payload["seller_questions"])
+    assert "판매자 조건 협상" in payload["analysis_prefill"]
+    assert "SpecPilot AI 판매자 조건 협상 키트" in payload["share_copy"]
+    assert payload["primary_cta_path"] == "#analysis"
+    assert payload["next_actions"]
+
+    risky = client.post(
+        "/public/seller-negotiation-kit",
+        json={
+            "category": "laptop",
+            "product_title": "해외 리퍼 노트북",
+            "seller_name": "Open Market",
+            "current_price_krw": 1_780_000,
+            "target_price_krw": 1_620_000,
+            "budget_krw": 1_700_000,
+            "competing_price_krw": 1_650_000,
+            "shipping_fee_krw": 80_000,
+            "stock_count": 2,
+            "urgency": "today",
+            "risk_terms": ["해외", "리퍼", "반품 불가", "AS 불가"],
+        },
+    )
+    assert risky.status_code == 200
+    risky_payload = risky.json()
+    assert risky_payload["priority"] == "blocker"
+    assert risky_payload["negotiation_score"] < 60
+    assert any("공식 조건 답변" in guardrail for guardrail in risky_payload["guardrails"])
+    assert any("조건 확정" in risky_payload["headline"] or "조건" in risky_payload["headline"] for _ in [0])
+    assert any("가격 조정 요청보다" in action for action in risky_payload["next_actions"])
+
+
 def test_public_purchase_aftercare_kit_closes_return_and_outcome_loop() -> None:
     response = client.post(
         "/public/purchase-aftercare-kit",

@@ -144,6 +144,24 @@ CHECKS = (
         ),
     ),
     SmokeCheck(
+        name="public-seller-negotiation-kit",
+        method="POST",
+        path="/public/seller-negotiation-kit",
+        required_keys=(
+            "kit_version",
+            "priority",
+            "negotiation_score",
+            "expected_saving_krw",
+            "fair_offer_krw",
+            "max_acceptable_price_krw",
+            "levers",
+            "message_variants",
+            "guardrails",
+            "seller_questions",
+            "share_copy",
+        ),
+    ),
+    SmokeCheck(
         name="public-purchase-aftercare-kit",
         method="POST",
         path="/public/purchase-aftercare-kit",
@@ -689,6 +707,25 @@ def run_smoke() -> list[dict[str, Any]]:
                 "risk_terms": ["FreeDOS"],
                 "missing_evidence": ["배송 예정일", "반품 조건", "AS 조건"],
                 "must_confirm": ["실제 출고 사양"],
+                "source": "release_smoke",
+            }
+        if check.name == "public-seller-negotiation-kit":
+            json_body = {
+                "category": "desktop_pc",
+                "product_title": "Creator RTX 4070 SUPER Build",
+                "seller_name": "PC Mall",
+                "current_price_krw": 2_165_000,
+                "target_price_krw": 2_100_000,
+                "budget_krw": 2_200_000,
+                "competing_price_krw": 2_120_000,
+                "shipping_fee_krw": 10_000,
+                "assembly_fee_krw": 30_000,
+                "os_fee_krw": 0,
+                "desired_ship_days": 2,
+                "stock_count": 8,
+                "urgency": "within_7_days",
+                "risk_terms": ["카드 할인"],
+                "must_keep_conditions": ["실제 출고 사양", "국내 AS", "반품 7일"],
                 "source": "release_smoke",
             }
         if check.name == "public-purchase-aftercare-kit":
