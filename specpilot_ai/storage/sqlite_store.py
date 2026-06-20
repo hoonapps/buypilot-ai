@@ -219,7 +219,7 @@ DATA_INVENTORY_SPECS = [
     {
         "table_name": "alert_subscriptions",
         "label": "가격 알림 구독",
-        "pii_scope": "raw_contact",
+        "pii_scope": "masked_contact",
         "retention_days": 90,
         "created_column": "created_at",
     },
@@ -1904,7 +1904,7 @@ class SpecPilotStore:
                     subscription.target_price_krw,
                     subscription.current_price_krw,
                     json.dumps(subscription.channels, ensure_ascii=False),
-                    contact,
+                    subscription.contact_masked,
                     subscription.owner_label,
                     subscription.status,
                     subscription.created_at,
@@ -8048,7 +8048,11 @@ def _alert_from_row(row: sqlite3.Row) -> AlertSubscription:
         target_price_krw=data["target_price_krw"],
         current_price_krw=data["current_price_krw"],
         channels=json.loads(data["channels_json"]),
-        contact_masked=_mask_contact(data["contact"]),
+        contact_masked=(
+            data["contact"]
+            if "***" in data["contact"]
+            else _mask_contact(data["contact"])
+        ),
         owner_label=data["owner_label"],
         status=data["status"],
         created_at=data["created_at"],

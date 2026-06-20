@@ -31,6 +31,9 @@ jobs:
       - name: Pytest
         run: pytest -q
 
+      - name: Release endpoint smoke
+        run: python scripts/check_release_endpoints.py
+
       - name: Render product plan PDF
         env:
           PRODUCT_PLAN_PDF_OUTPUT: ${{ runner.temp }}/shopping_purchase_decision_agent_plan.pdf

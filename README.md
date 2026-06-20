@@ -1545,7 +1545,13 @@ pytest -q
 
 ```bash
 make verify
+python scripts/check_release_endpoints.py
+PRODUCT_PLAN_PDF_OUTPUT=/tmp/shopping_purchase_decision_agent_plan.pdf \
+  python scripts/render_product_plan_pdf.py
+test -s /tmp/shopping_purchase_decision_agent_plan.pdf
 ```
+
+`check_release_endpoints.py`는 출시 데모 워크스페이스에 분석, 저장/공유 리포트, 가격 알림, 피드백, 베타 리드, 추천 대기열, 요금제 관심, 구매 결과, CTA 실험, 외부 연동 증거를 심은 뒤 `/ready`, `/public/launch-smoke`, `/ops/public-launch-preflight`, `/beta/launch-gate`의 필수 JSON 신호와 blocker 없는 출시 상태를 검증합니다.
 
 Docker 이미지 빌드:
 
@@ -1623,7 +1629,7 @@ GitHub Actions는 `main` push와 PR에서 다음을 실행합니다.
 - 학습 인사이트는 구매 결과, 결제 전 검수 차단, 피드백 만족도를 합쳐 제품별 전환율, 반품률, 가격 신선도, 다음 개선 액션으로 운영 콘솔에 노출합니다.
 - 완료 리포트 배치는 저장된 구매 리포트를 운영 채널 outbox로 묶어 전달하고, 템플릿, 수신자 그룹, unsubscribe 제외, 발송 전 렌더링 미리보기, provider 삽입용 공개 추적 픽셀/클릭 리다이렉트, provider webhook 기반 반송/신고/수신 제외, batch별 성공/실패/재시도/열람/클릭 상태를 남깁니다.
 - 목표가 도달 알림은 발송 큐와 채널별 dispatch 시도를 남기고 실패 시 재시도 기준을 함께 저장합니다.
-- 연락처와 이메일 원문은 응답/운영 콘솔에 노출하지 않고 마스킹된 값만 표시합니다. `/ops/data-governance`는 원문 연락처 컬럼이 남은 저장 표면을 blocker로 표시해 저장 구조 보강 대상을 드러냅니다.
+- 연락처와 이메일 원문은 응답/운영 콘솔에 노출하지 않고 마스킹된 값만 표시합니다. 가격 알림 구독도 마스킹된 연락처만 저장하며 `/ops/data-governance`는 원문 연락처 컬럼이 남은 저장 표면을 blocker로 표시해 저장 구조 보강 대상을 드러냅니다.
 - 추천 만족도와 구매 의향은 모델 개선 신호로 쓰되 추천 순위에는 즉시 반영하지 않습니다.
 - 베타 출시 준비도는 분석 실행, 공유 리포트 조회, 알림 연결, 피드백, 리드, 품질 차단 사유를 함께 보며 단일 지표만으로 공개 확대를 결정하지 않습니다.
 - 베타 cohort는 시나리오와 persona 기준으로 리드와 피드백을 묶고, 자동 개선 백로그는 readiness/피드백/품질 차단/학습 인사이트 신호에서 생성합니다.

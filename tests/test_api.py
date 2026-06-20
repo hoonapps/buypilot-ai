@@ -3901,11 +3901,12 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     governance_payload = data_governance.json()
     assert governance_payload["workspace_id"] == saved_payload["workspace_id"]
     assert governance_payload["total_records"] > 0
-    assert governance_payload["raw_contact_surfaces"] >= 1
-    assert governance_payload["status"] == "blocker"
+    assert governance_payload["raw_contact_surfaces"] == 0
+    assert governance_payload["status"] == "ok"
     assert any(
         item["table_name"] == "alert_subscriptions"
-        and item["status"] == "blocker"
+        and item["status"] == "ok"
+        and item["pii_scope"] == "masked_contact"
         for item in governance_payload["inventory"]
     )
 
@@ -4253,7 +4254,7 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
         "warning",
         "blocker",
     }
-    assert launch_payload["metric_cards"]["raw_contact_surfaces"] >= 1
+    assert launch_payload["metric_cards"]["raw_contact_surfaces"] == 0
 
     isolated_launch_gate = client.get("/beta/launch-gate", headers=WORKSPACE_B)
     assert isolated_launch_gate.status_code == 200
