@@ -740,6 +740,65 @@ class PricingDashboard(BaseModel):
     recent_intents: list[SubscriptionIntent] = Field(default_factory=list)
 
 
+class MarketReportPick(BaseModel):
+    category: Category
+    product_id: str
+    model_name: str
+    role_label: str
+    effective_price_krw: int
+    target_price_krw: int
+    price_band: str
+    stock_status: str
+    source_type: str
+    benchmark_summary: str
+    risk_status: CheckStatus
+    fit_tags: list[str] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+    watchouts: list[str] = Field(default_factory=list)
+
+
+class MarketPriceSegment(BaseModel):
+    category: Category
+    label: str
+    min_price_krw: int
+    max_price_krw: int
+    recommended_budget_krw: int
+    summary: str
+    representative_product_ids: list[str] = Field(default_factory=list)
+
+
+class MarketRiskSignal(BaseModel):
+    title: str
+    status: CheckStatus
+    affected_product_ids: list[str] = Field(default_factory=list)
+    evidence: str
+    action: str
+
+
+class MarketTrendCard(BaseModel):
+    title: str
+    category: Category | None = None
+    signal: str
+    evidence: str
+    recommendation: str
+
+
+class CategoryMarketReport(BaseModel):
+    workspace_id: str
+    generated_at: str
+    report_month: str
+    category_filter: Category | None = None
+    headline: str
+    summary: str
+    total_candidates: int = 0
+    picks: list[MarketReportPick] = Field(default_factory=list)
+    price_segments: list[MarketPriceSegment] = Field(default_factory=list)
+    risk_signals: list[MarketRiskSignal] = Field(default_factory=list)
+    trend_cards: list[MarketTrendCard] = Field(default_factory=list)
+    workspace_signals: dict[str, int | float | str] = Field(default_factory=dict)
+    publishing_checklist: list[str] = Field(default_factory=list)
+
+
 class BetaCohortRequest(BaseModel):
     name: str = Field(min_length=2)
     scenario: str = Field(min_length=2)

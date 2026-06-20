@@ -33,6 +33,7 @@ from specpilot_ai.core.models import (
     BetaLeadRequest,
     BetaReadinessDashboard,
     Category,
+    CategoryMarketReport,
     CheckoutReview,
     CheckoutReviewRequest,
     CompletionDeliveryEngagement,
@@ -114,6 +115,7 @@ from specpilot_ai.core.models import (
 from specpilot_ai.graph.neo4j_client import Neo4jRepository
 from specpilot_ai.graph.product_graph import pc_purchase_graph_schema
 from specpilot_ai.services.intake import diagnose_intake
+from specpilot_ai.services.market import build_category_market_report
 from specpilot_ai.services.trust import build_privacy_policy, build_trust_policy
 from specpilot_ai.sources.collector import SourceCollector
 from specpilot_ai.sources.url_ingestion import ingest_source_url
@@ -1038,6 +1040,18 @@ def me(workspace: WorkspaceContext = WORKSPACE_DEPENDENCY) -> WorkspaceContext:
 @app.get("/pricing/plans", response_model=list[PricingPlan])
 def list_pricing_plans() -> list[PricingPlan]:
     return pricing_plans()
+
+
+@app.get("/market/category-reports", response_model=CategoryMarketReport)
+def category_market_report(
+    category: Category | None = None,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> CategoryMarketReport:
+    return build_category_market_report(
+        workspace_id=workspace.workspace_id,
+        metrics=_store().metrics_for_workspace(workspace.workspace_id),
+        category_filter=category,
+    )
 
 
 @app.post("/billing/subscription-intents", response_model=SubscriptionIntent)

@@ -200,6 +200,42 @@ def test_pricing_plans_subscription_intents_and_dashboard() -> None:
     assert metrics_payload["estimated_mrr_krw"] == 156_900
 
 
+def test_category_market_report_exposes_monthly_picks_and_risks() -> None:
+    workspace = {"X-SpecPilot-Key": f"pytest-market-{uuid4().hex}"}
+
+    report = client.get(
+        "/market/category-reports?category=laptop",
+        headers=workspace,
+    )
+
+    assert report.status_code == 200
+    payload = report.json()
+    assert payload["workspace_id"].startswith("workspace_")
+    assert payload["report_month"]
+    assert payload["category_filter"] == "laptop"
+    assert "노트북" in payload["headline"]
+    assert payload["total_candidates"] == 5
+    assert payload["picks"]
+    assert all(item["category"] == "laptop" for item in payload["picks"])
+    assert all(item["effective_price_krw"] > 0 for item in payload["picks"])
+    assert all(item["target_price_krw"] > 0 for item in payload["picks"])
+    assert payload["price_segments"]
+    assert payload["risk_signals"]
+    assert payload["trend_cards"]
+    assert payload["workspace_signals"]["analysis_runs"] >= 0
+    assert payload["publishing_checklist"]
+
+    combined = client.get("/market/category-reports", headers=workspace)
+    assert combined.status_code == 200
+    combined_payload = combined.json()
+    assert combined_payload["category_filter"] is None
+    assert combined_payload["total_candidates"] == 10
+    assert {item["category"] for item in combined_payload["picks"]} <= {
+        "desktop_pc",
+        "laptop",
+    }
+
+
 def test_trust_policy_endpoint_exposes_cache_and_fairness_rules() -> None:
     response = client.get("/policy/trust")
 
