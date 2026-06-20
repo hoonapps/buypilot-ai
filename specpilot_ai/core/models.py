@@ -1605,6 +1605,54 @@ class PublicCheckoutNudgeKit(BaseModel):
     primary_cta_path: str = "#analysis"
 
 
+class SpecRescueRequest(BaseModel):
+    category: Category = Category.desktop_pc
+    product_title: str = "구매 후보"
+    verdict: str = "hold"
+    budget_krw: int = Field(default=2_200_000, ge=300_000, le=30_000_000)
+    cart_total_krw: int | None = Field(default=None, ge=0, le=30_000_000)
+    blocker_count: int = Field(default=0, ge=0, le=20)
+    warning_count: int = Field(default=0, ge=0, le=20)
+    missing_evidence: list[str] = Field(default_factory=list)
+    purpose: str = "qhd_creator"
+    source: str = "web"
+
+
+class SpecRescueAlternative(BaseModel):
+    alternative_id: str
+    product_id: str
+    model_name: str
+    role_label: str
+    effective_price_krw: int
+    price_delta_krw: int
+    status: CheckStatus
+    option_summary: str
+    rescue_reason: str
+    tradeoff: str
+    evidence: list[str] = Field(default_factory=list)
+    search_query: str
+    cta_label: str = "이 대체 후보로 분석"
+
+
+class PublicSpecRescueKit(BaseModel):
+    kit_version: str = "specpilot.public_spec_rescue_kit.v1"
+    generated_at: str
+    category: Category
+    product_title: str
+    verdict: str
+    rescue_priority: CheckStatus
+    headline: str
+    summary: str
+    decision_rule: str
+    seller_message: str
+    alternatives: list[SpecRescueAlternative] = Field(default_factory=list)
+    analysis_prefill: str
+    share_copy: str
+    primary_cta_label: str = "대체 후보로 분석 시작"
+    primary_cta_path: str = "#analysis"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class CandidateCompareItem(BaseModel):
     product_id: str
     model_name: str

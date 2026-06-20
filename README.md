@@ -286,6 +286,24 @@ curl -X POST http://127.0.0.1:8000/public/checkout-nudge-kit \
   }'
 ```
 
+공개 대체 후보 rescue 키트는 장바구니 검수에서 보류 또는 확인 필요가 나온 사용자가 바로 이탈하지 않도록 같은 예산의 대체 후보, 판매자 확인 메시지, 검색 문구, 공유 문구를 반환합니다.
+
+```bash
+curl -X POST http://127.0.0.1:8000/public/spec-rescue-kit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "category": "desktop_pc",
+    "product_title": "Creator RTX 4070 SUPER Build",
+    "verdict": "hold",
+    "budget_krw": 2200000,
+    "cart_total_krw": 2340000,
+    "blocker_count": 4,
+    "warning_count": 2,
+    "missing_evidence": ["배송 예정일", "AS 조건"],
+    "purpose": "qhd_creator"
+  }'
+```
+
 공개 후보 비교 스냅샷은 카테고리, 예산, 목적을 받아 TOP 후보, 예산 방어, 성능 우선, 안전 우선 대안 시나리오와 공유 문구를 반환합니다.
 
 ```bash
@@ -1482,6 +1500,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/public/buyer-challenge-kit`: 구매 성향, 실패 비용, 체크리스트를 3단계 공유 챌린지와 카카오톡/커뮤니티/팀 채널별 복사 문구로 패키징
 - `/public/spec-risk-scanner`, `/public/spec-risk-scanner/result`: 공개 옵션/사양 빠른 검수 메타와 결제 전 예산 초과, CPU/GPU/RAM/SSD/OS 불일치, 배송/반품/AS 증거 누락 판정, 구매 세이프티 브리프, 판매자 질문, 승인 요약, 캡처 체크리스트 조회
 - `/public/checkout-nudge-kit`: 공개 장바구니 검수 결과를 후속 알림 문구, 다음 행동, 판매자 답변/가격 재확인/구매 결과 회수 단계, 분석 prefill, 대기열 prefill로 변환
+- `/public/spec-rescue-kit`: 공개 장바구니 보류/확인 필요 결과를 예산 내 대체 후보 3개, 판매자 확인 메시지, 검색 문구, 분석 prefill, 공유 문구로 변환
 - `/public/candidate-compare`: 공개 후보 5개 비교표, 비교 축별 승자, 예산/성능/안전 우선 대안 시나리오, 분석 prefill, 공유 문구 조회
 - `/public/deal-timing-window`: 공개 후보별 현재가, 목표가, 적정가 밴드, 재고/쿠폰 변동 리스크, 결제 트리거, 목표가 알림용 공유 문구 조회
 - `/reports/completion-templates`, `/reports/completion-recipient-groups`, `/reports/completion-preview`, `/reports/completion-batches`, `/reports/completion-engagement`, `/reports/completion-provider-events`, `/reports/completion-deliveries/provider-webhooks`, `/t/o/{tracking_token}.png`, `/t/c/{tracking_token}`: 완료 리포트 템플릿, 수신자 그룹, unsubscribe 제외, 발송 전 렌더링 미리보기, batch와 개별 delivery 성공/실패/재시도/열람/클릭/반송/신고/수신 제외 상태, provider 삽입용 공개 추적 픽셀/클릭 리다이렉트

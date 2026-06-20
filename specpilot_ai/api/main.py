@@ -117,6 +117,7 @@ from specpilot_ai.core.models import (
     PublicReferralLeaderboard,
     PublicReport,
     PublicSocialProofWall,
+    PublicSpecRescueKit,
     PublicSpecRiskScanner,
     PurchaseDecisionBoard,
     PurchaseLink,
@@ -158,6 +159,7 @@ from specpilot_ai.core.models import (
     SourceSchedulePreview,
     SourceUrlIngestRequest,
     SourceUrlIngestResponse,
+    SpecRescueRequest,
     SpecRiskScannerRequest,
     SpecRiskScannerResult,
     SubscriptionIntent,
@@ -195,6 +197,7 @@ from specpilot_ai.services.mistake_cost import (
     estimate_mistake_cost,
 )
 from specpilot_ai.services.onboarding import purchase_onboarding_playbooks
+from specpilot_ai.services.spec_rescue import build_public_spec_rescue_kit
 from specpilot_ai.services.spec_risk_scanner import (
     build_checkout_nudge_kit,
     build_public_spec_risk_scanner,
@@ -1211,6 +1214,16 @@ def public_checkout_nudge_kit(
     request: CheckoutNudgeRequest,
 ) -> PublicCheckoutNudgeKit:
     return build_checkout_nudge_kit(request)
+
+
+@app.post(
+    "/public/spec-rescue-kit",
+    response_model=PublicSpecRescueKit,
+)
+def public_spec_rescue_kit(
+    request: SpecRescueRequest,
+) -> PublicSpecRescueKit:
+    return build_public_spec_rescue_kit(request)
 
 
 @app.get("/public/candidate-compare", response_model=PublicCandidateCompare)

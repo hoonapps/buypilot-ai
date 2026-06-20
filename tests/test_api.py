@@ -656,6 +656,43 @@ def test_public_checkout_nudge_kit_turns_cart_check_into_followup_plan() -> None
     assert "노트북" in ready_payload["analysis_prefill"]
 
 
+def test_public_spec_rescue_kit_suggests_safer_alternatives_after_hold() -> None:
+    response = client.post(
+        "/public/spec-rescue-kit",
+        json={
+            "category": "desktop_pc",
+            "product_title": "Creator RTX 4070 SUPER Build",
+            "verdict": "hold",
+            "budget_krw": 2_200_000,
+            "cart_total_krw": 2_340_000,
+            "blocker_count": 4,
+            "warning_count": 2,
+            "missing_evidence": ["배송 예정일", "AS 조건"],
+            "purpose": "qhd_creator",
+            "source": "pytest",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kit_version"] == "specpilot.public_spec_rescue_kit.v1"
+    assert payload["rescue_priority"] == "blocker"
+    assert "대체안" in payload["headline"]
+    assert "blocker 4개" in payload["summary"]
+    assert "결제하지 말고" in payload["decision_rule"]
+    assert "판매자" in payload["seller_message"] or "확인 요청" in payload["seller_message"]
+    assert len(payload["alternatives"]) == 3
+    first = payload["alternatives"][0]
+    assert first["model_name"] != "Creator RTX 4070 SUPER Build"
+    assert first["effective_price_krw"] > 0
+    assert first["search_query"]
+    assert first["evidence"]
+    assert first["cta_label"] == "이 대체 후보로 분석"
+    assert "대체 후보" in payload["analysis_prefill"]
+    assert "SpecPilot AI 대체 후보 rescue" in payload["share_copy"]
+    assert payload["next_actions"]
+
+
 def test_public_candidate_compare_exposes_top_candidates_and_scenarios() -> None:
     response = client.get(
         "/public/candidate-compare"
