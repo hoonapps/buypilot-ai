@@ -61,6 +61,11 @@ from specpilot_ai.core.models import (
     IntegrationProviderRequest,
     IntegrationReadinessDashboard,
     LaunchCampaignKit,
+    LaunchExperiment,
+    LaunchExperimentDashboard,
+    LaunchExperimentEvent,
+    LaunchExperimentEventRequest,
+    LaunchExperimentRequest,
     LaunchGateDashboard,
     LaunchPulseDashboard,
     ObservabilityDispatchRequest,
@@ -1258,6 +1263,58 @@ def growth_launch_kit(
     audience: str = "creator",
 ) -> LaunchCampaignKit:
     return build_launch_campaign_kit(category=category, audience=audience)
+
+
+@app.post("/growth/launch-experiments", response_model=LaunchExperiment)
+def create_launch_experiment(
+    request: LaunchExperimentRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> LaunchExperiment:
+    return _store().create_launch_experiment_for_workspace(
+        workspace.workspace_id,
+        request,
+    )
+
+
+@app.get("/growth/launch-experiments", response_model=list[LaunchExperiment])
+def list_launch_experiments(
+    limit: int = 20,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[LaunchExperiment]:
+    return _store().list_launch_experiments_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+
+
+@app.post(
+    "/growth/launch-experiments/{experiment_id}/events",
+    response_model=LaunchExperimentEvent,
+)
+def record_launch_experiment_event(
+    experiment_id: str,
+    request: LaunchExperimentEventRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> LaunchExperimentEvent:
+    event = _store().record_launch_experiment_event_for_workspace(
+        workspace.workspace_id,
+        experiment_id,
+        request,
+    )
+    if event is None:
+        raise HTTPException(status_code=404, detail="launch experiment not found")
+    return event
+
+
+@app.get("/growth/launch-experiment-dashboard", response_model=LaunchExperimentDashboard)
+def launch_experiment_dashboard(
+    limit: int = 20,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> LaunchExperimentDashboard:
+    return _store().launch_experiment_dashboard_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
 
 
 @app.get("/growth/launch-pulse", response_model=LaunchPulseDashboard)

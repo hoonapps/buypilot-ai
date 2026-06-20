@@ -57,6 +57,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 리텐션 허브: 저장 리포트, 가격 알림, 공유 조회, 구매 상담, 구매 결과, 완료 리포트 반응을 재참여 점수와 플레이로 집계
 - 추천 대기열: 가입자별 추천 코드와 공유 URL을 발급하고 추천 유입, 우선순위 점수, 리더보드로 공개 전 확산 루프를 검증
 - 런치 반응 Pulse: 성장 이벤트, 만족도, 구매 의향, 추천 대기열, 요금제 관심, readiness를 합성해 공개 반응 온도와 다음 액션을 반환
+- 출시 실험 허브: 공개 CTA 카피 variant를 만들고 노출/전환 이벤트, 승자 후보, 다음 실험 액션을 워크스페이스별로 집계
 - 출시 캠페인 키트: 커뮤니티/검색/추천 채널별 공개 베타 카피, CTA 실험, 출시 체크리스트, 위험 고지, 측정 계획 생성
 - 공개 데모 갤러리: 데스크톱/크리에이터 노트북/팀 구매 시나리오를 한 번에 폼 적용 가능한 출시용 preset으로 제공
 - 출처 신뢰도, 캐시 만료 기준, 제휴 고지 정책
@@ -894,6 +895,46 @@ curl http://127.0.0.1:8000/growth/launch-pulse \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
+출시 실험 허브:
+
+```bash
+curl -X POST http://127.0.0.1:8000/growth/launch-experiments \
+  -H "Content-Type: application/json" \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY" \
+  -d '{
+    "name": "커뮤니티 첫 분석 CTA",
+    "channel": "community",
+    "audience": "desktop_pc_buyer",
+    "hypothesis": "구매 실패 방지 메시지가 빠른 진단 메시지보다 전환이 높다.",
+    "primary_metric": "subscription_cta",
+    "target_surface": "community-post",
+    "category": "desktop_pc",
+    "variants": [
+      {
+        "label": "구매 실패 방지",
+        "headline": "200만원 PC 견적, 결제 전에 실패 가능성을 줄이세요",
+        "body": "가격 타이밍, 호환성, 결제 전 검수까지 한 번에 확인합니다.",
+        "cta_label": "구매 전 검수하기",
+        "cta_path": "/#start-concierge",
+        "allocation_percent": 50
+      },
+      {
+        "label": "3분 빠른 진단",
+        "headline": "컴퓨터 견적 고민을 3분 안에 줄이세요",
+        "body": "용도와 예산을 넣으면 후보와 가격 대기 여부를 보여줍니다.",
+        "cta_label": "3분 진단 시작",
+        "cta_path": "/",
+        "allocation_percent": 50
+      }
+    ]
+  }'
+```
+
+```bash
+curl http://127.0.0.1:8000/growth/launch-experiment-dashboard \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
 출시 캠페인 키트:
 
 ```bash
@@ -1149,6 +1190,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/growth/retention-hub`: 저장 리포트, 가격 알림, 공개 조회, 구매 상담, 구매 결과, 완료 리포트 engagement를 재참여 신호, 플레이, 다음 액션으로 집계
 - `/growth/waitlist-referrals`, `/growth/referral-dashboard`: 추천 대기열 가입, 추천 코드/공유 URL, 추천 유입 수, 우선순위 점수, 리더보드를 워크스페이스별로 집계
 - `/growth/launch-pulse`: 성장 이벤트, 피드백, 추천 대기열, 요금제 관심, readiness를 합성해 공개 반응 Pulse 점수와 다음 액션을 반환
+- `/growth/launch-experiments`, `/growth/launch-experiments/{experiment_id}/events`, `/growth/launch-experiment-dashboard`: 공개 CTA variant, 노출/전환 이벤트, 승자 후보, 다음 실험 액션을 관리
 - `/growth/launch-kit`: 공개 베타 채널별 카피, CTA 실험, 출시 체크리스트, 위험 고지, 측정 계획을 반환
 - `/beta/launch-gate`: readiness, 품질 회귀, 학습 인사이트, 백로그 SLA, 전환/성장/발송/외부 연동/데이터 거버넌스 운영 상태를 공개 go/no-go 판정과 필수 액션으로 집계
 - `feedback_count`, `average_satisfaction`, `purchase_intent_rate`: 추천 결과가 실제 구매 판단으로 이어지는지 보는 운영 지표

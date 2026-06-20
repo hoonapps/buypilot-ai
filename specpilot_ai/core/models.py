@@ -1063,6 +1063,101 @@ class LaunchCampaignKit(BaseModel):
     measurement_plan: list[str] = Field(default_factory=list)
 
 
+class LaunchExperimentVariantRequest(BaseModel):
+    label: str = Field(min_length=1)
+    headline: str = Field(min_length=2)
+    body: str = Field(min_length=2)
+    cta_label: str = Field(min_length=1)
+    cta_path: str = "/"
+    allocation_percent: int = Field(default=50, ge=1, le=100)
+
+
+class LaunchExperimentRequest(BaseModel):
+    name: str = Field(min_length=2)
+    channel: str = "community"
+    audience: str = "individual_buyer"
+    hypothesis: str = Field(min_length=2)
+    primary_metric: GrowthEventType = GrowthEventType.subscription_cta
+    target_surface: str = "launch-page"
+    category: Category | None = None
+    variants: list[LaunchExperimentVariantRequest] = Field(default_factory=list)
+
+
+class LaunchExperimentEventRequest(BaseModel):
+    variant_id: str = Field(min_length=2)
+    event_type: str = "impression"
+    trace_id: str | None = None
+    source: str = "web"
+    surface: str = "launch-experiment"
+    label: str = ""
+    metadata: dict[str, str | int | float | bool] = Field(default_factory=dict)
+
+
+class LaunchExperimentEvent(BaseModel):
+    event_id: str
+    experiment_id: str
+    workspace_id: str
+    variant_id: str
+    event_type: str
+    trace_id: str | None = None
+    source: str
+    surface: str
+    label: str = ""
+    metadata: dict[str, str | int | float | bool] = Field(default_factory=dict)
+    created_at: str
+
+
+class LaunchExperimentVariant(BaseModel):
+    variant_id: str
+    label: str
+    headline: str
+    body: str
+    cta_label: str
+    cta_path: str
+    allocation_percent: int = Field(ge=1, le=100)
+    impressions: int = 0
+    conversions: int = 0
+    conversion_rate: float = 0
+    status: CheckStatus = CheckStatus.warning
+    evidence: str = ""
+    recommendation: str = ""
+
+
+class LaunchExperiment(BaseModel):
+    experiment_id: str
+    workspace_id: str = "demo"
+    name: str
+    channel: str
+    audience: str
+    hypothesis: str
+    primary_metric: GrowthEventType
+    target_surface: str
+    category: Category | None = None
+    status: CheckStatus = CheckStatus.warning
+    winning_variant_id: str | None = None
+    created_at: str
+    updated_at: str
+    variants: list[LaunchExperimentVariant] = Field(default_factory=list)
+
+
+class LaunchExperimentDashboard(BaseModel):
+    dashboard_version: str = "specpilot.launch_experiment_hub.v1"
+    workspace_id: str
+    generated_at: str
+    status: CheckStatus
+    experiment_count: int = 0
+    active_experiment_count: int = 0
+    total_impressions: int = 0
+    total_conversions: int = 0
+    conversion_rate: float = 0
+    best_variant_label: str = ""
+    summary: str
+    experiments: list[LaunchExperiment] = Field(default_factory=list)
+    recommended_experiments: list[LaunchExperiment] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+    recent_events: list[LaunchExperimentEvent] = Field(default_factory=list)
+
+
 class LaunchPulseMetric(BaseModel):
     key: str
     label: str

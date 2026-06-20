@@ -734,6 +734,113 @@ def test_growth_acquisition_hub_maps_public_launch_surfaces() -> None:
     assert payload["recent_growth_events"]
 
 
+def test_launch_experiment_hub_tracks_variant_winner() -> None:
+    workspace = {"X-SpecPilot-Key": f"pytest-launch-exp-{uuid4().hex}"}
+    created = client.post(
+        "/growth/launch-experiments",
+        headers=workspace,
+        json={
+            "name": "커뮤니티 첫 분석 CTA",
+            "channel": "community",
+            "audience": "desktop_pc_buyer",
+            "hypothesis": "구매 실패 방지 메시지가 빠른 진단 메시지보다 전환이 높다.",
+            "primary_metric": "subscription_cta",
+            "target_surface": "community-post",
+            "category": "desktop_pc",
+            "variants": [
+                {
+                    "label": "구매 실패 방지",
+                    "headline": "200만원 PC 견적, 결제 전에 실패 가능성을 줄이세요",
+                    "body": "가격 타이밍, 호환성, 결제 전 검수까지 한 번에 확인합니다.",
+                    "cta_label": "구매 전 검수하기",
+                    "cta_path": "/#start-concierge",
+                    "allocation_percent": 50,
+                },
+                {
+                    "label": "3분 빠른 진단",
+                    "headline": "컴퓨터 견적 고민을 3분 안에 줄이세요",
+                    "body": "용도와 예산을 넣으면 후보와 가격 대기 여부를 보여줍니다.",
+                    "cta_label": "3분 진단 시작",
+                    "cta_path": "/",
+                    "allocation_percent": 50,
+                },
+            ],
+        },
+    )
+    assert created.status_code == 200
+    experiment = created.json()
+    assert experiment["experiment_id"].startswith("lexp_")
+    assert len(experiment["variants"]) == 2
+    winner_variant = experiment["variants"][0]["variant_id"]
+    slower_variant = experiment["variants"][1]["variant_id"]
+
+    for index in range(12):
+        response = client.post(
+            f"/growth/launch-experiments/{experiment['experiment_id']}/events",
+            headers=workspace,
+            json={
+                "variant_id": winner_variant,
+                "event_type": "impression",
+                "source": "pytest",
+                "surface": "community-post",
+                "label": f"winner impression {index}",
+            },
+        )
+        assert response.status_code == 200
+    for index in range(2):
+        response = client.post(
+            f"/growth/launch-experiments/{experiment['experiment_id']}/events",
+            headers=workspace,
+            json={
+                "variant_id": winner_variant,
+                "event_type": "conversion",
+                "source": "pytest",
+                "surface": "community-post",
+                "label": f"winner conversion {index}",
+            },
+        )
+        assert response.status_code == 200
+    for index in range(10):
+        response = client.post(
+            f"/growth/launch-experiments/{experiment['experiment_id']}/events",
+            headers=workspace,
+            json={
+                "variant_id": slower_variant,
+                "event_type": "impression",
+                "source": "pytest",
+                "surface": "community-post",
+                "label": f"slower impression {index}",
+            },
+        )
+        assert response.status_code == 200
+
+    missing = client.post(
+        f"/growth/launch-experiments/{experiment['experiment_id']}/events",
+        headers=workspace,
+        json={"variant_id": "missing_variant", "event_type": "conversion"},
+    )
+    assert missing.status_code == 404
+
+    dashboard = client.get(
+        "/growth/launch-experiment-dashboard?limit=10",
+        headers=workspace,
+    )
+    assert dashboard.status_code == 200
+    payload = dashboard.json()
+    assert payload["dashboard_version"] == "specpilot.launch_experiment_hub.v1"
+    assert payload["experiment_count"] == 1
+    assert payload["total_impressions"] == 22
+    assert payload["total_conversions"] == 2
+    assert payload["best_variant_label"] == "구매 실패 방지"
+    assert payload["experiments"][0]["winning_variant_id"] == winner_variant
+    assert payload["recommended_experiments"]
+    assert payload["recent_events"]
+
+    funnel = client.get("/growth/funnel", headers=workspace)
+    assert funnel.status_code == 200
+    assert funnel.json()["paid_intent_rate"] > 0
+
+
 def test_growth_retention_hub_prioritizes_reengagement_loops() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-retention-{uuid4().hex}"}
     analysis = client.post(

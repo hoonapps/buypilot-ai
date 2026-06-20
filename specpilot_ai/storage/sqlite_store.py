@@ -61,6 +61,12 @@ from specpilot_ai.core.models import (
     IntegrationReadinessCheck,
     IntegrationReadinessDashboard,
     IntegrationStatus,
+    LaunchExperiment,
+    LaunchExperimentDashboard,
+    LaunchExperimentEvent,
+    LaunchExperimentEventRequest,
+    LaunchExperimentRequest,
+    LaunchExperimentVariant,
     LaunchGateCheck,
     LaunchGateDashboard,
     LaunchPulseDashboard,
@@ -218,6 +224,20 @@ DATA_INVENTORY_SPECS = [
     {
         "table_name": "growth_events",
         "label": "제품 성장 퍼널 이벤트",
+        "pii_scope": "workspace_scoped",
+        "retention_days": 180,
+        "created_column": "created_at",
+    },
+    {
+        "table_name": "launch_experiments",
+        "label": "출시 CTA 실험",
+        "pii_scope": "workspace_scoped",
+        "retention_days": 180,
+        "created_column": "created_at",
+    },
+    {
+        "table_name": "launch_experiment_events",
+        "label": "출시 CTA 실험 이벤트",
         "pii_scope": "workspace_scoped",
         "retention_days": 180,
         "created_column": "created_at",
@@ -2706,6 +2726,258 @@ class SpecPilotStore:
                 f"{row['surface']} {int(row['event_count'])}건" for row in surface_rows
             ],
             next_actions=next_actions[:5],
+            recent_events=recent_events,
+        )
+
+    def create_launch_experiment_for_workspace(
+        self,
+        workspace_id: str,
+        request: LaunchExperimentRequest,
+    ) -> LaunchExperiment:
+        now = _now()
+        variants = _launch_experiment_variant_payloads(request)
+        experiment_id = f"lexp_{uuid4().hex[:12]}"
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO launch_experiments (
+                    experiment_id, workspace_id, name, channel, audience,
+                    hypothesis, primary_metric, target_surface, category,
+                    status, variants_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    experiment_id,
+                    workspace_id,
+                    request.name[:120],
+                    request.channel[:80],
+                    request.audience[:120],
+                    request.hypothesis[:240],
+                    request.primary_metric.value,
+                    request.target_surface[:120],
+                    request.category.value if request.category else None,
+                    CheckStatus.warning.value,
+                    json.dumps(variants, ensure_ascii=False),
+                    now,
+                    now,
+                ),
+            )
+            row = conn.execute(
+                """
+                SELECT *
+                FROM launch_experiments
+                WHERE workspace_id = ? AND experiment_id = ?
+                """,
+                (workspace_id, experiment_id),
+            ).fetchone()
+            stats = _launch_experiment_variant_stats(conn, workspace_id, experiment_id)
+        return _launch_experiment_from_row(row, stats)
+
+    def list_launch_experiments_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 20,
+    ) -> list[LaunchExperiment]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM launch_experiments
+                WHERE workspace_id = ?
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT ?
+                """,
+                (workspace_id, limit),
+            ).fetchall()
+            return [
+                _launch_experiment_from_row(
+                    row,
+                    _launch_experiment_variant_stats(
+                        conn,
+                        workspace_id,
+                        str(row["experiment_id"]),
+                    ),
+                )
+                for row in rows
+            ]
+
+    def record_launch_experiment_event_for_workspace(
+        self,
+        workspace_id: str,
+        experiment_id: str,
+        request: LaunchExperimentEventRequest,
+    ) -> LaunchExperimentEvent | None:
+        now = _now()
+        event_type = _launch_experiment_event_type(request.event_type)
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT *
+                FROM launch_experiments
+                WHERE workspace_id = ? AND experiment_id = ?
+                """,
+                (workspace_id, experiment_id),
+            ).fetchone()
+            if row is None:
+                return None
+            variant_ids = {
+                str(item["variant_id"])
+                for item in json.loads(str(row["variants_json"] or "[]"))
+            }
+            if request.variant_id not in variant_ids:
+                return None
+            event = LaunchExperimentEvent(
+                event_id=f"lexpevt_{uuid4().hex[:12]}",
+                experiment_id=experiment_id,
+                workspace_id=workspace_id,
+                variant_id=request.variant_id,
+                event_type=event_type,
+                trace_id=request.trace_id,
+                source=request.source[:80],
+                surface=request.surface[:120],
+                label=request.label[:160],
+                metadata=request.metadata,
+                created_at=now,
+            )
+            conn.execute(
+                """
+                INSERT INTO launch_experiment_events (
+                    event_id, workspace_id, experiment_id, variant_id,
+                    event_type, trace_id, source, surface, label,
+                    metadata_json, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event.event_id,
+                    event.workspace_id,
+                    event.experiment_id,
+                    event.variant_id,
+                    event.event_type,
+                    event.trace_id,
+                    event.source,
+                    event.surface,
+                    event.label,
+                    json.dumps(event.metadata, ensure_ascii=False),
+                    event.created_at,
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE launch_experiments
+                SET updated_at = ?
+                WHERE workspace_id = ? AND experiment_id = ?
+                """,
+                (now, workspace_id, experiment_id),
+            )
+            if event_type == "conversion":
+                metadata = {
+                    **event.metadata,
+                    "launch_experiment_id": experiment_id,
+                    "launch_variant_id": request.variant_id,
+                    "launch_event_id": event.event_id,
+                }
+                conn.execute(
+                    """
+                    INSERT INTO growth_events (
+                        event_id, workspace_id, event_type, trace_id, report_id,
+                        product_id, source, surface, label, metadata_json, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        f"growth_{uuid4().hex[:12]}",
+                        workspace_id,
+                        str(row["primary_metric"]),
+                        event.trace_id,
+                        None,
+                        None,
+                        event.source,
+                        event.surface,
+                        event.label or row["name"],
+                        json.dumps(metadata, ensure_ascii=False),
+                        now,
+                    ),
+                )
+        return event
+
+    def list_launch_experiment_events_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 50,
+    ) -> list[LaunchExperimentEvent]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM launch_experiment_events
+                WHERE workspace_id = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (workspace_id, limit),
+            ).fetchall()
+        return [_launch_experiment_event_from_row(row) for row in rows]
+
+    def launch_experiment_dashboard_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 20,
+    ) -> LaunchExperimentDashboard:
+        experiments = self.list_launch_experiments_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        recent_events = self.list_launch_experiment_events_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        total_impressions = sum(
+            variant.impressions for experiment in experiments for variant in experiment.variants
+        )
+        total_conversions = sum(
+            variant.conversions for experiment in experiments for variant in experiment.variants
+        )
+        conversion_rate = (
+            round(total_conversions / total_impressions, 4)
+            if total_impressions
+            else 0
+        )
+        variants = [
+            variant for experiment in experiments for variant in experiment.variants
+        ]
+        best_variant = _best_launch_variant(variants)
+        status = _launch_experiment_dashboard_status(
+            len(experiments),
+            total_impressions,
+            conversion_rate,
+        )
+        return LaunchExperimentDashboard(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            status=status,
+            experiment_count=len(experiments),
+            active_experiment_count=sum(
+                1 for experiment in experiments if experiment.status != CheckStatus.ok
+            ),
+            total_impressions=total_impressions,
+            total_conversions=total_conversions,
+            conversion_rate=conversion_rate,
+            best_variant_label=best_variant.label if best_variant else "",
+            summary=_launch_experiment_summary(
+                len(experiments),
+                total_impressions,
+                total_conversions,
+                conversion_rate,
+            ),
+            experiments=experiments,
+            recommended_experiments=_recommended_launch_experiments(experiments),
+            next_actions=_launch_experiment_next_actions(
+                experiments,
+                total_impressions,
+                conversion_rate,
+            ),
             recent_events=recent_events,
         )
 
@@ -5459,6 +5731,37 @@ class SpecPilotStore:
                     created_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS launch_experiments (
+                    experiment_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    name TEXT NOT NULL,
+                    channel TEXT NOT NULL,
+                    audience TEXT NOT NULL,
+                    hypothesis TEXT NOT NULL,
+                    primary_metric TEXT NOT NULL,
+                    target_surface TEXT NOT NULL,
+                    category TEXT,
+                    status TEXT NOT NULL,
+                    variants_json TEXT NOT NULL DEFAULT '[]',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS launch_experiment_events (
+                    event_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    experiment_id TEXT NOT NULL,
+                    variant_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    trace_id TEXT,
+                    source TEXT NOT NULL DEFAULT 'web',
+                    surface TEXT NOT NULL DEFAULT 'launch-experiment',
+                    label TEXT NOT NULL DEFAULT '',
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(experiment_id) REFERENCES launch_experiments(experiment_id)
+                );
+
                 CREATE TABLE IF NOT EXISTS beta_cohorts (
                     cohort_id TEXT PRIMARY KEY,
                     workspace_id TEXT NOT NULL DEFAULT 'demo',
@@ -5572,6 +5875,10 @@ class SpecPilotStore:
                     ON waitlist_referrals(workspace_id, referred_by_code);
                 CREATE INDEX IF NOT EXISTS idx_subscription_intents_workspace
                     ON subscription_intents(workspace_id, plan_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_launch_experiments_workspace
+                    ON launch_experiments(workspace_id, updated_at);
+                CREATE INDEX IF NOT EXISTS idx_launch_experiment_events_workspace
+                    ON launch_experiment_events(workspace_id, experiment_id, variant_id);
                 CREATE INDEX IF NOT EXISTS idx_beta_cohorts_workspace
                     ON beta_cohorts(workspace_id, active);
                 CREATE INDEX IF NOT EXISTS idx_beta_backlog_actions_workspace
@@ -7275,6 +7582,149 @@ def _growth_event_from_row(row: sqlite3.Row) -> GrowthEventRecord:
     )
 
 
+def _launch_experiment_event_from_row(row: sqlite3.Row) -> LaunchExperimentEvent:
+    data = dict(row)
+    return LaunchExperimentEvent(
+        event_id=data["event_id"],
+        experiment_id=data["experiment_id"],
+        workspace_id=data["workspace_id"],
+        variant_id=data["variant_id"],
+        event_type=data["event_type"],
+        trace_id=data["trace_id"],
+        source=data["source"],
+        surface=data["surface"],
+        label=data["label"],
+        metadata=json.loads(data["metadata_json"]),
+        created_at=data["created_at"],
+    )
+
+
+def _launch_experiment_variant_payloads(
+    request: LaunchExperimentRequest,
+) -> list[dict[str, str | int]]:
+    if not request.variants:
+        return [
+            {
+                "variant_id": f"var_{uuid4().hex[:10]}",
+                "label": "A",
+                "headline": "조건에 맞는 컴퓨터를 구매 실패 없이 고르세요",
+                "body": "예산, 용도, 가격 타이밍, 결제 전 검수를 한 번에 확인합니다.",
+                "cta_label": "내 조건으로 분석",
+                "cta_path": "/",
+                "allocation_percent": 50,
+            },
+            {
+                "variant_id": f"var_{uuid4().hex[:10]}",
+                "label": "B",
+                "headline": "컴퓨터 견적 고민을 3분 안에 줄이세요",
+                "body": (
+                    "데스크톱과 노트북 후보를 비교하고 "
+                    "바로 살지 기다릴지 판단합니다."
+                ),
+                "cta_label": "3분 진단 시작",
+                "cta_path": "/#start-concierge",
+                "allocation_percent": 50,
+            },
+        ]
+    return [
+        {
+            "variant_id": f"var_{uuid4().hex[:10]}",
+            "label": variant.label[:40],
+            "headline": variant.headline[:160],
+            "body": variant.body[:320],
+            "cta_label": variant.cta_label[:80],
+            "cta_path": variant.cta_path[:200],
+            "allocation_percent": variant.allocation_percent,
+        }
+        for variant in request.variants
+    ]
+
+
+def _launch_experiment_variant_stats(
+    conn: sqlite3.Connection,
+    workspace_id: str,
+    experiment_id: str,
+) -> dict[str, dict[str, int]]:
+    rows = conn.execute(
+        """
+        SELECT variant_id, event_type, COUNT(*) AS event_count
+        FROM launch_experiment_events
+        WHERE workspace_id = ? AND experiment_id = ?
+        GROUP BY variant_id, event_type
+        """,
+        (workspace_id, experiment_id),
+    ).fetchall()
+    stats: dict[str, dict[str, int]] = {}
+    for row in rows:
+        variant_id = str(row["variant_id"])
+        event_type = str(row["event_type"])
+        stats.setdefault(variant_id, {"impressions": 0, "conversions": 0})
+        if event_type == "conversion":
+            stats[variant_id]["conversions"] = int(row["event_count"] or 0)
+        else:
+            stats[variant_id]["impressions"] += int(row["event_count"] or 0)
+    return stats
+
+
+def _launch_variant_from_payload(
+    payload: dict,
+    stats: dict[str, dict[str, int]],
+) -> LaunchExperimentVariant:
+    variant_id = str(payload["variant_id"])
+    variant_stats = stats.get(variant_id, {"impressions": 0, "conversions": 0})
+    impressions = int(variant_stats.get("impressions", 0))
+    conversions = int(variant_stats.get("conversions", 0))
+    conversion_rate = round(conversions / impressions, 4) if impressions else 0
+    status = _launch_variant_status(impressions, conversion_rate)
+    return LaunchExperimentVariant(
+        variant_id=variant_id,
+        label=str(payload["label"]),
+        headline=str(payload["headline"]),
+        body=str(payload["body"]),
+        cta_label=str(payload["cta_label"]),
+        cta_path=str(payload["cta_path"]),
+        allocation_percent=int(payload["allocation_percent"]),
+        impressions=impressions,
+        conversions=conversions,
+        conversion_rate=conversion_rate,
+        status=status,
+        evidence=f"노출 {impressions}회 / 전환 {conversions}건",
+        recommendation=_launch_variant_recommendation(status, impressions, conversion_rate),
+    )
+
+
+def _launch_experiment_from_row(
+    row: sqlite3.Row,
+    stats: dict[str, dict[str, int]],
+) -> LaunchExperiment:
+    data = dict(row)
+    variants_payload = json.loads(data["variants_json"])
+    variants = [
+        _launch_variant_from_payload(payload, stats) for payload in variants_payload
+    ]
+    best_variant = _best_launch_variant(variants)
+    status = _launch_experiment_status(variants)
+    winning_variant_id = (
+        best_variant.variant_id if best_variant and status == CheckStatus.ok else None
+    )
+    return LaunchExperiment(
+        experiment_id=data["experiment_id"],
+        workspace_id=data["workspace_id"],
+        name=data["name"],
+        channel=data["channel"],
+        audience=data["audience"],
+        hypothesis=data["hypothesis"],
+        primary_metric=GrowthEventType(data["primary_metric"]),
+        target_surface=data["target_surface"],
+        category=Category(data["category"]) if data["category"] else None,
+        status=status,
+        winning_variant_id=winning_variant_id,
+        created_at=data["created_at"],
+        updated_at=data["updated_at"],
+        variants=variants,
+    )
+
+
 def _beta_lead_from_row(row: sqlite3.Row) -> BetaLead:
     data = dict(row)
     return BetaLead(
@@ -8811,6 +9261,129 @@ def _growth_funnel_step(
         status=status,
         recommendation=recommendation,
     )
+
+
+def _launch_experiment_event_type(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized in {"conversion", "converted", "click", "signup", "intent"}:
+        return "conversion"
+    return "impression"
+
+
+def _launch_variant_status(impressions: int, conversion_rate: float) -> CheckStatus:
+    if impressions < 5:
+        return CheckStatus.blocker
+    if conversion_rate >= 0.08:
+        return CheckStatus.ok
+    if conversion_rate >= 0.03:
+        return CheckStatus.warning
+    return CheckStatus.blocker
+
+
+def _launch_variant_recommendation(
+    status: CheckStatus,
+    impressions: int,
+    conversion_rate: float,
+) -> str:
+    if impressions < 5:
+        return "표본이 부족합니다. 같은 채널에서 노출을 먼저 확보하세요."
+    if status == CheckStatus.ok:
+        return "승자 후보입니다. 같은 angle을 다음 채널에도 확장하세요."
+    if conversion_rate > 0:
+        return "카피의 proof point와 CTA를 더 구체적으로 바꿔 재검증하세요."
+    return "전환이 없습니다. 문제 고통, 가격대, CTA 위치를 새 variant로 바꾸세요."
+
+
+def _best_launch_variant(
+    variants: list[LaunchExperimentVariant],
+) -> LaunchExperimentVariant | None:
+    eligible = [variant for variant in variants if variant.impressions > 0]
+    if not eligible:
+        return None
+    return max(
+        eligible,
+        key=lambda item: (item.conversion_rate, item.conversions, item.impressions),
+    )
+
+
+def _launch_experiment_status(
+    variants: list[LaunchExperimentVariant],
+) -> CheckStatus:
+    impressions = sum(variant.impressions for variant in variants)
+    if impressions < 10:
+        return CheckStatus.warning if impressions else CheckStatus.blocker
+    if any(variant.status == CheckStatus.ok for variant in variants):
+        return CheckStatus.ok
+    if any(variant.conversions for variant in variants):
+        return CheckStatus.warning
+    return CheckStatus.blocker
+
+
+def _launch_experiment_dashboard_status(
+    experiment_count: int,
+    total_impressions: int,
+    conversion_rate: float,
+) -> CheckStatus:
+    if experiment_count == 0:
+        return CheckStatus.blocker
+    if total_impressions >= 40 and conversion_rate >= 0.06:
+        return CheckStatus.ok
+    if total_impressions >= 10 or conversion_rate > 0:
+        return CheckStatus.warning
+    return CheckStatus.blocker
+
+
+def _launch_experiment_summary(
+    experiment_count: int,
+    total_impressions: int,
+    total_conversions: int,
+    conversion_rate: float,
+) -> str:
+    if not experiment_count:
+        return "아직 출시 CTA 실험이 없습니다. launch-kit 문구를 실제 실험으로 전환하세요."
+    return (
+        f"출시 실험 {experiment_count}개에서 노출 {total_impressions}회, "
+        f"전환 {total_conversions}건, 전환율 {round(conversion_rate * 100, 1)}%를 "
+        "집계했습니다."
+    )
+
+
+def _recommended_launch_experiments(
+    experiments: list[LaunchExperiment],
+) -> list[LaunchExperiment]:
+    return sorted(
+        experiments,
+        key=lambda item: (
+            item.status == CheckStatus.ok,
+            -sum(variant.impressions for variant in item.variants),
+            item.updated_at,
+        ),
+    )[:3]
+
+
+def _launch_experiment_next_actions(
+    experiments: list[LaunchExperiment],
+    total_impressions: int,
+    conversion_rate: float,
+) -> list[str]:
+    if not experiments:
+        return [
+            "커뮤니티, 검색, 추천 대기열용 CTA 실험을 최소 2개 variant로 생성하세요.",
+            "primary metric은 subscription_cta 또는 share_cta 중 하나로 고정하세요.",
+        ]
+    actions: list[str] = []
+    if total_impressions < 40:
+        actions.append("각 variant가 최소 20회 이상 노출되도록 채널별 배포량을 맞추세요.")
+    if conversion_rate < 0.03:
+        actions.append("문제 고통, 예산대, 결제 전 검수 proof를 CTA 문구에 직접 넣으세요.")
+    for experiment in experiments:
+        if experiment.status != CheckStatus.ok:
+            actions.append(f"{experiment.name}: 표본 또는 전환이 부족한 variant를 재작성하세요.")
+        if len(actions) >= 5:
+            break
+    if not actions:
+        actions.append("승자 variant를 공개 유입 허브의 주 CTA와 SEO 페이지에 반영하세요.")
+    return actions[:5]
 
 
 def _score_status(score: float, *, warning: float, ok: float) -> CheckStatus:
