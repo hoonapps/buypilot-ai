@@ -70,6 +70,9 @@ from specpilot_ai.core.models import (
     LaunchExperimentVariant,
     LaunchGateCheck,
     LaunchGateDashboard,
+    LaunchCommunityKit,
+    LaunchCommunityReplyTemplate,
+    LaunchCommunityRisk,
     LaunchPulseDashboard,
     LaunchPulseMetric,
     LaunchPulseSignal,
@@ -3499,6 +3502,76 @@ class SpecPilotStore:
                 pricing=pricing,
             ),
             next_actions=_launch_week_recap_next_actions(wins, risks, war_room),
+        )
+
+    def launch_community_kit_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 12,
+    ) -> LaunchCommunityKit:
+        metrics = self.metrics_for_workspace(workspace_id)
+        recap = self.launch_week_recap_for_workspace(workspace_id, limit=limit)
+        objections = self.public_launch_objection_kit_for_workspace(workspace_id)
+        share_pack = self.public_launch_share_pack_for_workspace(workspace_id)
+        router = self.public_launch_action_router_for_workspace(workspace_id)
+        smoke = self.public_launch_smoke_dashboard_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        response_score = _launch_community_score(
+            recap=recap,
+            objections=objections,
+            share_pack=share_pack,
+            router=router,
+            smoke=smoke,
+            metrics=metrics,
+        )
+        status = _launch_community_status(
+            response_score=response_score,
+            objections=objections,
+            smoke=smoke,
+        )
+        templates = _launch_community_reply_templates(
+            objections=objections,
+            share_pack=share_pack,
+            router=router,
+            recap=recap,
+        )
+        risks = _launch_community_risks(
+            metrics=metrics,
+            objections=objections,
+            share_pack=share_pack,
+            smoke=smoke,
+            recap=recap,
+        )
+        return LaunchCommunityKit(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            status=status,
+            response_score=response_score,
+            headline=_launch_community_headline(status, response_score),
+            summary=_launch_community_summary(metrics, templates, risks),
+            metric_cards={
+                "response_score": response_score,
+                "objection_score": objections.objection_score,
+                "share_score": share_pack.share_score,
+                "recap_score": recap.recap_score,
+                "growth_events": metrics.growth_events,
+                "share_cta_clicks": metrics.share_cta_clicks,
+                "public_share_views": metrics.public_share_views,
+                "reply_templates": len(templates),
+                "risk_count": len([risk for risk in risks if risk.status != CheckStatus.ok]),
+            },
+            pinned_update=_launch_community_pinned_update(recap, share_pack),
+            reply_templates=templates,
+            risks=risks,
+            tracking_events=[
+                "launch_community_reply_copy",
+                "launch_community_pinned_update_copy",
+                "launch_action_route_click",
+                "launch_share_community",
+            ],
+            next_actions=_launch_community_next_actions(templates, risks, recap),
         )
 
     def retention_hub_for_workspace(
@@ -13221,6 +13294,255 @@ def _launch_week_recap_next_actions(
     if not actions:
         actions.append("가장 강한 CTA와 채널 문구를 다음 주 배포 플랜의 기본값으로 승격하세요.")
     actions.append("D+7 founder update를 공개 런칭룸과 커뮤니티 후속 댓글에 공유하세요.")
+    return list(dict.fromkeys(actions))[:7]
+
+
+def _launch_community_score(
+    *,
+    recap: LaunchWeekRecapDashboard,
+    objections: PublicLaunchObjectionKit,
+    share_pack: PublicLaunchSharePack,
+    router: PublicLaunchActionRouter,
+    smoke: PublicLaunchSmokeDashboard,
+    metrics: OperationsMetrics,
+) -> float:
+    engagement_score = min(
+        100.0,
+        metrics.share_cta_clicks * 12
+        + metrics.public_share_views * 4
+        + metrics.growth_events * 3,
+    )
+    return round(
+        recap.recap_score * 0.22
+        + objections.objection_score * 0.22
+        + share_pack.share_score * 0.18
+        + router.routing_score * 0.16
+        + smoke.smoke_score * 0.12
+        + engagement_score * 0.1,
+        1,
+    )
+
+
+def _launch_community_status(
+    *,
+    response_score: float,
+    objections: PublicLaunchObjectionKit,
+    smoke: PublicLaunchSmokeDashboard,
+) -> CheckStatus:
+    if (
+        response_score < 42
+        or objections.status == CheckStatus.blocker
+        or smoke.status == CheckStatus.blocker
+    ):
+        return CheckStatus.blocker
+    if (
+        response_score < 74
+        or objections.status == CheckStatus.warning
+        or smoke.status == CheckStatus.warning
+    ):
+        return CheckStatus.warning
+    return CheckStatus.ok
+
+
+def _launch_community_reply_templates(
+    *,
+    objections: PublicLaunchObjectionKit,
+    share_pack: PublicLaunchSharePack,
+    router: PublicLaunchActionRouter,
+    recap: LaunchWeekRecapDashboard,
+) -> list[LaunchCommunityReplyTemplate]:
+    routes_by_key = {route.key: route for route in router.routes}
+    route_fallback = next(iter(router.routes), None)
+    templates: list[LaunchCommunityReplyTemplate] = []
+    for objection in objections.objections[:6]:
+        route = routes_by_key.get(_community_route_key_for_objection(objection.key))
+        route = route or route_fallback
+        cta_label = route.cta_label if route else objection.cta_label
+        cta_path = route.cta_path if route else objection.cta_path
+        tracking_event = route.tracking_event if route else "launch_community_reply_click"
+        proof = " / ".join(objection.proof_points[:2]) or objections.summary
+        templates.append(
+            LaunchCommunityReplyTemplate(
+                key=f"reply_{objection.key}",
+                label=objection.question,
+                trigger=_community_trigger_for_objection(objection.key),
+                tone=_community_tone_for_objection(objection.key),
+                copy_text=(
+                    f"{objection.short_answer}\n\n"
+                    f"근거: {proof}\n"
+                    f"첫 주 업데이트: {recap.founder_update}\n"
+                    f"다음 확인: {cta_label} {cta_path}"
+                ),
+                cta_label=cta_label,
+                cta_path=cta_path,
+                tracking_event=tracking_event,
+            ),
+        )
+    community_variant = next(
+        (variant for variant in share_pack.variants if variant.channel == "community"),
+        None,
+    )
+    if community_variant:
+        templates.insert(
+            0,
+            LaunchCommunityReplyTemplate(
+                key="reply_pinned_context",
+                label="상단 고정 댓글",
+                trigger="첫 글을 본 사람이 제품 맥락과 링크를 한 번에 확인해야 할 때",
+                tone="짧고 투명하게",
+                copy_text=community_variant.copy_text,
+                cta_label=community_variant.cta_label,
+                cta_path=community_variant.share_url,
+                tracking_event=community_variant.tracking_event,
+            ),
+        )
+    return templates[:7]
+
+
+def _community_route_key_for_objection(key: str) -> str:
+    mapping = {
+        "vs_price_comparison": "first_purchase_analysis",
+        "price_comparison": "first_purchase_analysis",
+        "affiliate_bias": "shared_review",
+        "fresh_price": "first_purchase_analysis",
+        "privacy": "shared_review",
+        "first_buyer": "first_purchase_analysis",
+        "team_purchase": "team_purchase",
+    }
+    return mapping.get(key, "first_purchase_analysis")
+
+
+def _community_trigger_for_objection(key: str) -> str:
+    triggers = {
+        "vs_price_comparison": "최저가 비교 사이트와 무엇이 다른지 묻는 댓글",
+        "price_comparison": "최저가 비교 사이트와 무엇이 다른지 묻는 댓글",
+        "affiliate_bias": "제휴 링크 때문에 추천이 편향되는지 묻는 댓글",
+        "fresh_price": "가격이 최신인지, 특가가 반영되는지 묻는 댓글",
+        "privacy": "공유 리포트와 피드백의 개인정보 노출을 걱정하는 댓글",
+        "first_buyer": "컴퓨터를 잘 몰라도 쓸 수 있는지 묻는 댓글",
+        "team_purchase": "회사/팀 장비 구매에도 쓸 수 있는지 묻는 댓글",
+    }
+    return triggers.get(key, "서비스 신뢰 기준을 묻는 댓글")
+
+
+def _community_tone_for_objection(key: str) -> str:
+    if key in {"affiliate_bias", "privacy"}:
+        return "방어적으로 보이지 않게 기준을 먼저 공개"
+    if key in {"vs_price_comparison", "price_comparison", "fresh_price"}:
+        return "최저가가 아니라 구매 실패 방지 관점으로 설명"
+    if key == "team_purchase":
+        return "승인 근거와 반복 구매 ROI를 강조"
+    return "첫 구매자가 바로 이해할 만큼 짧게 설명"
+
+
+def _launch_community_risks(
+    *,
+    metrics: OperationsMetrics,
+    objections: PublicLaunchObjectionKit,
+    share_pack: PublicLaunchSharePack,
+    smoke: PublicLaunchSmokeDashboard,
+    recap: LaunchWeekRecapDashboard,
+) -> list[LaunchCommunityRisk]:
+    return [
+        _launch_community_risk(
+            key="reply_latency",
+            label="댓글 대응 지연",
+            status=CheckStatus.ok if metrics.growth_events >= 5 else CheckStatus.warning,
+            evidence=f"성장 이벤트 {metrics.growth_events}건, 공유 CTA {metrics.share_cta_clicks}건",
+            response_rule="첫 2시간은 최저가/제휴/가격 최신성 질문에 10분 이내 답변하세요.",
+        ),
+        _launch_community_risk(
+            key="objection_gap",
+            label="반박 답변 누락",
+            status=objections.status,
+            evidence=objections.summary,
+            response_rule="반복 질문은 새 주장으로 맞서지 말고 반박 FAQ 근거 경로와 CTA로 답하세요.",
+        ),
+        _launch_community_risk(
+            key="share_context_loss",
+            label="공유 맥락 손실",
+            status=share_pack.status,
+            evidence=share_pack.summary,
+            response_rule="고정 댓글에는 한 줄 가치, 공개 런칭룸 링크, 제휴/개인정보 고지를 함께 넣으세요.",
+        ),
+        _launch_community_risk(
+            key="broken_public_surface",
+            label="공개 링크/미리보기 오류",
+            status=smoke.status,
+            evidence=smoke.summary,
+            response_rule="커뮤니티 글을 올린 직후 OG 이미지, canonical, sitemap, CTA 이벤트를 다시 확인하세요.",
+        ),
+        _launch_community_risk(
+            key="overclaim",
+            label="성과 과장",
+            status=recap.status,
+            evidence=recap.summary,
+            response_rule="첫 주 지표는 실제 이벤트/공유/요금제 관심 숫자만 말하고 구매 보장 표현은 쓰지 마세요.",
+        ),
+    ]
+
+
+def _launch_community_risk(
+    *,
+    key: str,
+    label: str,
+    status: CheckStatus,
+    evidence: str,
+    response_rule: str,
+) -> LaunchCommunityRisk:
+    return LaunchCommunityRisk(
+        key=key,
+        label=label,
+        status=status,
+        evidence=evidence,
+        response_rule=response_rule,
+    )
+
+
+def _launch_community_headline(status: CheckStatus, response_score: float) -> str:
+    if status == CheckStatus.ok:
+        return f"커뮤니티 대응 키트 {round(response_score)}점, 후속 댓글을 바로 운영하세요."
+    if status == CheckStatus.blocker:
+        return f"커뮤니티 대응 키트 {round(response_score)}점, 공개 확대 전 답변/링크 blocker를 닫아야 합니다."
+    return f"커뮤니티 대응 키트 {round(response_score)}점, 반복 질문 답변을 보강하세요."
+
+
+def _launch_community_summary(
+    metrics: OperationsMetrics,
+    templates: list[LaunchCommunityReplyTemplate],
+    risks: list[LaunchCommunityRisk],
+) -> str:
+    warning_count = sum(1 for risk in risks if risk.status == CheckStatus.warning)
+    blocker_count = sum(1 for risk in risks if risk.status == CheckStatus.blocker)
+    return (
+        f"성장 이벤트 {metrics.growth_events}건과 공유 CTA {metrics.share_cta_clicks}건을 기준으로 "
+        f"커뮤니티 댓글 템플릿 {len(templates)}개와 운영 리스크 {len(risks)}개를 준비했습니다. "
+        f"warning {warning_count}개, blocker {blocker_count}개입니다."
+    )
+
+
+def _launch_community_pinned_update(
+    recap: LaunchWeekRecapDashboard,
+    share_pack: PublicLaunchSharePack,
+) -> str:
+    disclosure = share_pack.trust_disclosures[0] if share_pack.trust_disclosures else ""
+    return (
+        f"{recap.founder_update}\n\n"
+        f"런칭룸: {share_pack.primary_url}\n"
+        f"{disclosure}"
+    ).strip()
+
+
+def _launch_community_next_actions(
+    templates: list[LaunchCommunityReplyTemplate],
+    risks: list[LaunchCommunityRisk],
+    recap: LaunchWeekRecapDashboard,
+) -> list[str]:
+    actions = [risk.response_rule for risk in risks if risk.status != CheckStatus.ok]
+    if templates:
+        actions.append("상단 고정 댓글에는 pinned update를 붙이고 첫 답글에는 최저가/제휴 답변을 우선 사용하세요.")
+    actions.extend(recap.next_actions[:2])
+    actions.append("복사한 댓글마다 launch_community_reply_copy 이벤트를 남겨 어떤 반박이 전환되는지 보세요.")
     return list(dict.fromkeys(actions))[:7]
 
 

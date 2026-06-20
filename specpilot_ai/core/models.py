@@ -1964,6 +1964,41 @@ class LaunchWeekRecapDashboard(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class LaunchCommunityReplyTemplate(BaseModel):
+    key: str
+    label: str
+    trigger: str
+    tone: str
+    copy_text: str
+    cta_label: str
+    cta_path: str
+    tracking_event: str
+
+
+class LaunchCommunityRisk(BaseModel):
+    key: str
+    label: str
+    status: CheckStatus
+    evidence: str
+    response_rule: str
+
+
+class LaunchCommunityKit(BaseModel):
+    kit_version: str = "specpilot.launch_community_kit.v1"
+    workspace_id: str
+    generated_at: str
+    status: CheckStatus
+    response_score: float = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    metric_cards: dict[str, int | float | str] = Field(default_factory=dict)
+    pinned_update: str
+    reply_templates: list[LaunchCommunityReplyTemplate] = Field(default_factory=list)
+    risks: list[LaunchCommunityRisk] = Field(default_factory=list)
+    tracking_events: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PublicAcquisitionSurface(BaseModel):
     key: str
     label: str

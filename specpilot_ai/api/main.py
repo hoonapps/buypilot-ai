@@ -64,6 +64,7 @@ from specpilot_ai.core.models import (
     IntegrationProviderRequest,
     IntegrationReadinessDashboard,
     LaunchCampaignKit,
+    LaunchCommunityKit,
     LaunchDistributionPlan,
     LaunchExperiment,
     LaunchExperimentDashboard,
@@ -1831,6 +1832,17 @@ def growth_launch_week_recap(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> LaunchWeekRecapDashboard:
     return _store().launch_week_recap_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+
+
+@app.get("/growth/launch-community-kit", response_model=LaunchCommunityKit)
+def growth_launch_community_kit(
+    limit: int = 12,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> LaunchCommunityKit:
+    return _store().launch_community_kit_for_workspace(
         workspace.workspace_id,
         limit=limit,
     )

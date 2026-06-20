@@ -1989,6 +1989,66 @@ def test_growth_launch_week_recap_summarizes_first_week_response() -> None:
     assert payload["next_actions"]
 
 
+def test_growth_launch_community_kit_prepares_reply_templates() -> None:
+    workspace = {"X-SpecPilot-Key": f"pytest-community-kit-{uuid4().hex}"}
+    for event_type in ["analysis_view", "share_cta", "share_cta", "subscription_cta"]:
+        response = client.post(
+            "/growth/events",
+            headers=workspace,
+            json={
+                "event_type": event_type,
+                "source": "pytest-community-kit",
+                "surface": "community-thread",
+                "label": f"커뮤니티 대응 {event_type}",
+            },
+        )
+        assert response.status_code == 200
+    referral = client.post(
+        "/growth/waitlist-referrals",
+        headers=workspace,
+        json={
+            "email": "community-kit@example.com",
+            "persona": "creator",
+            "use_case": "커뮤니티 댓글에 답하면서 초대 링크를 공유하고 싶습니다.",
+            "contact_consent": True,
+            "source": "pytest-community-kit",
+        },
+    )
+    assert referral.status_code == 200
+
+    response = client.get("/growth/launch-community-kit?limit=8", headers=workspace)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kit_version"] == "specpilot.launch_community_kit.v1"
+    assert payload["workspace_id"].startswith("workspace_")
+    assert payload["status"] in {"ok", "warning", "blocker"}
+    assert payload["response_score"] > 0
+    assert payload["metric_cards"]["reply_templates"] >= 6
+    assert "SpecPilot AI 첫 주 공개 리포트" in payload["pinned_update"]
+    template_keys = {template["key"] for template in payload["reply_templates"]}
+    assert {
+        "reply_pinned_context",
+        "reply_vs_price_comparison",
+        "reply_affiliate_bias",
+        "reply_fresh_price",
+        "reply_privacy",
+        "reply_first_buyer",
+        "reply_team_purchase",
+    } <= template_keys
+    assert all(template["copy_text"] for template in payload["reply_templates"])
+    assert all(template["tracking_event"] for template in payload["reply_templates"])
+    risk_keys = {risk["key"] for risk in payload["risks"]}
+    assert {
+        "reply_latency",
+        "objection_gap",
+        "share_context_loss",
+        "broken_public_surface",
+        "overclaim",
+    } <= risk_keys
+    assert "launch_community_reply_copy" in payload["tracking_events"]
+    assert payload["next_actions"]
+
+
 def test_public_launch_room_packages_demo_proof_and_growth_ctas() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-launch-room-{uuid4().hex}"}
     referral = client.post(
