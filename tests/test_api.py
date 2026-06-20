@@ -926,7 +926,9 @@ def test_public_proof_hub_publishes_trust_and_conversion_evidence() -> None:
     assert payload["status"] in {"ok", "warning", "blocker"}
     assert payload["metric_cards"]["feedback_count"] >= 1
     assert payload["metric_cards"]["public_share_views"] >= 1
+    assert payload["hero_proof_strip"]
     assert payload["trust_badges"]
+    assert payload["evidence_kit"]
     asset_keys = {asset["key"] for asset in payload["proof_assets"]}
     assert {
         "trust_center",
@@ -941,6 +943,25 @@ def test_public_proof_hub_publishes_trust_and_conversion_evidence() -> None:
     assert payload["cta_cards"]
     assert payload["recent_feedback"]
     assert payload["next_actions"]
+
+
+def test_public_proof_hub_has_launch_evidence_for_empty_workspace() -> None:
+    workspace = {"X-SpecPilot-Key": f"pytest-empty-proof-{uuid4().hex}"}
+    proof = client.get("/public/proof-hub?limit=4", headers=workspace)
+    assert proof.status_code == 200
+    payload = proof.json()
+    assert payload["metric_cards"]["analysis_runs"] == 0
+    assert payload["hero_proof_strip"]
+    assert "제휴 여부와 추천 순위를 분리합니다" in payload["hero_proof_strip"]
+    evidence_titles = {item["title"] for item in payload["evidence_kit"]}
+    assert {
+        "추천 공정성 공개",
+        "시장 리포트형 시작점",
+        "공유 검토 루프",
+        "실구매 실패 방어선",
+    } <= evidence_titles
+    assert all(item["source_path"] for item in payload["evidence_kit"])
+    assert payload["objection_answers"]
 
 
 def test_growth_retention_hub_prioritizes_reengagement_loops() -> None:

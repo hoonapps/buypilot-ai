@@ -88,6 +88,7 @@ from specpilot_ai.core.models import (
     PublicAcquisitionSurface,
     PublicObjectionAnswer,
     PublicProofAsset,
+    PublicProofEvidence,
     PublicProofHub,
     PublicReport,
     PurchaseDecisionBoard,
@@ -3263,8 +3264,10 @@ class SpecPilotStore:
             proof_score=proof_score,
             headline=_public_proof_headline(status, proof_score),
             summary=_public_proof_summary(metrics, proof_assets),
+            hero_proof_strip=_public_proof_strip(metrics, experiments),
             metric_cards=_public_proof_metric_cards(metrics, experiments),
             trust_badges=_public_proof_badges(metrics),
+            evidence_kit=_public_evidence_kit(metrics, proof_assets),
             proof_assets=proof_assets,
             objection_answers=_public_objection_answers(metrics),
             cta_cards=_public_proof_cta_cards(acquisition, experiments),
@@ -9841,6 +9844,83 @@ def _public_proof_summary(
         f"{ok_assets}개가 공개 proof로 사용 가능합니다. 공개 조회 "
         f"{metrics.public_share_views}회, 피드백 {metrics.feedback_count}건을 함께 반영했습니다."
     )
+
+
+def _public_proof_strip(
+    metrics: OperationsMetrics,
+    experiments: LaunchExperimentDashboard,
+) -> list[str]:
+    strip = [
+        "제휴 여부와 추천 순위를 분리합니다",
+        "가격 출처, 수집 시각, 캐시 TTL을 공개합니다",
+        "공개 리포트는 토큰으로 격리됩니다",
+        "연락처 원문 없이 피드백을 학습 신호로 씁니다",
+    ]
+    if metrics.public_share_views:
+        strip.insert(0, f"공개 공유 리포트 {metrics.public_share_views}회 조회")
+    if metrics.feedback_count:
+        strip.insert(
+            0,
+            f"구매자 피드백 {metrics.feedback_count}건, 만족도 {metrics.average_satisfaction}점",
+        )
+    if experiments.total_conversions:
+        strip.insert(0, f"CTA 실험 전환 {experiments.total_conversions}건 검증")
+    return list(dict.fromkeys(strip))[:6]
+
+
+def _public_evidence_kit(
+    metrics: OperationsMetrics,
+    proof_assets: list[PublicProofAsset],
+) -> list[PublicProofEvidence]:
+    asset_status = {asset.key: asset.status for asset in proof_assets}
+    return [
+        PublicProofEvidence(
+            title="추천 공정성 공개",
+            status=CheckStatus.ok,
+            audience="첫 방문자",
+            proof=(
+                "제휴 링크 여부와 추천 점수는 분리하고, 목적 적합도/가격/호환성/"
+                "리뷰 신뢰도/구매 안정성 기준을 공개합니다."
+            ),
+            source_path="/policy/trust-center",
+            reuse_hint="랜딩 hero 하단 proof strip과 공개 리포트 하단 신뢰 문구로 재사용",
+        ),
+        PublicProofEvidence(
+            title="시장 리포트형 시작점",
+            status=asset_status.get("market_reports", CheckStatus.blocker),
+            audience="검색 유입 사용자",
+            proof=(
+                "데스크톱 PC와 노트북 카테고리별 예산 구간, 추천 픽, 리스크 신호, "
+                "구매 전 체크리스트를 공개 페이지로 제공합니다."
+            ),
+            source_path="/market/desktop-pc",
+            reuse_hint="SEO 페이지와 커뮤니티 답변의 첫 CTA로 연결",
+        ),
+        PublicProofEvidence(
+            title="공유 검토 루프",
+            status=asset_status.get("share_review", CheckStatus.blocker),
+            audience="가족/동료 검토 사용자",
+            proof=(
+                "저장 리포트를 읽기 전용 공개 토큰으로 바꿔 같은 근거와 구매 전 "
+                "질문을 함께 검토하게 합니다."
+            ),
+            source_path="/r/{share_token}",
+            reuse_hint="분석 완료 화면의 공유 CTA와 커뮤니티 검토 flow에 배치",
+        ),
+        PublicProofEvidence(
+            title="실구매 실패 방어선",
+            status=CheckStatus.ok
+            if metrics.checkout_reviews or metrics.source_monitors
+            else CheckStatus.warning,
+            audience="구매 직전 사용자",
+            proof=(
+                "상품 URL 수집, 가격/배송/재고/모델명 검수, 결제 전 옵션 확인, "
+                "목표가 알림으로 실제 구매 실패를 줄입니다."
+            ),
+            source_path="/#source-check",
+            reuse_hint="가격 대기/결제 전 검수 섹션의 신뢰 근거로 노출",
+        ),
+    ]
 
 
 def _public_proof_metric_cards(

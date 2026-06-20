@@ -933,6 +933,15 @@ class PublicObjectionAnswer(BaseModel):
     evidence: list[str] = Field(default_factory=list)
 
 
+class PublicProofEvidence(BaseModel):
+    title: str
+    status: CheckStatus
+    audience: str
+    proof: str
+    source_path: str
+    reuse_hint: str
+
+
 class PublicProofHub(BaseModel):
     proof_version: str = "specpilot.public_proof_hub.v1"
     workspace_id: str
@@ -941,8 +950,10 @@ class PublicProofHub(BaseModel):
     proof_score: float = Field(ge=0, le=100)
     headline: str
     summary: str
+    hero_proof_strip: list[str] = Field(default_factory=list)
     metric_cards: dict[str, int | float | str] = Field(default_factory=dict)
     trust_badges: list[str] = Field(default_factory=list)
+    evidence_kit: list[PublicProofEvidence] = Field(default_factory=list)
     proof_assets: list[PublicProofAsset] = Field(default_factory=list)
     objection_answers: list[PublicObjectionAnswer] = Field(default_factory=list)
     cta_cards: list[str] = Field(default_factory=list)
