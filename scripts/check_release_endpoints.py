@@ -57,6 +57,20 @@ CHECKS = (
         path="/beta/launch-gate",
         required_keys=("decision", "launch_readiness_score", "checks", "required_actions"),
     ),
+    SmokeCheck(
+        name="public-price-watch-kit",
+        method="GET",
+        path="/public/price-watch-kit?category=desktop_pc&budget_krw=2200000&purpose=qhd_creator",
+        required_keys=(
+            "watch_version",
+            "headline",
+            "watched_count",
+            "primary_watch_label",
+            "candidates",
+            "alert_script",
+            "share_copy",
+        ),
+    ),
 )
 
 

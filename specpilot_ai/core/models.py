@@ -1753,6 +1753,43 @@ class PublicDealTimingWindow(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class PriceWatchCandidate(BaseModel):
+    product_id: str
+    model_name: str
+    status: CheckStatus
+    current_price_krw: int
+    target_price_krw: int
+    target_gap_krw: int = 0
+    alert_threshold_krw: int
+    cadence: str
+    alert_reason: str
+    notification_copy: str
+    decision_rule: str
+    fallback_action: str
+
+
+class PublicPriceWatchKit(BaseModel):
+    watch_version: str = "specpilot.public_price_watch_kit.v1"
+    generated_at: str
+    category: Category
+    budget_krw: int
+    purpose: str
+    headline: str
+    summary: str
+    watched_count: int = 0
+    immediate_buy_count: int = 0
+    total_target_savings_krw: int = 0
+    primary_watch_product_id: str | None = None
+    primary_watch_label: str
+    candidates: list[PriceWatchCandidate] = Field(default_factory=list)
+    alert_script: str
+    analysis_prefill: str
+    share_copy: str
+    primary_cta_label: str = "목표가 조건으로 분석 시작"
+    primary_cta_path: str = "#analysis"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class StartConciergeMilestone(BaseModel):
     step: str
     title: str

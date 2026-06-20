@@ -817,6 +817,53 @@ def test_public_deal_timing_window_separates_buy_now_and_wait() -> None:
     assert "노트북" in laptop_payload["analysis_prefill"]
 
 
+def test_public_price_watch_kit_turns_waiting_into_alert_rules() -> None:
+    response = client.get(
+        "/public/price-watch-kit"
+        "?category=desktop_pc&budget_krw=2200000&purpose=qhd_creator"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["watch_version"] == "specpilot.public_price_watch_kit.v1"
+    assert payload["category"] == "desktop_pc"
+    assert payload["budget_krw"] == 2_200_000
+    assert payload["purpose"] == "qhd_creator"
+    assert "목표가" in payload["headline"]
+    assert payload["watched_count"] >= 1
+    assert payload["immediate_buy_count"] >= 1
+    assert payload["total_target_savings_krw"] > 0
+    assert payload["primary_watch_product_id"]
+    assert payload["primary_watch_label"]
+    assert len(payload["candidates"]) >= 5
+    first = payload["candidates"][0]
+    assert first["product_id"]
+    assert first["current_price_krw"] > 0
+    assert first["target_price_krw"] > 0
+    assert first["alert_threshold_krw"] > 0
+    assert first["target_gap_krw"] >= 0
+    assert first["cadence"]
+    assert first["alert_reason"]
+    assert first["notification_copy"]
+    assert first["decision_rule"]
+    assert first["fallback_action"]
+    assert "목표가 알림" in payload["alert_script"]
+    assert "목표가" in payload["analysis_prefill"]
+    assert "SpecPilot AI 공개 목표가 감시" in payload["share_copy"]
+    assert payload["primary_cta_path"] == "#analysis"
+    assert payload["next_actions"]
+
+    laptop = client.get(
+        "/public/price-watch-kit"
+        "?category=laptop&budget_krw=2000000&purpose=portable_creator"
+    )
+    assert laptop.status_code == 200
+    laptop_payload = laptop.json()
+    assert laptop_payload["category"] == "laptop"
+    assert any(item["product_id"].startswith("laptop-") for item in laptop_payload["candidates"])
+    assert "노트북" in laptop_payload["headline"]
+
+
 def test_growth_funnel_tracks_product_reaction_events() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-growth-{uuid4().hex}"}
     other_workspace = {"X-SpecPilot-Key": f"pytest-growth-other-{uuid4().hex}"}

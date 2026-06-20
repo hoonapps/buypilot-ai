@@ -59,6 +59,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 공개 옵션/사양 빠른 검수기: 판매 페이지 옵션명, 장바구니 문구, 최종 결제 금액을 붙여 넣으면 예산 초과, 사양 불일치, 증거 누락을 결제 전 blocker/warning으로 판정하고 구매 세이프티 브리프, 판매자 확인 질문, 승인/공유 요약, 캡처 체크리스트를 반환
 - 공개 후보 비교 스냅샷: 데스크톱/노트북 후보 5개를 가격, 목적 적합도, 리뷰 신뢰, 구매 안정성으로 정렬하고 예산/성능/안전 우선 대안 시나리오를 제공
 - 공개 구매 타이밍 윈도우: 후보별 현재가, 목표가, 적정가 밴드, 변동 리스크, 결제 트리거를 공개 화면에서 즉시 결제/가격 대기로 분리
+- 공개 목표가 감시 키트: 구매 타이밍 결과를 알림 기준가, 감시 주기, 알림 문구, 결제 판단 규칙, 대체 행동으로 변환
 - 첫 구매 진단 콘시어지: 입력 조건을 즉시 진단해 맞춤 온보딩 플레이북, 누락 질문, 분석/공유/검수 다음 행동으로 연결
 - 성장 퍼널: 분석 결과 조회, 추천 카드 클릭, 대안 시나리오 클릭, 공유/알림/구독 CTA를 이벤트로 저장하고 출시 게이트에 반응 지표로 반영
 - 공개 유입 허브: 데모, SEO 카테고리 리포트, 공유 리포트, 추천 대기열, Trust Center, 요금제 관심을 표면별 준비도와 채널 액션으로 집계
@@ -315,6 +316,12 @@ curl "http://127.0.0.1:8000/public/candidate-compare?category=desktop_pc&budget_
 
 ```bash
 curl "http://127.0.0.1:8000/public/deal-timing-window?category=desktop_pc&budget_krw=2200000&purpose=qhd_creator"
+```
+
+공개 목표가 감시 키트는 구매 타이밍 결과를 후보별 알림 기준가, 감시 주기, 알림 문구, 결제 판단 규칙, 대체 행동으로 변환합니다.
+
+```bash
+curl "http://127.0.0.1:8000/public/price-watch-kit?category=desktop_pc&budget_krw=2200000&purpose=qhd_creator"
 ```
 
 첫 구매 진단 콘시어지는 현재 입력값을 진단하고 가장 가까운 플레이북, 누락 질문, 분석 실행, 공유/가격 대기, 결제 전 검수 다음 행동을 한 응답으로 반환합니다.
@@ -1505,6 +1512,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/public/spec-rescue-kit`: 공개 장바구니 보류/확인 필요 결과를 예산 내 대체 후보 3개, 판매자 확인 메시지, 검색 문구, 분석 prefill, 공유 문구로 변환
 - `/public/candidate-compare`: 공개 후보 5개 비교표, 비교 축별 승자, 예산/성능/안전 우선 대안 시나리오, 분석 prefill, 공유 문구 조회
 - `/public/deal-timing-window`: 공개 후보별 현재가, 목표가, 적정가 밴드, 재고/쿠폰 변동 리스크, 결제 트리거, 목표가 알림용 공유 문구 조회
+- `/public/price-watch-kit`: 공개 구매 타이밍 결과를 목표가 알림 기준가, 감시 주기, 알림 문구, 결제 판단 규칙, 대체 행동으로 변환
 - `/reports/completion-templates`, `/reports/completion-recipient-groups`, `/reports/completion-preview`, `/reports/completion-batches`, `/reports/completion-engagement`, `/reports/completion-provider-events`, `/reports/completion-deliveries/provider-webhooks`, `/t/o/{tracking_token}.png`, `/t/c/{tracking_token}`: 완료 리포트 템플릿, 수신자 그룹, unsubscribe 제외, 발송 전 렌더링 미리보기, batch와 개별 delivery 성공/실패/재시도/열람/클릭/반송/신고/수신 제외 상태, provider 삽입용 공개 추적 픽셀/클릭 리다이렉트
 - `purchase_outcomes`, `completed_purchase_outcomes`, `purchase_conversion_rate`, `average_final_price_delta_krw`, `purchase_outcome_value_krw`: 실제 구매 결과와 최종 결제 금액 차이를 보는 운영 지표
 - `/ops/learning-insights`: 실제 구매 결과, 결제 전 검수 차단, 만족도 피드백을 제품별 전환율, 반품률, 가격 차이, 개선 액션으로 집계

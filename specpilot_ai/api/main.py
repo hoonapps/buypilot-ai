@@ -113,6 +113,7 @@ from specpilot_ai.core.models import (
     PublicLaunchSharePack,
     PublicLaunchSmokeDashboard,
     PublicMistakeCostCalculator,
+    PublicPriceWatchKit,
     PublicProofHub,
     PublicReferralLaunchKit,
     PublicReferralLeaderboard,
@@ -199,6 +200,7 @@ from specpilot_ai.services.mistake_cost import (
     estimate_mistake_cost,
 )
 from specpilot_ai.services.onboarding import purchase_onboarding_playbooks
+from specpilot_ai.services.price_watch import build_public_price_watch_kit
 from specpilot_ai.services.spec_rescue import build_public_spec_rescue_kit
 from specpilot_ai.services.spec_risk_scanner import (
     build_checkout_nudge_kit,
@@ -1253,6 +1255,19 @@ def public_deal_timing_window(
     purpose: str = "qhd_creator",
 ) -> PublicDealTimingWindow:
     return build_public_deal_timing_window(
+        category=category,
+        budget_krw=budget_krw,
+        purpose=purpose,
+    )
+
+
+@app.get("/public/price-watch-kit", response_model=PublicPriceWatchKit)
+def public_price_watch_kit(
+    category: Category | None = None,
+    budget_krw: int | None = None,
+    purpose: str = "qhd_creator",
+) -> PublicPriceWatchKit:
+    return build_public_price_watch_kit(
         category=category,
         budget_krw=budget_krw,
         purpose=purpose,
