@@ -2367,6 +2367,55 @@ def test_launch_dashboard_cache_reuses_and_invalidates_public_smoke(
     assert proof_calls >= 1
 
 
+def test_launch_dashboard_cache_reuses_gate_and_incident_center(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    store = SpecPilotStore(Settings(storage_path=str(tmp_path / "launch-core-cache.sqlite3")))
+    workspace_id = f"pytest-launch-core-cache-{uuid4().hex}"
+    first_gate = store.launch_gate_for_workspace(workspace_id)
+    first_incident = store.launch_incident_center_for_workspace(workspace_id, limit=4)
+
+    readiness_calls = 0
+    original_readiness = SpecPilotStore.beta_readiness_for_workspace
+
+    def tracked_readiness(self, workspace_id):  # noqa: ANN001
+        nonlocal readiness_calls
+        readiness_calls += 1
+        return original_readiness(self, workspace_id)
+
+    monkeypatch.setattr(
+        SpecPilotStore,
+        "beta_readiness_for_workspace",
+        tracked_readiness,
+    )
+
+    second_gate = store.launch_gate_for_workspace(workspace_id)
+    second_incident = store.launch_incident_center_for_workspace(workspace_id, limit=4)
+
+    assert second_gate.launch_readiness_score == first_gate.launch_readiness_score
+    assert second_incident.incident_score == first_incident.incident_score
+    assert readiness_calls == 0
+
+    store.create_growth_event_for_workspace(
+        workspace_id,
+        GrowthEventRequest(
+            event_type=GrowthEventType.analysis_view,
+            source="pytest-launch-core-cache",
+            surface="launch-preflight",
+            label="게이트/인시던트 캐시 무효화 검증",
+            metadata={"test": "launch-core-cache"},
+        ),
+    )
+
+    refreshed_gate = store.launch_gate_for_workspace(workspace_id)
+    refreshed_incident = store.launch_incident_center_for_workspace(workspace_id, limit=4)
+
+    assert refreshed_gate.workspace_id == workspace_id
+    assert refreshed_incident.center_version == "specpilot.launch_incident_center.v1"
+    assert readiness_calls >= 2
+
+
 def test_growth_launch_response_loop_turns_reactions_into_followups() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-response-loop-{uuid4().hex}"}
     analysis = client.post(

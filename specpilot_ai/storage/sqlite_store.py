@@ -3556,6 +3556,14 @@ class SpecPilotStore:
         workspace_id: str,
         limit: int = 12,
     ) -> LaunchIncidentCenter:
+        cached = self._cached_launch_dashboard(
+            workspace_id,
+            "launch_incident_center",
+            LaunchIncidentCenter,
+            limit,
+        )
+        if cached is not None:
+            return cached
         metrics = self.metrics_for_workspace(workspace_id)
         readiness = self.beta_readiness_for_workspace(workspace_id)
         regression = self.ops_regression_for_workspace(workspace_id, window_size=5)
@@ -3586,7 +3594,7 @@ class SpecPilotStore:
         status = _launch_incident_status(signals, incident_score)
         incident_level = _launch_incident_level(status, incident_score, signals)
         runbook = _launch_incident_runbook(signals, incident_level)
-        return LaunchIncidentCenter(
+        dashboard = LaunchIncidentCenter(
             workspace_id=workspace_id,
             generated_at=_now(),
             status=status,
@@ -3630,6 +3638,12 @@ class SpecPilotStore:
                 "launch_incident_resolved",
             ],
             next_actions=_launch_incident_next_actions(signals, runbook, incident_level),
+        )
+        return self._remember_launch_dashboard(
+            workspace_id,
+            "launch_incident_center",
+            dashboard,
+            limit,
         )
 
     def launch_week_recap_for_workspace(
@@ -6840,6 +6854,13 @@ class SpecPilotStore:
         )
 
     def launch_gate_for_workspace(self, workspace_id: str) -> LaunchGateDashboard:
+        cached = self._cached_launch_dashboard(
+            workspace_id,
+            "launch_gate",
+            LaunchGateDashboard,
+        )
+        if cached is not None:
+            return cached
         metrics = self.metrics_for_workspace(workspace_id)
         readiness = self.beta_readiness_for_workspace(workspace_id)
         regression = self.ops_regression_for_workspace(workspace_id, window_size=5)
@@ -6971,7 +6992,7 @@ class SpecPilotStore:
             learning,
             backlog,
         )
-        return LaunchGateDashboard(
+        dashboard = LaunchGateDashboard(
             workspace_id=workspace_id,
             generated_at=_now(),
             decision=decision,
@@ -6999,6 +7020,11 @@ class SpecPilotStore:
                 "share_cta_rate": growth.share_rate,
                 "subscription_cta_rate": growth.paid_intent_rate,
             },
+        )
+        return self._remember_launch_dashboard(
+            workspace_id,
+            "launch_gate",
+            dashboard,
         )
 
     def _ensure_schema(self) -> None:
