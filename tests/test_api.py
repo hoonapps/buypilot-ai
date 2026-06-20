@@ -1878,6 +1878,117 @@ def test_growth_launch_war_room_prioritizes_first_day_actions() -> None:
     assert payload["next_actions"]
 
 
+def test_growth_launch_week_recap_summarizes_first_week_response() -> None:
+    workspace = {"X-SpecPilot-Key": f"pytest-week-recap-{uuid4().hex}"}
+    for event_type in ["analysis_view", "share_cta", "subscription_cta"]:
+        response = client.post(
+            "/growth/events",
+            headers=workspace,
+            json={
+                "event_type": event_type,
+                "source": "pytest-week-recap",
+                "surface": "launch",
+                "label": f"D+7 {event_type}",
+            },
+        )
+        assert response.status_code == 200
+    referral = client.post(
+        "/growth/waitlist-referrals",
+        headers=workspace,
+        json={
+            "email": "week-recap@example.com",
+            "persona": "creator",
+            "use_case": "첫 주 공개 반응을 주변에 공유하고 싶습니다.",
+            "contact_consent": True,
+            "source": "pytest-week-recap",
+        },
+    )
+    assert referral.status_code == 200
+    intent = client.post(
+        "/billing/subscription-intents",
+        headers=workspace,
+        json={
+            "email": "week-recap@example.com",
+            "plan_id": "premium",
+            "billing_cycle": "monthly",
+            "persona": "creator",
+            "use_case": "가격 알림과 결제 전 검수를 첫 주에 써보고 싶습니다.",
+            "team_size": 1,
+            "max_budget_krw": 50_000,
+            "feature_priorities": ["가격 알림", "결제 전 검수"],
+            "purchase_timing": "within_7_days",
+            "source": "pytest-week-recap",
+        },
+    )
+    assert intent.status_code == 200
+    experiment = client.post(
+        "/growth/launch-experiments",
+        headers=workspace,
+        json={
+            "name": "D+7 공개 후속 CTA",
+            "channel": "community",
+            "audience": "desktop_pc_buyer",
+            "hypothesis": "첫 주 성과 리포트가 다시 공유를 만든다.",
+            "primary_metric": "share_cta",
+            "target_surface": "week-recap",
+            "category": "desktop_pc",
+            "variants": [
+                {
+                    "label": "첫 주 리포트",
+                    "headline": "SpecPilot AI 첫 주 공개 리포트",
+                    "body": "실제 반응과 다음 개선 항목을 공개합니다.",
+                    "cta_label": "첫 주 리포트 보기",
+                    "cta_path": "/launch#launch-week-recap",
+                    "allocation_percent": 100,
+                },
+            ],
+        },
+    )
+    assert experiment.status_code == 200
+    variant_id = experiment.json()["variants"][0]["variant_id"]
+    event = client.post(
+        f"/growth/launch-experiments/{experiment.json()['experiment_id']}/events",
+        headers=workspace,
+        json={
+            "variant_id": variant_id,
+            "event_type": "conversion",
+            "source": "pytest-week-recap",
+            "surface": "week-recap",
+            "label": "첫 주 리포트 전환",
+        },
+    )
+    assert event.status_code == 200
+
+    response = client.get("/growth/launch-week-recap?limit=8", headers=workspace)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["recap_version"] == "specpilot.launch_week_recap.v1"
+    assert payload["workspace_id"].startswith("workspace_")
+    assert payload["status"] in {"ok", "warning", "blocker"}
+    assert payload["recap_score"] > 0
+    assert payload["metric_cards"]["growth_events"] >= 3
+    assert payload["metric_cards"]["pricing_intents"] >= 1
+    win_keys = {win["key"] for win in payload["wins"]}
+    assert {
+        "reaction_learning",
+        "conversion_surface",
+        "referral_loop",
+        "paid_demand",
+        "retention_loop",
+        "experiment_learning",
+    } <= win_keys
+    risk_keys = {risk["key"] for risk in payload["risks"]}
+    assert {
+        "measurement_gap",
+        "publish_surface",
+        "conversion_bottleneck",
+        "quality_regression",
+    } <= risk_keys
+    assert "SpecPilot AI 첫 주 공개 리포트" in payload["founder_update"]
+    assert payload["channel_moves"]
+    assert payload["next_actions"]
+
+
 def test_public_launch_room_packages_demo_proof_and_growth_ctas() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-launch-room-{uuid4().hex}"}
     referral = client.post(

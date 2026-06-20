@@ -1931,6 +1931,39 @@ class LaunchWarRoomDashboard(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class LaunchWeekRecapWin(BaseModel):
+    key: str
+    label: str
+    metric: str
+    evidence: str
+    repeat_action: str
+
+
+class LaunchWeekRecapRisk(BaseModel):
+    key: str
+    label: str
+    status: CheckStatus
+    evidence: str
+    mitigation: str
+    owner: str
+
+
+class LaunchWeekRecapDashboard(BaseModel):
+    recap_version: str = "specpilot.launch_week_recap.v1"
+    workspace_id: str
+    generated_at: str
+    status: CheckStatus
+    recap_score: float = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    metric_cards: dict[str, int | float | str] = Field(default_factory=dict)
+    wins: list[LaunchWeekRecapWin] = Field(default_factory=list)
+    risks: list[LaunchWeekRecapRisk] = Field(default_factory=list)
+    channel_moves: list[str] = Field(default_factory=list)
+    founder_update: str
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PublicAcquisitionSurface(BaseModel):
     key: str
     label: str

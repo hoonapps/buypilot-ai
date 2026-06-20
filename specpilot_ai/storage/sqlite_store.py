@@ -73,6 +73,9 @@ from specpilot_ai.core.models import (
     LaunchPulseDashboard,
     LaunchPulseMetric,
     LaunchPulseSignal,
+    LaunchWeekRecapDashboard,
+    LaunchWeekRecapRisk,
+    LaunchWeekRecapWin,
     LaunchWarRoomDashboard,
     LaunchWarRoomPlay,
     LaunchWarRoomSignal,
@@ -3394,6 +3397,108 @@ class SpecPilotStore:
             plays=plays,
             escalation_paths=_launch_war_room_escalation_paths(signals),
             next_actions=_launch_war_room_next_actions(signals, plays),
+        )
+
+    def launch_week_recap_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 12,
+    ) -> LaunchWeekRecapDashboard:
+        metrics = self.metrics_for_workspace(workspace_id)
+        pulse = self.launch_pulse_for_workspace(workspace_id, limit=limit)
+        smoke = self.public_launch_smoke_dashboard_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        conversion = self.public_conversion_board_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        war_room = self.launch_war_room_for_workspace(workspace_id, limit=limit)
+        retention = self.retention_hub_for_workspace(workspace_id, limit=limit)
+        referrals = self.waitlist_referral_dashboard_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        pricing = self.pricing_dashboard_for_workspace(workspace_id)
+        experiments = self.launch_experiment_dashboard_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        regression = self.ops_regression_for_workspace(workspace_id, window_size=5)
+        recap_score = _launch_week_recap_score(
+            pulse=pulse,
+            smoke=smoke,
+            conversion=conversion,
+            war_room=war_room,
+            retention=retention,
+            referrals=referrals,
+            pricing=pricing,
+            experiments=experiments,
+        )
+        status = _launch_week_recap_status(
+            recap_score=recap_score,
+            smoke=smoke,
+            war_room=war_room,
+            regression=regression,
+        )
+        wins = _launch_week_recap_wins(
+            metrics=metrics,
+            pulse=pulse,
+            conversion=conversion,
+            retention=retention,
+            referrals=referrals,
+            pricing=pricing,
+            experiments=experiments,
+        )
+        risks = _launch_week_recap_risks(
+            metrics=metrics,
+            pulse=pulse,
+            smoke=smoke,
+            conversion=conversion,
+            war_room=war_room,
+            retention=retention,
+            referrals=referrals,
+            pricing=pricing,
+            experiments=experiments,
+            regression=regression,
+        )
+        return LaunchWeekRecapDashboard(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            status=status,
+            recap_score=recap_score,
+            headline=_launch_week_recap_headline(status, recap_score),
+            summary=_launch_week_recap_summary(metrics, wins, risks, pricing),
+            metric_cards={
+                "growth_events": metrics.growth_events,
+                "public_share_views": metrics.public_share_views,
+                "share_cta_clicks": metrics.share_cta_clicks,
+                "referral_waitlist": referrals.total_referrals,
+                "referred_signups": referrals.referred_signup_count,
+                "pricing_intents": pricing.intent_count,
+                "estimated_mrr_krw": pricing.estimated_mrr_krw,
+                "premium_intents": metrics.premium_subscription_intents,
+                "active_experiments": experiments.active_experiment_count,
+                "experiment_conversion_rate": f"{round(experiments.conversion_rate * 100)}%",
+                "pulse_score": pulse.pulse_score,
+                "retention_score": retention.retention_score,
+            },
+            wins=wins,
+            risks=risks,
+            channel_moves=_launch_week_recap_channel_moves(
+                conversion,
+                pulse,
+                war_room,
+            ),
+            founder_update=_launch_week_recap_founder_update(
+                recap_score=recap_score,
+                wins=wins,
+                risks=risks,
+                metrics=metrics,
+                pricing=pricing,
+            ),
+            next_actions=_launch_week_recap_next_actions(wins, risks, war_room),
         )
 
     def retention_hub_for_workspace(
@@ -12751,6 +12856,372 @@ def _launch_war_room_next_actions(
         actions.append("D+1 배포 플랜에 가장 반응이 높은 CTA와 공유 문구를 반영하세요.")
     actions.append("24시간 후 Pulse, 스모크, 전환 보드 점수를 다시 캡처해 다음 배포 여부를 결정하세요.")
     return list(dict.fromkeys(actions))[:6]
+
+
+def _launch_week_recap_score(
+    *,
+    pulse: LaunchPulseDashboard,
+    smoke: PublicLaunchSmokeDashboard,
+    conversion: PublicConversionBoard,
+    war_room: LaunchWarRoomDashboard,
+    retention: RetentionHubDashboard,
+    referrals: WaitlistReferralDashboard,
+    pricing: PricingDashboard,
+    experiments: LaunchExperimentDashboard,
+) -> float:
+    referral_score = min(
+        100.0,
+        referrals.total_referrals * 10 + referrals.referred_signup_count * 20,
+    )
+    pricing_score = min(
+        100.0,
+        pricing.intent_count * 12 + pricing.estimated_mrr_krw / 50000,
+    )
+    experiment_score = min(
+        100.0,
+        experiments.active_experiment_count * 12
+        + experiments.total_impressions * 2
+        + experiments.total_conversions * 15
+        + experiments.conversion_rate * 100,
+    )
+    return round(
+        pulse.pulse_score * 0.18
+        + smoke.smoke_score * 0.12
+        + conversion.conversion_score * 0.18
+        + war_room.command_score * 0.14
+        + retention.retention_score * 0.12
+        + referral_score * 0.1
+        + pricing_score * 0.1
+        + experiment_score * 0.06,
+        1,
+    )
+
+
+def _launch_week_recap_status(
+    *,
+    recap_score: float,
+    smoke: PublicLaunchSmokeDashboard,
+    war_room: LaunchWarRoomDashboard,
+    regression: OpsRegressionDashboard,
+) -> CheckStatus:
+    if (
+        recap_score < 42
+        or smoke.status == CheckStatus.blocker
+        or war_room.status == CheckStatus.blocker
+        or regression.status == CheckStatus.blocker
+    ):
+        return CheckStatus.blocker
+    if (
+        recap_score < 74
+        or smoke.status == CheckStatus.warning
+        or war_room.status == CheckStatus.warning
+        or regression.status == CheckStatus.warning
+    ):
+        return CheckStatus.warning
+    return CheckStatus.ok
+
+
+def _launch_week_recap_wins(
+    *,
+    metrics: OperationsMetrics,
+    pulse: LaunchPulseDashboard,
+    conversion: PublicConversionBoard,
+    retention: RetentionHubDashboard,
+    referrals: WaitlistReferralDashboard,
+    pricing: PricingDashboard,
+    experiments: LaunchExperimentDashboard,
+) -> list[LaunchWeekRecapWin]:
+    wins = [
+        _launch_week_recap_win(
+            key="reaction_learning",
+            label="반응 학습 표본",
+            metric=f"성장 이벤트 {metrics.growth_events}건 · Pulse {round(pulse.pulse_score)}점",
+            evidence=pulse.summary,
+            repeat_action=(
+                pulse.top_actions[0]
+                if pulse.top_actions
+                else "다음 배포에서도 CTA와 공유 이벤트를 같은 이름으로 유지하세요."
+            ),
+        ),
+        _launch_week_recap_win(
+            key="conversion_surface",
+            label="공개 전환 표면",
+            metric=f"전환 {round(conversion.conversion_score)}점 · 공유 조회 {metrics.public_share_views}회",
+            evidence=conversion.summary,
+            repeat_action=(
+                conversion.channel_actions[0]
+                if conversion.channel_actions
+                else "전환 점수가 높은 표면을 다음 채널 배포에 재사용하세요."
+            ),
+        ),
+        _launch_week_recap_win(
+            key="referral_loop",
+            label="추천 확산 루프",
+            metric=(
+                f"대기열 {referrals.total_referrals}명 · "
+                f"추천 유입 {referrals.referred_signup_count}명"
+            ),
+            evidence=referrals.summary,
+            repeat_action=(
+                referrals.next_actions[0]
+                if referrals.next_actions
+                else "상위 추천자에게 다음 공유 문구와 보상 단계를 보내세요."
+            ),
+        ),
+        _launch_week_recap_win(
+            key="paid_demand",
+            label="유료 수요 검증",
+            metric=f"요금제 관심 {pricing.intent_count}건 · 예상 MRR {pricing.estimated_mrr_krw:,}원",
+            evidence=pricing.summary,
+            repeat_action=(
+                pricing.next_actions[0]
+                if pricing.next_actions
+                else "Premium/Team 관심 리드를 D+7 후속 인터뷰로 연결하세요."
+            ),
+        ),
+        _launch_week_recap_win(
+            key="retention_loop",
+            label="구매 후속 루프",
+            metric=f"리텐션 {round(retention.retention_score)}점 · 가격 알림 {metrics.alert_subscriptions}개",
+            evidence=retention.summary,
+            repeat_action=(
+                retention.next_actions[0]
+                if retention.next_actions
+                else "저장 리포트와 가격 알림 CTA를 구매 대기 사용자에게 다시 노출하세요."
+            ),
+        ),
+        _launch_week_recap_win(
+            key="experiment_learning",
+            label="CTA 실험 학습",
+            metric=(
+                f"활성 실험 {experiments.active_experiment_count}개 · "
+                f"전환율 {round(experiments.conversion_rate * 100)}%"
+            ),
+            evidence=experiments.summary,
+            repeat_action=(
+                experiments.next_actions[0]
+                if experiments.next_actions
+                else "가장 강한 CTA를 다음 배포 슬롯의 기본 문구로 승격하세요."
+            ),
+        ),
+    ]
+    return wins
+
+
+def _launch_week_recap_win(
+    *,
+    key: str,
+    label: str,
+    metric: str,
+    evidence: str,
+    repeat_action: str,
+) -> LaunchWeekRecapWin:
+    return LaunchWeekRecapWin(
+        key=key,
+        label=label,
+        metric=metric,
+        evidence=evidence,
+        repeat_action=repeat_action,
+    )
+
+
+def _launch_week_recap_risks(
+    *,
+    metrics: OperationsMetrics,
+    pulse: LaunchPulseDashboard,
+    smoke: PublicLaunchSmokeDashboard,
+    conversion: PublicConversionBoard,
+    war_room: LaunchWarRoomDashboard,
+    retention: RetentionHubDashboard,
+    referrals: WaitlistReferralDashboard,
+    pricing: PricingDashboard,
+    experiments: LaunchExperimentDashboard,
+    regression: OpsRegressionDashboard,
+) -> list[LaunchWeekRecapRisk]:
+    risks = [
+        _launch_week_recap_risk(
+            key="measurement_gap",
+            label="측정 표본 부족",
+            status=CheckStatus.ok if metrics.growth_events >= 5 else CheckStatus.warning,
+            evidence=f"성장 이벤트 {metrics.growth_events}건, unique trace {metrics.growth_unique_traces}개",
+            mitigation="런칭 CTA, 공유 복사, 액션 라우터 클릭을 같은 growth event taxonomy로 유지하세요.",
+            owner="analytics",
+        ),
+        _launch_week_recap_risk(
+            key="publish_surface",
+            label="공개 표면 안정성",
+            status=smoke.status,
+            evidence=smoke.summary,
+            mitigation=(
+                smoke.next_actions[0]
+                if smoke.next_actions
+                else "런칭룸, sitemap, 공유 미리보기, 측정 이벤트를 배포 직후 다시 확인하세요."
+            ),
+            owner="launch-ops",
+        ),
+        _launch_week_recap_risk(
+            key="conversion_bottleneck",
+            label="전환 병목",
+            status=conversion.status,
+            evidence=conversion.summary,
+            mitigation=(
+                conversion.next_actions[0]
+                if conversion.next_actions
+                else "첫 구매 진단 CTA와 분석 시작 handoff를 전환 병목 기준으로 조정하세요."
+            ),
+            owner="product",
+        ),
+        _launch_week_recap_risk(
+            key="quality_regression",
+            label="품질/비용 회귀",
+            status=regression.status,
+            evidence=regression.summary,
+            mitigation=(
+                regression.next_actions[0]
+                if regression.next_actions
+                else "품질 회귀와 provider 차단율을 다음 배포 전 고정 확인하세요."
+            ),
+            owner="engineering",
+        ),
+        _launch_week_recap_risk(
+            key="referral_followup",
+            label="추천 후속 부재",
+            status=_pulse_count_status(referrals.total_referrals, 1, 5),
+            evidence=referrals.summary,
+            mitigation="추천 코드 보유자에게 공유 키트와 다음 보상 단계를 D+7 메시지로 보내세요.",
+            owner="community",
+        ),
+        _launch_week_recap_risk(
+            key="paid_followup",
+            label="유료 관심 후속",
+            status=pricing.readiness_status,
+            evidence=pricing.summary,
+            mitigation="Premium/Team 관심 리드는 상담 안건, ROI 포인트, 제안 메일로 48시간 안에 후속 처리하세요.",
+            owner="sales",
+        ),
+        _launch_week_recap_risk(
+            key="experiment_stall",
+            label="실험 학습 정체",
+            status=experiments.status,
+            evidence=experiments.summary,
+            mitigation="노출은 있는데 전환이 낮은 CTA는 한 줄 가치 제안과 proof 배치를 바꿔 재실험하세요.",
+            owner="growth",
+        ),
+        _launch_week_recap_risk(
+            key="retention_gap",
+            label="구매 후속 루프 약함",
+            status=retention.status,
+            evidence=retention.summary,
+            mitigation="저장 리포트, 가격 알림, 구매 결과 회수 CTA를 D+7 리마인드에 묶으세요.",
+            owner="lifecycle",
+        ),
+    ]
+    if war_room.decision in {"hold_and_fix", "collect_more_signal"}:
+        risks.insert(
+            0,
+            _launch_week_recap_risk(
+                key="war_room_decision",
+                label="워룸 판단 보류",
+                status=war_room.status,
+                evidence=war_room.summary,
+                mitigation=war_room.next_actions[0]
+                if war_room.next_actions
+                else "첫 24시간 워룸 play를 먼저 닫고 다음 채널 배포를 결정하세요.",
+                owner="founder",
+            ),
+        )
+    return risks[:8]
+
+
+def _launch_week_recap_risk(
+    *,
+    key: str,
+    label: str,
+    status: CheckStatus,
+    evidence: str,
+    mitigation: str,
+    owner: str,
+) -> LaunchWeekRecapRisk:
+    return LaunchWeekRecapRisk(
+        key=key,
+        label=label,
+        status=status,
+        evidence=evidence,
+        mitigation=mitigation,
+        owner=owner,
+    )
+
+
+def _launch_week_recap_headline(status: CheckStatus, recap_score: float) -> str:
+    if status == CheckStatus.ok:
+        return f"D+7 런칭 리포트 {round(recap_score)}점, 강한 채널을 반복 배포하세요."
+    if status == CheckStatus.blocker:
+        return f"D+7 런칭 리포트 {round(recap_score)}점, 다음 공개 확대 전 blocker를 닫아야 합니다."
+    return f"D+7 런칭 리포트 {round(recap_score)}점, 성과 신호는 보이지만 보강이 필요합니다."
+
+
+def _launch_week_recap_summary(
+    metrics: OperationsMetrics,
+    wins: list[LaunchWeekRecapWin],
+    risks: list[LaunchWeekRecapRisk],
+    pricing: PricingDashboard,
+) -> str:
+    warning_count = sum(1 for risk in risks if risk.status == CheckStatus.warning)
+    blocker_count = sum(1 for risk in risks if risk.status == CheckStatus.blocker)
+    return (
+        f"첫 주 성장 이벤트 {metrics.growth_events}건, 공유 조회 {metrics.public_share_views}회, "
+        f"요금제 관심 {pricing.intent_count}건을 기준으로 반복할 성과 {len(wins)}개와 "
+        f"리스크 {len(risks)}개를 정리했습니다. warning {warning_count}개, "
+        f"blocker {blocker_count}개입니다."
+    )
+
+
+def _launch_week_recap_channel_moves(
+    conversion: PublicConversionBoard,
+    pulse: LaunchPulseDashboard,
+    war_room: LaunchWarRoomDashboard,
+) -> list[str]:
+    moves: list[str] = []
+    moves.extend(conversion.channel_actions[:3])
+    moves.extend(f"Pulse hot surface: {surface}" for surface in pulse.hot_surfaces[:3])
+    moves.extend(war_room.next_actions[:2])
+    if not moves:
+        moves.append("D+7에는 가장 이해가 빠른 커뮤니티 문구 1개와 분석 CTA 1개만 반복 배포하세요.")
+    return list(dict.fromkeys(moves))[:6]
+
+
+def _launch_week_recap_founder_update(
+    *,
+    recap_score: float,
+    wins: list[LaunchWeekRecapWin],
+    risks: list[LaunchWeekRecapRisk],
+    metrics: OperationsMetrics,
+    pricing: PricingDashboard,
+) -> str:
+    lead_win = wins[0] if wins else None
+    lead_risk = next((risk for risk in risks if risk.status != CheckStatus.ok), None)
+    win_text = lead_win.metric if lead_win else "첫 주 반응 신호를 모았습니다."
+    risk_text = lead_risk.mitigation if lead_risk else "다음 주에는 가장 강한 채널을 반복 배포합니다."
+    return (
+        "SpecPilot AI 첫 주 공개 리포트입니다. "
+        f"런칭 점수는 {round(recap_score)}점이고, {win_text}. "
+        f"공유 조회 {metrics.public_share_views}회, 유료 관심 {pricing.intent_count}건을 확인했습니다. "
+        f"다음 액션은 {risk_text}"
+    )
+
+
+def _launch_week_recap_next_actions(
+    wins: list[LaunchWeekRecapWin],
+    risks: list[LaunchWeekRecapRisk],
+    war_room: LaunchWarRoomDashboard,
+) -> list[str]:
+    actions = [risk.mitigation for risk in risks if risk.status != CheckStatus.ok]
+    actions.extend(win.repeat_action for win in wins[:2])
+    actions.extend(war_room.next_actions[:2])
+    if not actions:
+        actions.append("가장 강한 CTA와 채널 문구를 다음 주 배포 플랜의 기본값으로 승격하세요.")
+    actions.append("D+7 founder update를 공개 런칭룸과 커뮤니티 후속 댓글에 공유하세요.")
+    return list(dict.fromkeys(actions))[:7]
 
 
 def _retention_signals(

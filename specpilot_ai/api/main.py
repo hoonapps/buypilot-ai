@@ -72,6 +72,7 @@ from specpilot_ai.core.models import (
     LaunchExperimentRequest,
     LaunchGateDashboard,
     LaunchPulseDashboard,
+    LaunchWeekRecapDashboard,
     LaunchWarRoomDashboard,
     MistakeCostCalculatorRequest,
     MistakeCostCalculatorResult,
@@ -1822,6 +1823,17 @@ def growth_launch_war_room(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> LaunchWarRoomDashboard:
     return _store().launch_war_room_for_workspace(workspace.workspace_id, limit=limit)
+
+
+@app.get("/growth/launch-week-recap", response_model=LaunchWeekRecapDashboard)
+def growth_launch_week_recap(
+    limit: int = 12,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> LaunchWeekRecapDashboard:
+    return _store().launch_week_recap_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
 
 
 @app.get("/growth/acquisition-hub", response_model=PublicAcquisitionHub)
