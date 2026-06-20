@@ -76,6 +76,7 @@ from specpilot_ai.core.models import (
     LaunchIncidentCenter,
     LaunchMediaKit,
     LaunchPulseDashboard,
+    LaunchResponseLoopDashboard,
     LaunchWeekRecapDashboard,
     LaunchWarRoomDashboard,
     MistakeCostCalculatorRequest,
@@ -1879,6 +1880,17 @@ def growth_launch_activation_offer(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> LaunchActivationOfferDashboard:
     return _store().launch_activation_offer_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+
+
+@app.get("/growth/launch-response-loop", response_model=LaunchResponseLoopDashboard)
+def growth_launch_response_loop(
+    limit: int = 12,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> LaunchResponseLoopDashboard:
+    return _store().launch_response_loop_for_workspace(
         workspace.workspace_id,
         limit=limit,
     )

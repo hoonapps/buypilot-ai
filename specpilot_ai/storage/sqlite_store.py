@@ -78,6 +78,8 @@ from specpilot_ai.core.models import (
     LaunchIncidentCenter,
     LaunchIncidentRunbookStep,
     LaunchIncidentSignal,
+    LaunchResponseFollowup,
+    LaunchResponseLoopDashboard,
     LaunchMediaAsset,
     LaunchMediaKit,
     LaunchMediaPitch,
@@ -3835,6 +3837,84 @@ class SpecPilotStore:
                 conversion,
                 referrals,
                 pricing,
+            ),
+        )
+
+    def launch_response_loop_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 12,
+    ) -> LaunchResponseLoopDashboard:
+        safe_limit = max(4, min(limit, 30))
+        metrics = self.metrics_for_workspace(workspace_id)
+        feedback = self.list_feedback_for_workspace(workspace_id, limit=safe_limit)
+        growth_events = self.list_growth_events_for_workspace(workspace_id, limit=safe_limit)
+        referrals = self.waitlist_referral_dashboard_for_workspace(
+            workspace_id,
+            limit=safe_limit,
+        )
+        pricing = self.pricing_dashboard_for_workspace(workspace_id)
+        response_score = _launch_response_score(
+            metrics=metrics,
+            feedback=feedback,
+            growth_events=growth_events,
+            referrals=referrals,
+            pricing=pricing,
+        )
+        status = _launch_response_status(response_score, feedback, growth_events)
+        followups = _launch_response_followups(
+            metrics=metrics,
+            feedback=feedback,
+            growth_events=growth_events,
+            referrals=referrals,
+            pricing=pricing,
+        )
+        proof_candidates = _launch_response_proof_candidates(feedback, growth_events)
+        founder_reply_queue = _launch_response_founder_reply_queue(feedback, growth_events)
+        product_fix_queue = _launch_response_product_fix_queue(feedback)
+        return LaunchResponseLoopDashboard(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            status=status,
+            response_score=response_score,
+            headline=_launch_response_headline(status, response_score),
+            summary=_launch_response_summary(
+                metrics=metrics,
+                feedback=feedback,
+                growth_events=growth_events,
+                referrals=referrals,
+                pricing=pricing,
+            ),
+            metric_cards={
+                "response_score": response_score,
+                "feedback_count": metrics.feedback_count,
+                "average_satisfaction": metrics.average_satisfaction,
+                "purchase_intent_rate_percent": round(metrics.purchase_intent_rate * 100),
+                "growth_events": metrics.growth_events,
+                "share_cta_clicks": metrics.share_cta_clicks,
+                "subscription_cta_clicks": metrics.subscription_cta_clicks,
+                "referral_waitlist": referrals.total_referrals,
+                "pricing_intents": pricing.intent_count,
+                "product_fix_items": len(product_fix_queue),
+            },
+            followups=followups,
+            proof_candidates=proof_candidates,
+            founder_reply_queue=founder_reply_queue,
+            product_fix_queue=product_fix_queue,
+            tracking_events=[
+                "launch_response_loop_view",
+                "launch_response_followup_sent",
+                "launch_response_proof_published",
+                "launch_response_fix_created",
+                "launch_response_referral_invite",
+            ],
+            recent_feedback=feedback[: min(safe_limit, 10)],
+            recent_growth_events=growth_events[: min(safe_limit, 10)],
+            next_actions=_launch_response_next_actions(
+                status,
+                followups,
+                proof_candidates,
+                product_fix_queue,
             ),
         )
 
@@ -14747,6 +14827,266 @@ def _launch_activation_next_actions(
     if pricing.intent_count == 0:
         actions.append("무료 분석 결과 화면에 Premium 관심 등록을 결제 대신 가벼운 의향 CTA로 배치하세요.")
     actions.extend(conversion.next_actions[:2])
+    return list(dict.fromkeys(actions))[:8]
+
+
+def _launch_response_score(
+    *,
+    metrics: OperationsMetrics,
+    feedback: list[FeedbackRecord],
+    growth_events: list[GrowthEventRecord],
+    referrals: WaitlistReferralDashboard,
+    pricing: PricingDashboard,
+) -> float:
+    positive_feedback = len([item for item in feedback if item.rating >= 4])
+    fix_feedback = len([item for item in feedback if item.rating <= 3 or item.improvement_requests])
+    event_types = {event.event_type for event in growth_events}
+    reaction_signal = min(
+        100.0,
+        metrics.growth_events * 4
+        + metrics.share_cta_clicks * 8
+        + metrics.subscription_cta_clicks * 10
+        + len(event_types) * 8,
+    )
+    feedback_signal = min(
+        100.0,
+        metrics.feedback_count * 12
+        + metrics.average_satisfaction * 10
+        + metrics.purchase_intent_rate * 30
+        + positive_feedback * 6
+        - fix_feedback * 3,
+    )
+    demand_signal = min(
+        100.0,
+        referrals.total_referrals * 8
+        + referrals.referred_signup_count * 12
+        + pricing.intent_count * 10
+        + pricing.team_intent_count * 12,
+    )
+    return round(reaction_signal * 0.35 + feedback_signal * 0.4 + demand_signal * 0.25, 1)
+
+
+def _launch_response_status(
+    response_score: float,
+    feedback: list[FeedbackRecord],
+    growth_events: list[GrowthEventRecord],
+) -> CheckStatus:
+    if not feedback and not growth_events:
+        return CheckStatus.warning
+    if response_score < 38 or any(item.rating <= 2 for item in feedback[:5]):
+        return CheckStatus.blocker
+    if response_score < 72 or any(item.improvement_requests for item in feedback[:5]):
+        return CheckStatus.warning
+    return CheckStatus.ok
+
+
+def _launch_response_followups(
+    *,
+    metrics: OperationsMetrics,
+    feedback: list[FeedbackRecord],
+    growth_events: list[GrowthEventRecord],
+    referrals: WaitlistReferralDashboard,
+    pricing: PricingDashboard,
+) -> list[LaunchResponseFollowup]:
+    positive = [item for item in feedback if item.rating >= 4]
+    fixes = [item for item in feedback if item.rating <= 3 or item.improvement_requests]
+    share_events = [event for event in growth_events if event.event_type == GrowthEventType.share_cta]
+    paid_events = [
+        event for event in growth_events if event.event_type == GrowthEventType.subscription_cta
+    ]
+    followups = [
+        _launch_response_followup(
+            key="publish_positive_proof",
+            label="긍정 반응 proof 전환",
+            owner="growth",
+            priority="high" if positive else "medium",
+            trigger=f"만족도 4점 이상 피드백 {len(positive)}건",
+            action="연락처 원문을 제외하고 공개 proof 후보를 social proof wall과 런칭룸에 반영",
+            reply_copy=_launch_response_positive_reply(positive[0] if positive else None),
+            proof_policy="연락처, trace_id, 주문번호 원문은 공개하지 않고 rating, 맥락, 선택 후보만 마스킹합니다.",
+            tracking_event="launch_response_proof_published",
+        ),
+        _launch_response_followup(
+            key="fix_negative_feedback",
+            label="불만/개선 요청 처리",
+            owner="product",
+            priority="high" if fixes else "low",
+            trigger=f"개선 요청 또는 3점 이하 피드백 {len(fixes)}건",
+            action="반복 개선 요청을 beta backlog로 옮기고 다음 배포 전 owner를 지정",
+            reply_copy=_launch_response_fix_reply(fixes[0] if fixes else None),
+            proof_policy="불만 원문은 공개 proof로 쓰지 않고 문제 유형과 수정 상태만 공개합니다.",
+            tracking_event="launch_response_fix_created",
+        ),
+        _launch_response_followup(
+            key="amplify_share_reaction",
+            label="공유 반응 확산",
+            owner="community",
+            priority="high" if share_events or referrals.total_referrals else "medium",
+            trigger=(
+                f"공유 CTA {metrics.share_cta_clicks}건 · "
+                f"추천 대기열 {referrals.total_referrals}명"
+            ),
+            action="공유한 사용자에게 추천 링크와 커뮤니티용 짧은 답변을 보내 2차 확산을 유도",
+            reply_copy="공유해주셔서 감사합니다. 같은 조건을 검토하는 분에게는 /join 추천 링크와 런칭룸을 같이 보내주세요.",
+            proof_policy="추천 순위는 이메일을 마스킹하고 referral code와 referred count만 공개합니다.",
+            tracking_event="launch_response_referral_invite",
+        ),
+        _launch_response_followup(
+            key="follow_paid_intent",
+            label="유료 관심 후속 연락",
+            owner="sales",
+            priority="high" if paid_events or pricing.intent_count else "medium",
+            trigger=(
+                f"요금제 관심 {pricing.intent_count}건 · "
+                f"구독 CTA {metrics.subscription_cta_clicks}건"
+            ),
+            action="Premium/Team 관심 리드에게 24시간 안에 상담 안건, ROI 포인트, 다음 분석 CTA를 발송",
+            reply_copy="관심 등록 감사합니다. 구매 조건, 예산, 팀 규모를 알려주시면 승인 가능한 비교 리포트 형태로 정리해드릴게요.",
+            proof_policy="요금제 관심은 수량과 예상 MRR만 공개하고 이메일/회사명은 공개하지 않습니다.",
+            tracking_event="launch_response_paid_followup",
+        ),
+    ]
+    if not feedback and not growth_events:
+        followups.insert(
+            0,
+            _launch_response_followup(
+                key="collect_first_response",
+                label="첫 반응 수집",
+                owner="founder",
+                priority="high",
+                trigger="피드백과 성장 이벤트가 아직 없음",
+                action="런칭룸 상단에 30초 분석 CTA와 한 줄 피드백 CTA를 함께 고정",
+                reply_copy="첫 사용자 반응을 받고 있습니다. 조건을 넣어보고 한 줄로 좋은 점/불편한 점을 남겨주세요.",
+                proof_policy="첫 반응 5건 전까지는 정량 지표를 proof로 과장하지 않습니다.",
+                tracking_event="launch_response_first_signal",
+            ),
+        )
+    return followups[:5]
+
+
+def _launch_response_followup(
+    *,
+    key: str,
+    label: str,
+    owner: str,
+    priority: str,
+    trigger: str,
+    action: str,
+    reply_copy: str,
+    proof_policy: str,
+    tracking_event: str,
+) -> LaunchResponseFollowup:
+    return LaunchResponseFollowup(
+        key=key,
+        label=label,
+        owner=owner,
+        priority=priority,
+        trigger=trigger,
+        action=action,
+        reply_copy=reply_copy,
+        proof_policy=proof_policy,
+        tracking_event=tracking_event,
+    )
+
+
+def _launch_response_positive_reply(record: FeedbackRecord | None) -> str:
+    if record is None:
+        return "좋은 반응이 들어오면 허락 가능한 범위에서 공개 proof로 정리하고, 다음 분석 CTA를 함께 보내세요."
+    reason = record.reason or "구매 판단에 도움이 됐다는 반응"
+    return f"좋은 피드백 감사합니다. '{reason}' 맥락은 개인정보를 제거한 뒤 런칭 proof로 반영하겠습니다."
+
+
+def _launch_response_fix_reply(record: FeedbackRecord | None) -> str:
+    if record is None:
+        return "개선 요청이 들어오면 같은 날 owner와 수정 상태를 답장하세요."
+    request = ", ".join(record.improvement_requests[:2]) or record.reason or "불편했던 지점"
+    return f"남겨주신 '{request}' 항목은 바로 수정 후보에 올리고, 처리 상태를 후속 업데이트로 공유하겠습니다."
+
+
+def _launch_response_proof_candidates(
+    feedback: list[FeedbackRecord],
+    growth_events: list[GrowthEventRecord],
+) -> list[str]:
+    candidates = [
+        f"만족도 {item.rating}점: {item.reason or '구매 판단에 도움이 됨'}"
+        for item in feedback
+        if item.rating >= 4
+    ]
+    event_surfaces = list(dict.fromkeys(event.surface for event in growth_events if event.surface))
+    candidates.extend(f"반응 표면: {surface}" for surface in event_surfaces[:4])
+    if not candidates:
+        candidates.append("첫 proof 후보는 만족도 4점 이상 피드백 또는 공유 CTA 이벤트가 생기면 생성됩니다.")
+    return candidates[:8]
+
+
+def _launch_response_founder_reply_queue(
+    feedback: list[FeedbackRecord],
+    growth_events: list[GrowthEventRecord],
+) -> list[str]:
+    replies = [
+        f"{item.contact_masked or '익명'}: {item.reason or '피드백 확인'}"
+        for item in feedback
+        if item.purchase_intent or item.rating >= 4
+    ]
+    replies.extend(
+        f"{event.surface}: {event.label or event.event_type.value} 후속 확인"
+        for event in growth_events
+        if event.event_type in {GrowthEventType.share_cta, GrowthEventType.subscription_cta}
+    )
+    if not replies:
+        replies.append("첫 피드백이 들어오면 24시간 안에 founder reply를 보낼 대상을 여기에 쌓으세요.")
+    return list(dict.fromkeys(replies))[:8]
+
+
+def _launch_response_product_fix_queue(feedback: list[FeedbackRecord]) -> list[str]:
+    fixes: list[str] = []
+    for item in feedback:
+        fixes.extend(item.improvement_requests)
+        if item.rating <= 3 and item.reason:
+            fixes.append(item.reason)
+    if not fixes:
+        fixes.append("반복 개선 요청이 들어오면 beta backlog owner와 due date를 지정하세요.")
+    return list(dict.fromkeys(fixes))[:8]
+
+
+def _launch_response_headline(status: CheckStatus, response_score: float) -> str:
+    if status == CheckStatus.ok:
+        return f"반응 후속 루프 {round(response_score)}점, 좋은 반응을 proof와 후속 연락으로 전환하세요."
+    if status == CheckStatus.blocker:
+        return f"반응 후속 루프 {round(response_score)}점, 불만 또는 측정 공백을 먼저 처리해야 합니다."
+    return f"반응 후속 루프 {round(response_score)}점, 첫 proof와 개선 요청을 분리하세요."
+
+
+def _launch_response_summary(
+    *,
+    metrics: OperationsMetrics,
+    feedback: list[FeedbackRecord],
+    growth_events: list[GrowthEventRecord],
+    referrals: WaitlistReferralDashboard,
+    pricing: PricingDashboard,
+) -> str:
+    return (
+        f"피드백 {len(feedback)}건, 성장 이벤트 {len(growth_events)}건, "
+        f"추천 대기열 {referrals.total_referrals}명, 요금제 관심 {pricing.intent_count}건을 "
+        f"공개 proof, founder reply, 제품 수정, 공유 확산, 유료 후속으로 분류합니다. "
+        f"전체 누적 피드백 {metrics.feedback_count}건 기준입니다."
+    )
+
+
+def _launch_response_next_actions(
+    status: CheckStatus,
+    followups: list[LaunchResponseFollowup],
+    proof_candidates: list[str],
+    product_fix_queue: list[str],
+) -> list[str]:
+    actions = [followup.action for followup in followups if followup.priority == "high"]
+    if status != CheckStatus.ok:
+        actions.append("3점 이하 피드백과 개선 요청은 공개 proof보다 제품 수정 queue에 먼저 넣으세요.")
+    if proof_candidates:
+        actions.append("연락처와 trace_id를 제거한 proof 후보만 런칭룸과 social proof wall에 반영하세요.")
+    if product_fix_queue:
+        actions.append("반복 개선 요청은 beta backlog에 owner와 due date를 지정하세요.")
+    actions.append("24시간 후 D+7 리포트 founder update에 proof, 수정, 후속 연락 결과를 반영하세요.")
     return list(dict.fromkeys(actions))[:8]
 
 

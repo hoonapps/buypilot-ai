@@ -2268,6 +2268,106 @@ def test_growth_launch_activation_offer_does_not_regenerate_heavy_launch_kits(
     assert payload["offers"]
 
 
+def test_growth_launch_response_loop_turns_reactions_into_followups() -> None:
+    workspace = {"X-SpecPilot-Key": f"pytest-response-loop-{uuid4().hex}"}
+    analysis = client.post(
+        "/analyze",
+        headers=workspace,
+        json={
+            "query": "휴대용 개발 노트북을 180만원 안에서 추천해줘",
+            "category": "laptop",
+            "budget_krw": 1800000,
+            "purpose": "portable development",
+            "must_haves": ["32GB RAM", "가벼운 무게"],
+        },
+    )
+    assert analysis.status_code == 200
+    trace_id = analysis.json()["graph_trace_id"]
+    positive = client.post(
+        "/feedback",
+        headers=workspace,
+        json={
+            "trace_id": trace_id,
+            "rating": 5,
+            "purchase_intent": True,
+            "selected_product_id": "laptop-dev-01",
+            "reason": "가격 대기와 제외 이유가 명확해서 바로 공유할 수 있었습니다.",
+            "improvement_requests": [],
+            "contact": "response-loop@example.com",
+        },
+    )
+    assert positive.status_code == 200
+    fix = client.post(
+        "/feedback",
+        headers=workspace,
+        json={
+            "trace_id": trace_id,
+            "rating": 3,
+            "purchase_intent": False,
+            "selected_product_id": None,
+            "reason": "팀 구매 승인용 문구가 더 필요합니다.",
+            "improvement_requests": ["승인자용 한 장 요약", "보안/AS 체크 추가"],
+            "contact": "",
+        },
+    )
+    assert fix.status_code == 200
+    for event_type in ["share_cta", "subscription_cta"]:
+        event = client.post(
+            "/growth/events",
+            headers=workspace,
+            json={
+                "event_type": event_type,
+                "trace_id": trace_id,
+                "source": "pytest-response-loop",
+                "surface": "launch-response-loop",
+                "label": f"반응 루프 {event_type}",
+            },
+        )
+        assert event.status_code == 200
+    pricing = client.post(
+        "/billing/subscription-intents",
+        headers=workspace,
+        json={
+            "email": "response-loop@example.com",
+            "plan_id": "premium",
+            "billing_cycle": "monthly",
+            "persona": "individual_buyer",
+            "use_case": "구매 타이밍과 결제 전 검수를 계속 받고 싶습니다.",
+            "team_size": 1,
+            "max_budget_krw": 2000000,
+            "feature_priorities": ["price_alert", "checkout_review"],
+            "purchase_timing": "within_30_days",
+            "contact_consent": True,
+            "source": "pytest-response-loop",
+        },
+    )
+    assert pricing.status_code == 200
+
+    response = client.get("/growth/launch-response-loop?limit=8", headers=workspace)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["loop_version"] == "specpilot.launch_response_loop.v1"
+    assert payload["workspace_id"].startswith("workspace_")
+    assert payload["status"] in {"ok", "warning", "blocker"}
+    assert payload["response_score"] > 0
+    followup_keys = {item["key"] for item in payload["followups"]}
+    assert {
+        "publish_positive_proof",
+        "fix_negative_feedback",
+        "amplify_share_reaction",
+        "follow_paid_intent",
+    } <= followup_keys
+    assert payload["metric_cards"]["feedback_count"] >= 2
+    assert payload["metric_cards"]["pricing_intents"] >= 1
+    assert payload["proof_candidates"]
+    assert payload["founder_reply_queue"]
+    assert payload["product_fix_queue"]
+    assert "launch_response_loop_view" in payload["tracking_events"]
+    assert payload["recent_feedback"]
+    assert payload["recent_growth_events"]
+    assert payload["next_actions"]
+
+
 def test_public_launch_room_packages_demo_proof_and_growth_ctas() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-launch-room-{uuid4().hex}"}
     referral = client.post(

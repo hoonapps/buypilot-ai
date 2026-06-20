@@ -2103,6 +2103,37 @@ class LaunchActivationOfferDashboard(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class LaunchResponseFollowup(BaseModel):
+    key: str
+    label: str
+    owner: str
+    priority: str
+    trigger: str
+    action: str
+    reply_copy: str
+    proof_policy: str
+    tracking_event: str
+
+
+class LaunchResponseLoopDashboard(BaseModel):
+    loop_version: str = "specpilot.launch_response_loop.v1"
+    workspace_id: str
+    generated_at: str
+    status: CheckStatus
+    response_score: float = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    metric_cards: dict[str, int | float | str] = Field(default_factory=dict)
+    followups: list[LaunchResponseFollowup] = Field(default_factory=list)
+    proof_candidates: list[str] = Field(default_factory=list)
+    founder_reply_queue: list[str] = Field(default_factory=list)
+    product_fix_queue: list[str] = Field(default_factory=list)
+    tracking_events: list[str] = Field(default_factory=list)
+    recent_feedback: list[FeedbackRecord] = Field(default_factory=list)
+    recent_growth_events: list[GrowthEventRecord] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PublicAcquisitionSurface(BaseModel):
     key: str
     label: str
