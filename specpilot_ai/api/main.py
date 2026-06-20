@@ -134,6 +134,7 @@ from specpilot_ai.core.models import (
     SourceUrlIngestResponse,
     SubscriptionIntent,
     SubscriptionIntentRequest,
+    TeamPurchaseConsultKit,
     TraceEvent,
     TraceRunSummary,
     TraceSpanRecord,
@@ -1338,6 +1339,17 @@ def pricing_dashboard(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> PricingDashboard:
     return _store().pricing_dashboard_for_workspace(workspace.workspace_id)
+
+
+@app.get("/ops/team-purchase-consult-kit", response_model=TeamPurchaseConsultKit)
+def team_purchase_consult_kit(
+    limit: int = 8,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> TeamPurchaseConsultKit:
+    return _store().team_purchase_consult_kit_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
 
 
 @app.post("/feedback", response_model=FeedbackRecord)

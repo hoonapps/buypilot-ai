@@ -220,6 +220,28 @@ def test_pricing_plans_subscription_intents_and_dashboard() -> None:
     assert dashboard_payload["readiness_status"] in {"ok", "warning"}
     assert dashboard_payload["next_actions"]
 
+    consult = client.get("/ops/team-purchase-consult-kit", headers=workspace_a)
+    assert consult.status_code == 200
+    consult_payload = consult.json()
+    assert consult_payload["kit_version"] == "specpilot.team_purchase_consult_kit.v1"
+    assert consult_payload["team_intent_count"] == 1
+    assert consult_payload["estimated_team_mrr_krw"] == 147_000
+    assert consult_payload["recommended_team_size"] == 3
+    assert consult_payload["target_plan"]["plan_id"] == "team"
+    assert consult_payload["decision_maker_brief"]
+    assert consult_payload["consultation_agenda"]
+    assert consult_payload["required_inputs"]
+    assert consult_payload["roi_points"]
+    assert consult_payload["rollout_steps"]
+    assert "it***@example.com" in consult_payload["email_copy"]
+    assert consult_payload["recent_team_intents"][0]["plan_id"] == "team"
+    assert consult_payload["next_actions"]
+
+    isolated_consult = client.get("/ops/team-purchase-consult-kit", headers=workspace_b)
+    assert isolated_consult.status_code == 200
+    assert isolated_consult.json()["team_intent_count"] == 0
+    assert isolated_consult.json()["status"] == "blocker"
+
     metrics = client.get("/ops/metrics", headers=workspace_a)
     assert metrics.status_code == 200
     metrics_payload = metrics.json()

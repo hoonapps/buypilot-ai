@@ -916,6 +916,28 @@ class PricingDashboard(BaseModel):
     recent_intents: list[SubscriptionIntent] = Field(default_factory=list)
 
 
+class TeamPurchaseConsultKit(BaseModel):
+    kit_version: str = "specpilot.team_purchase_consult_kit.v1"
+    workspace_id: str
+    generated_at: str
+    status: CheckStatus
+    headline: str
+    summary: str
+    target_plan: PricingPlan
+    team_intent_count: int = 0
+    estimated_team_mrr_krw: int = 0
+    recommended_team_size: int = 1
+    decision_maker_brief: str
+    consultation_agenda: list[str] = Field(default_factory=list)
+    required_inputs: list[str] = Field(default_factory=list)
+    roi_points: list[str] = Field(default_factory=list)
+    rollout_steps: list[str] = Field(default_factory=list)
+    email_copy: str
+    cta_cards: list[str] = Field(default_factory=list)
+    recent_team_intents: list[SubscriptionIntent] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class MarketReportPick(BaseModel):
     category: Category
     product_id: str

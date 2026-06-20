@@ -136,6 +136,7 @@ from specpilot_ai.core.models import (
     SourceRefreshRun,
     SubscriptionIntent,
     SubscriptionIntentRequest,
+    TeamPurchaseConsultKit,
     TraceEvent,
     TraceRunSummary,
     TraceSpanRecord,
@@ -3909,6 +3910,43 @@ class SpecPilotStore:
             next_actions=next_actions,
             plans=pricing_plans(),
             recent_intents=intents[:20],
+        )
+
+    def team_purchase_consult_kit_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 8,
+    ) -> TeamPurchaseConsultKit:
+        intents = self.list_subscription_intents_for_workspace(workspace_id, limit=200)
+        team_intents = [item for item in intents if item.plan_id == "team"]
+        dashboard = self.pricing_dashboard_for_workspace(workspace_id)
+        plan = pricing_plan_by_id("team")
+        assert plan is not None
+        recommended_team_size = _recommended_team_size(team_intents)
+        estimated_team_mrr = sum(item.estimated_mrr_krw for item in team_intents)
+        status = _team_consult_status(team_intents, estimated_team_mrr)
+        return TeamPurchaseConsultKit(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            status=status,
+            headline=_team_consult_headline(status, team_intents),
+            summary=_team_consult_summary(dashboard, team_intents, recommended_team_size),
+            target_plan=plan,
+            team_intent_count=len(team_intents),
+            estimated_team_mrr_krw=estimated_team_mrr,
+            recommended_team_size=recommended_team_size,
+            decision_maker_brief=_team_consult_decision_maker_brief(
+                team_intents,
+                estimated_team_mrr,
+            ),
+            consultation_agenda=_team_consult_agenda(team_intents),
+            required_inputs=_team_consult_required_inputs(team_intents),
+            roi_points=_team_consult_roi_points(team_intents, estimated_team_mrr),
+            rollout_steps=_team_consult_rollout_steps(),
+            email_copy=_team_consult_email_copy(team_intents, recommended_team_size),
+            cta_cards=_team_consult_cta_cards(status),
+            recent_team_intents=team_intents[: max(1, min(limit, 20))],
+            next_actions=_team_consult_next_actions(status, team_intents),
         )
 
     def create_beta_cohort_for_workspace(
@@ -8251,6 +8289,178 @@ def _pricing_dashboard_status(
     if intent_count == 0:
         return CheckStatus.blocker, actions
     return CheckStatus.warning, actions
+
+
+def _recommended_team_size(intents: list[SubscriptionIntent]) -> int:
+    if not intents:
+        return 3
+    return max(1, round(sum(item.team_size for item in intents) / len(intents)))
+
+
+def _team_consult_status(
+    intents: list[SubscriptionIntent],
+    estimated_team_mrr: int,
+) -> CheckStatus:
+    if not intents:
+        return CheckStatus.blocker
+    if len(intents) >= 2 or estimated_team_mrr >= 150_000:
+        return CheckStatus.ok
+    return CheckStatus.warning
+
+
+def _team_consult_headline(
+    status: CheckStatus,
+    intents: list[SubscriptionIntent],
+) -> str:
+    if status == CheckStatus.ok:
+        return f"Team 구매 상담을 바로 제안할 수 있는 리드 {len(intents)}건이 있습니다."
+    if intents:
+        return "초기 Team 리드가 생겼습니다. 상담 입력을 보강하세요."
+    return "Team 구매 상담 리드를 먼저 확보해야 합니다."
+
+
+def _team_consult_summary(
+    dashboard: PricingDashboard,
+    intents: list[SubscriptionIntent],
+    recommended_team_size: int,
+) -> str:
+    if intents:
+        return (
+            f"Team 관심 {len(intents)}건, 추천 상담 기준 팀 규모 "
+            f"{recommended_team_size}명, 전체 예상 MRR {dashboard.estimated_mrr_krw:,}원입니다."
+        )
+    return (
+        "아직 Team 관심 등록이 없습니다. 반복 장비 구매, 사무용 노트북 교체, "
+        "팀 공유 리포트 메시지를 공개 런칭 페이지에 더 강하게 노출하세요."
+    )
+
+
+def _team_consult_decision_maker_brief(
+    intents: list[SubscriptionIntent],
+    estimated_team_mrr: int,
+) -> str:
+    if not intents:
+        return (
+            "SpecPilot AI Team은 사무용 PC/노트북 반복 구매에서 조건 취합, "
+            "공유 리포트, 결제 전 검수, 구매 결과 학습을 한 흐름으로 묶습니다."
+        )
+    top = intents[0]
+    priorities = ", ".join(top.feature_priorities[:3]) or "팀 공유 리포트, 결제 전 검수"
+    return (
+        f"{top.email_masked} 리드가 {top.team_size}명 규모로 {priorities}를 요청했습니다. "
+        f"현재 Team 예상 MRR은 {estimated_team_mrr:,}원이며 첫 상담에서는 반복 구매 "
+        "품목과 승인 흐름을 확정해야 합니다."
+    )
+
+
+def _team_consult_agenda(intents: list[SubscriptionIntent]) -> list[str]:
+    agenda = [
+        "최근 90일 PC/노트북 구매 건수와 반복 구매 품목 확인",
+        "예산 승인자, 실사용자, IT 검수자 역할 분리",
+        "공유 리포트와 결제 전 검수 체크리스트 적용 범위 합의",
+        "구매 결과 회수와 다음 추천 품질 개선 루프 설계",
+    ]
+    if any("완료 리포트" in priority for item in intents for priority in item.feature_priorities):
+        agenda.append("완료 리포트 발송 대상과 채널 운영 기준 확인")
+    return agenda[:5]
+
+
+def _team_consult_required_inputs(intents: list[SubscriptionIntent]) -> list[str]:
+    inputs = [
+        "팀 규모와 월평균 장비 구매/교체 건수",
+        "주요 사용 목적: 사무, 개발, 디자인, 영상 편집, 현장 업무",
+        "예산 범위와 승인 단계",
+        "필수 보안/AS/브랜드 정책",
+        "현재 견적 비교 방식과 실패 사례",
+    ]
+    if intents and any(item.max_budget_krw for item in intents):
+        max_budget = max(item.max_budget_krw or 0 for item in intents)
+        inputs.insert(0, f"확인된 희망 월 예산 상한 {max_budget:,}원")
+    return inputs[:6]
+
+
+def _team_consult_roi_points(
+    intents: list[SubscriptionIntent],
+    estimated_team_mrr: int,
+) -> list[str]:
+    team_size = _recommended_team_size(intents)
+    avoided_hours = max(4, team_size * 2)
+    points = [
+        (
+            f"조건 취합과 비교표 작성 시간을 월 {avoided_hours}시간 이상 "
+            "줄이는 것을 1차 목표로 둡니다."
+        ),
+        "공유 리포트로 승인자와 실사용자가 같은 근거를 보고 검토합니다.",
+        "결제 전 검수로 모델명, 배송비, 쿠폰, 재고, AS 조건 누락을 줄입니다.",
+        "구매 결과를 저장해 다음 장비 구매 기준을 팀별로 학습합니다.",
+    ]
+    if estimated_team_mrr:
+        points.insert(
+            0,
+            (
+                f"확인된 Team 예상 MRR {estimated_team_mrr:,}원을 "
+                "결제 전환 실험 기준으로 둡니다."
+            ),
+        )
+    return points[:5]
+
+
+def _team_consult_rollout_steps() -> list[str]:
+    return [
+        "1주차: 대표 장비 구매 시나리오 2개를 공유 리포트로 생성",
+        "2주차: 결제 전 검수와 구매 결과 회수 workflow를 적용",
+        "3주차: 팀별 구매 기준과 제외 조건을 템플릿화",
+        "4주차: 완료 리포트와 학습 인사이트로 반복 구매 기준 확정",
+    ]
+
+
+def _team_consult_email_copy(
+    intents: list[SubscriptionIntent],
+    recommended_team_size: int,
+) -> str:
+    lead = intents[0].email_masked if intents else "구매 담당자"
+    return (
+        f"안녕하세요, {lead}님.\n"
+        "SpecPilot AI Team 구매 보조 상담을 제안드립니다.\n\n"
+        f"{recommended_team_size}명 규모 팀의 PC/노트북 구매 조건을 모아 공유 리포트, "
+        "결제 전 검수, 구매 결과 학습 루프로 정리해 드립니다.\n"
+        "첫 상담에서는 최근 구매 실패 사례, 예산 승인 흐름, 필수 사양/AS 정책을 확인하고 "
+        "바로 적용할 팀 구매 표준안을 만들어 보겠습니다."
+    )
+
+
+def _team_consult_cta_cards(status: CheckStatus) -> list[str]:
+    cards = [
+        "Team 구매 상담 예약",
+        "팀 구매 표준안 샘플 보기",
+        "공유 리포트로 승인자 검토 시작",
+    ]
+    if status == CheckStatus.blocker:
+        cards.insert(0, "Team 요금제 관심 리드 확보")
+    return cards[:4]
+
+
+def _team_consult_next_actions(
+    status: CheckStatus,
+    intents: list[SubscriptionIntent],
+) -> list[str]:
+    if status == CheckStatus.ok:
+        return [
+            "상위 Team 리드에게 상담 이메일을 보내고 24시간 내 응답을 추적하세요.",
+            "상담 전 대표 구매 리포트와 결제 전 검수 예시를 준비하세요.",
+            "상담 후 Team plan 결제 전환 실험 이벤트를 기록하세요.",
+        ]
+    if intents:
+        return [
+            "현재 Team 리드의 예산, 구매 주기, 승인자를 보강 질문으로 확인하세요.",
+            "런칭 페이지 수익화 카드에 Team 상담 CTA를 고정하세요.",
+            "공유 리포트 하단에 팀 구매 표준안 CTA를 붙이세요.",
+        ]
+    return [
+        "Premium 관심 사용자 중 반복 구매/팀 구매 persona를 Team CTA로 재분류하세요.",
+        "런칭 페이지에 Team 구매 상담 키트 preview를 노출하세요.",
+        "커뮤니티 배포 문구에 사무용 PC/노트북 반복 구매 사례를 추가하세요.",
+    ]
 
 
 def _beta_cohort_from_row(row: sqlite3.Row) -> BetaCohort:

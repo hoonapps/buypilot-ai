@@ -83,6 +83,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 추천 만족도 피드백, 구매 의향, 선택 후보 저장
 - 베타 신청 리드 저장과 개인정보 마스킹
 - 요금제/구독 의향 수집: Free/Premium/Team 요금제, 관심 등록, 예상 MRR, 연환산 매출, 전환 준비 액션 추적
+- 팀 구매 상담 키트: Team 관심 리드를 상담 브리프, 안건, ROI 포인트, 롤아웃 단계, 복사용 제안 메일로 전환
 - 베타 출시 준비도 대시보드: 분석, 공유, 알림, 피드백, 리드, 품질 차단 사유를 launch readiness 점수로 집계
 - 출시 게이트: readiness, 품질 회귀, 학습 인사이트, 백로그 SLA, 전환/발송/외부 연동 운영 상태로 공개 go/no-go 판정
 - 베타 cohort 운영: 구매 시나리오별 리드, 피드백, 만족도, 구매 의향 집계
@@ -778,6 +779,13 @@ curl http://127.0.0.1:8000/ops/pricing-dashboard \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
+Team 구매 상담 키트를 확인합니다.
+
+```bash
+curl http://127.0.0.1:8000/ops/team-purchase-consult-kit \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
 베타 공개 확대 가능성을 확인합니다.
 
 ```bash
@@ -1251,6 +1259,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/public/proof-hub`: Trust Center, 공개 시장 리포트, 공유 조회, 피드백, 출시 CTA 실험, 공개 유입 표면을 공개 proof 카드, hero proof strip, evidence kit, 반박 답변으로 집계
 - `/public/social-proof-wall`: 만족도 높은 마스킹 피드백, 구매 결과, 추천 유입 리더보드를 랜딩용 공개 proof 카드, 신뢰 고지, CTA로 선별
 - `/public/launch-room`: 데모 갤러리, 공개 시장 리포트, proof strip, 유입 허브, 런치 Pulse, 추천 대기열, 요금제 관심을 외부 공유용 런칭룸 카드로 집계
+- `/ops/team-purchase-consult-kit`: Team 요금제 관심 리드를 상담 브리프, 확인 입력, ROI 포인트, 롤아웃 단계, 제안 메일 초안으로 집계
 - `/ops/data-governance`: 워크스페이스별 테이블 인벤토리, 원문 연락처 표면, 마스킹 표면, 보존 초과 액션을 집계
 - `share_token`, `shared_at`, `share_views`: 저장 리포트 공개 공유 상태
 - `/reports/{report_id}/share-assets`: 공개 리포트 URL, 구매 판정, 최종 후보, 검토 질문을 조합해 카카오톡/커뮤니티/블로그 공유 문구와 OG 메타를 생성
