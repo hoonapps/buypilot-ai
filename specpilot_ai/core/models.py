@@ -1731,6 +1731,66 @@ class PublicListingDecoderKit(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class ProductPageEvidenceRequest(BaseModel):
+    category: Category = Category.desktop_pc
+    url: str = Field(min_length=8)
+    product_title: str = "구매 후보"
+    expected_model: str = ""
+    expected_cpu: str = ""
+    expected_gpu: str = ""
+    expected_ram_gb: int | None = Field(default=None, ge=0, le=1024)
+    expected_storage_gb: int | None = Field(default=None, ge=0, le=16384)
+    expected_os: str = ""
+    budget_krw: int = Field(default=2_200_000, ge=300_000, le=30_000_000)
+    seller_name: str = ""
+    page_text: str = ""
+    html_snapshot: str = ""
+    risk_terms: list[str] = Field(default_factory=list)
+    source: str = "web"
+
+
+class ProductPageEvidenceSignal(BaseModel):
+    signal_id: str
+    label: str
+    status: CheckStatus
+    evidence: str
+    recommendation: str
+
+
+class PublicProductPageEvidenceKit(BaseModel):
+    kit_version: str = "specpilot.public_product_page_evidence_kit.v1"
+    generated_at: str
+    category: Category
+    url: str
+    host: str
+    product_title: str
+    seller_name: str
+    priority: CheckStatus
+    evidence_score: float = Field(ge=0, le=100)
+    extracted_price_krw: int | None = None
+    shipping_fee_krw: int | None = None
+    discount_krw: int | None = None
+    effective_price_krw: int | None = None
+    budget_delta_krw: int | None = None
+    availability_status: str
+    model_match_status: CheckStatus
+    headline: str
+    summary: str
+    source_signals: list[ProductPageEvidenceSignal] = Field(default_factory=list)
+    risk_flags: list[str] = Field(default_factory=list)
+    extraction_notes: list[str] = Field(default_factory=list)
+    evidence_checklist: list[str] = Field(default_factory=list)
+    seller_questions: list[str] = Field(default_factory=list)
+    scanner_prefill: SpecRiskScannerRequest
+    price_prefill: "PriceBreakdownRequest"
+    seller_evidence_prefill: "SellerEvidenceRequest"
+    analysis_prefill: str
+    share_copy: str
+    primary_cta_label: str = "상품 페이지 근거로 분석 시작"
+    primary_cta_path: str = "#analysis"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PurchaseApprovalBriefRequest(BaseModel):
     category: Category = Category.desktop_pc
     product_title: str = "구매 후보"

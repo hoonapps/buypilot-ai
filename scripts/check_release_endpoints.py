@@ -85,6 +85,24 @@ CHECKS = (
         ),
     ),
     SmokeCheck(
+        name="public-product-page-evidence-kit",
+        method="POST",
+        path="/public/product-page-evidence-kit",
+        required_keys=(
+            "kit_version",
+            "priority",
+            "evidence_score",
+            "effective_price_krw",
+            "availability_status",
+            "model_match_status",
+            "source_signals",
+            "scanner_prefill",
+            "price_prefill",
+            "seller_evidence_prefill",
+            "share_copy",
+        ),
+    ),
+    SmokeCheck(
         name="public-setup-compatibility-kit",
         method="POST",
         path="/public/setup-compatibility-kit",
@@ -648,6 +666,26 @@ def run_smoke() -> list[dict[str, Any]]:
                 "budget_krw": 2_200_000,
                 "cart_total_krw": 2_090_000,
                 "purpose": "portable_creator",
+                "source": "release_smoke",
+            }
+        if check.name == "public-product-page-evidence-kit":
+            json_body = {
+                "category": "desktop_pc",
+                "url": "https://shop.example.com/product/creator-4070-super",
+                "product_title": "Creator RTX 4070 SUPER Build",
+                "expected_model": "Creator RTX 4070 SUPER Build",
+                "expected_cpu": "Ryzen 7 7800X3D",
+                "expected_gpu": "RTX 4070 SUPER",
+                "expected_ram_gb": 32,
+                "expected_storage_gb": 1000,
+                "expected_os": "Windows 11",
+                "budget_krw": 2_200_000,
+                "seller_name": "PC Mall",
+                "page_text": (
+                    "Creator RTX 4070 SUPER Build Ryzen 7 7800X3D RTX 4070 SUPER "
+                    "RAM 32GB SSD 1TB Windows 11 판매중 재고 있음 최종 결제 금액 "
+                    "2,165,000원 무료배송 카드 할인 40,000원 국내 제조사 AS 반품 7일"
+                ),
                 "source": "release_smoke",
             }
         if check.name == "public-setup-compatibility-kit":

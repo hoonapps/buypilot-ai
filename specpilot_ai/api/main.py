@@ -98,6 +98,7 @@ from specpilot_ai.core.models import (
     PricingPlan,
     PrivacyPolicySummary,
     ProductBrief,
+    ProductPageEvidenceRequest,
     PublicAcquisitionHub,
     PublicBuyerChallengeKit,
     PublicBuyerChecklist,
@@ -122,6 +123,7 @@ from specpilot_ai.core.models import (
     PublicOwnershipCostKit,
     PublicPriceBreakdownKit,
     PublicPriceWatchKit,
+    PublicProductPageEvidenceKit,
     PublicProofHub,
     PublicPurchaseAftercareKit,
     PublicPurchaseApprovalBriefKit,
@@ -230,6 +232,7 @@ from specpilot_ai.services.onboarding import purchase_onboarding_playbooks
 from specpilot_ai.services.ownership_cost import build_public_ownership_cost_kit
 from specpilot_ai.services.price_breakdown import build_public_price_breakdown_kit
 from specpilot_ai.services.price_watch import build_public_price_watch_kit
+from specpilot_ai.services.product_page_evidence import build_public_product_page_evidence_kit
 from specpilot_ai.services.purchase_aftercare import build_public_purchase_aftercare_kit
 from specpilot_ai.services.purchase_approval import build_public_purchase_approval_brief_kit
 from specpilot_ai.services.purchase_execution import build_public_purchase_execution_kit
@@ -1262,6 +1265,19 @@ def public_listing_decoder_kit(
     request: ListingDecoderRequest,
 ) -> PublicListingDecoderKit:
     return build_public_listing_decoder_kit(request)
+
+
+@app.post(
+    "/public/product-page-evidence-kit",
+    response_model=PublicProductPageEvidenceKit,
+)
+def public_product_page_evidence_kit(
+    request: ProductPageEvidenceRequest,
+) -> PublicProductPageEvidenceKit:
+    try:
+        return build_public_product_page_evidence_kit(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post(

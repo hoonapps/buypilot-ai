@@ -666,6 +666,104 @@ def test_public_listing_decoder_kit_turns_shopping_title_into_scanner_prefill() 
     assert any("바로 결제하지" in action for action in risky_payload["next_actions"])
 
 
+def test_public_product_page_evidence_kit_extracts_safe_snapshot_and_prefills_checks() -> None:
+    response = client.post(
+        "/public/product-page-evidence-kit",
+        json={
+            "category": "desktop_pc",
+            "url": "https://shop.example.com/product/creator-4070-super",
+            "product_title": "Creator RTX 4070 SUPER Build",
+            "expected_model": "Creator RTX 4070 SUPER Build",
+            "expected_cpu": "Ryzen 7 7800X3D",
+            "expected_gpu": "RTX 4070 SUPER",
+            "expected_ram_gb": 32,
+            "expected_storage_gb": 1000,
+            "expected_os": "Windows 11",
+            "budget_krw": 2_200_000,
+            "seller_name": "PC Mall",
+            "page_text": (
+                "Creator RTX 4070 SUPER Build Ryzen 7 7800X3D RTX 4070 SUPER "
+                "RAM 32GB SSD 1TB Windows 11 판매중 재고 있음 최종 결제 금액 "
+                "2,165,000원 무료배송 카드 할인 40,000원 국내 제조사 AS 반품 7일"
+            ),
+            "source": "pytest",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kit_version"] == "specpilot.public_product_page_evidence_kit.v1"
+    assert payload["category"] == "desktop_pc"
+    assert payload["host"] == "shop.example.com"
+    assert payload["seller_name"] == "PC Mall"
+    assert payload["priority"] in {"ok", "warning"}
+    assert payload["evidence_score"] >= 80
+    assert payload["extracted_price_krw"] == 2_165_000
+    assert payload["shipping_fee_krw"] == 0
+    assert payload["discount_krw"] == 40_000
+    assert payload["effective_price_krw"] == 2_125_000
+    assert payload["budget_delta_krw"] == -75_000
+    assert payload["availability_status"] == "in_stock"
+    assert payload["model_match_status"] == "ok"
+    assert {signal["signal_id"] for signal in payload["source_signals"]} >= {
+        "url_safety",
+        "model_match",
+        "availability",
+        "budget_fit",
+    }
+    assert any("live fetch 없이" in note for note in payload["extraction_notes"])
+    assert any("최종 결제 금액" in item for item in payload["evidence_checklist"])
+    assert any("최종 결제 금액" in question for question in payload["seller_questions"])
+    assert payload["scanner_prefill"]["source"] == "product_page_evidence"
+    assert payload["scanner_prefill"]["expected_gpu"] == "RTX 4070 SUPER"
+    assert payload["price_prefill"]["source"] == "product_page_evidence"
+    assert payload["price_prefill"]["listed_price_krw"] == 2_165_000
+    assert payload["seller_evidence_prefill"]["source"] == "product_page_evidence"
+    assert "상품 페이지 근거 인입" in payload["analysis_prefill"]
+    assert "SpecPilot AI 상품 페이지 근거 인입 키트" in payload["share_copy"]
+    assert payload["primary_cta_path"] == "#analysis"
+    assert payload["next_actions"]
+
+    risky = client.post(
+        "/public/product-page-evidence-kit",
+        json={
+            "category": "laptop",
+            "url": "https://market.example.net/item/refurb-laptop",
+            "product_title": "CreatorBook 15 리퍼 해외배송",
+            "expected_model": "CreatorBook Pro 16 RTX 4060",
+            "expected_gpu": "RTX 4060",
+            "budget_krw": 1_600_000,
+            "seller_name": "Open Market",
+            "page_text": (
+                "CreatorBook 15 리퍼 해외배송 반품 불가 AS 불가 FreeDOS "
+                "품절 임박 최종 결제 금액 1,780,000원 배송비 80,000원"
+            ),
+            "risk_terms": ["리퍼", "해외", "반품 불가"],
+        },
+    )
+    assert risky.status_code == 200
+    risky_payload = risky.json()
+    assert risky_payload["priority"] == "blocker"
+    assert risky_payload["evidence_score"] < 70
+    assert risky_payload["model_match_status"] in {"warning", "blocker"}
+    assert risky_payload["budget_delta_krw"] > 0
+    assert any("리퍼" in risk or "해외" in risk for risk in risky_payload["risk_flags"])
+    assert risky_payload["seller_evidence_prefill"]["verdict"] == "hold"
+    assert any("결제하지" in action for action in risky_payload["next_actions"])
+
+    blocked = client.post(
+        "/public/product-page-evidence-kit",
+        json={
+            "category": "desktop_pc",
+            "url": "http://127.0.0.1/internal-product",
+            "product_title": "Internal Product",
+            "page_text": "최종 결제 금액 1,000,000원",
+        },
+    )
+    assert blocked.status_code == 400
+    assert "private" in blocked.json()["detail"] or "내부" in blocked.json()["detail"]
+
+
 def test_public_setup_compatibility_kit_checks_pc_and_laptop_fit() -> None:
     desktop = client.post(
         "/public/setup-compatibility-kit",

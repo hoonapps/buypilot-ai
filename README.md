@@ -64,6 +64,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 공개 구매 실행 패키지: 최종가, 예산, blocker/warning, 누락 증거, 판매자 질문을 결제 전 실행 단계, 증거 게이트, 중단 조건, 공유 문구로 변환
 - 공개 판매자 조건 협상 키트: 현재가, 목표가, 경쟁가, 배송/조립/OS 비용, 재고, 위험 조건을 조건 안전 협상 메시지와 guardrail로 변환
 - 공개 상품명 해석 키트: 쇼핑몰 상품명/옵션명에서 CPU/GPU/RAM/SSD/OS와 리퍼·전시·해외 조건을 구조화하고 검수 prefill을 제공
+- 공개 상품 페이지 근거 인입 키트: 상품 URL과 붙여 넣은 페이지 문구/HTML에서 가격, 배송비, 할인, 실구매가, 재고, 모델명 일치도, URL 안전성, 판매자 확인 질문을 추출해 검수 prefill로 연결
 - 공개 옵션/사양 빠른 검수기: 판매 페이지 옵션명, 장바구니 문구, 최종 결제 금액을 붙여 넣으면 예산 초과, 사양 불일치, 증거 누락을 결제 전 blocker/warning으로 판정하고 구매 세이프티 브리프, 판매자 확인 질문, 승인/공유 요약, 캡처 체크리스트를 반환
 - 공개 후보 비교 스냅샷: 데스크톱/노트북 후보 5개를 가격, 목적 적합도, 리뷰 신뢰, 구매 안정성으로 정렬하고 예산/성능/안전 우선 대안 시나리오를 제공
 - 공개 구매 타이밍 윈도우: 후보별 현재가, 목표가, 적정가 밴드, 변동 리스크, 결제 트리거를 공개 화면에서 즉시 결제/가격 대기로 분리
@@ -293,6 +294,27 @@ curl -X POST http://127.0.0.1:8000/public/listing-decoder-kit \
     "budget_krw": 2200000,
     "cart_total_krw": 2090000,
     "purpose": "portable_creator"
+  }'
+```
+
+공개 상품 페이지 근거 인입 키트는 외부 URL을 직접 live fetch하지 않고 사용자가 붙여 넣은 상품 페이지 문구/HTML만 안전하게 분석합니다. 가격, 배송비, 할인, 재고, 모델명 일치도, URL 안전성, 판매자 질문, 옵션/사양 검수 prefill, 실구매가 분해 prefill을 반환합니다.
+
+```bash
+curl -X POST http://127.0.0.1:8000/public/product-page-evidence-kit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "category": "desktop_pc",
+    "url": "https://shop.example.com/product/creator-4070-super",
+    "product_title": "Creator RTX 4070 SUPER Build",
+    "expected_model": "Creator RTX 4070 SUPER Build",
+    "expected_cpu": "Ryzen 7 7800X3D",
+    "expected_gpu": "RTX 4070 SUPER",
+    "expected_ram_gb": 32,
+    "expected_storage_gb": 1000,
+    "expected_os": "Windows 11",
+    "budget_krw": 2200000,
+    "seller_name": "PC Mall",
+    "page_text": "Creator RTX 4070 SUPER Build Ryzen 7 7800X3D RTX 4070 SUPER RAM 32GB SSD 1TB Windows 11 판매중 재고 있음 최종 결제 금액 2,165,000원 무료배송 카드 할인 40,000원 국내 제조사 AS 반품 7일"
   }'
 ```
 
@@ -1787,6 +1809,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/public/buyer-persona-quiz`, `/public/buyer-persona-quiz/result`: 공개 30초 구매 성향 진단 질문과 persona별 추천 카테고리/예산, 분석 prefill, 체크리스트 경로, 공유 문구 조회
 - `/public/mistake-cost-calculator`, `/public/mistake-cost-calculator/result`: 공개 구매 실패 비용 계산 질문과 예산/수량/긴급도별 예상 손실, 방지 플랜, 분석 prefill, 공유 문구 조회
 - `/public/buyer-challenge-kit`: 구매 성향, 실패 비용, 체크리스트를 3단계 공유 챌린지와 카카오톡/커뮤니티/팀 채널별 복사 문구로 패키징
+- `/public/product-page-evidence-kit`: 공개 상품 URL과 사용자가 붙여 넣은 페이지 문구/HTML에서 가격, 배송비, 할인, 실구매가, 재고, 모델명 일치도, URL 안전성, 판매자 질문, 검수 prefill을 생성
 - `/public/setup-compatibility-kit`: 공개 CPU/GPU/RAM/SSD/모니터/파워/폼팩터 또는 노트북 휴대성 조합을 목적 기준으로 점검하고 분석/검수 prefill 조회
 - `/public/upgrade-readiness-kit`: 공개 RAM/SSD 슬롯, CPU 플랫폼, 파워, 케이스, 노트북 온보드 제약을 목표 보유 기간 기준 세팅 수명 점수, 업그레이드 경로, 판매자 질문으로 변환
 - `/public/ownership-cost-kit`: 공개 구매가/보유 기간/유지비/업그레이드비/다운타임/재판매율을 총소유비용, 월 실질 비용, 감가 시나리오, 판매자 질문으로 변환
