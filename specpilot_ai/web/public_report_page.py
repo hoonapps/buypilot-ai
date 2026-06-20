@@ -9,6 +9,7 @@ def public_report_html(report: PublicReport) -> str:
     purchase = report.response.report
     decision = purchase.purchase_decision
     share_brief = purchase.share_brief
+    conversion = report.conversion_cta
     top_cards = "\n".join(
         f"""
         <article class="card">
@@ -150,6 +151,8 @@ def public_report_html(report: PublicReport) -> str:
     brief_watchouts = _list_items(share_brief.watchouts if share_brief else [])
     brief_questions = _list_items(share_brief.reviewer_questions if share_brief else [])
     purchase_link_cards = _purchase_link_cards(report)
+    conversion_points = _list_items(conversion.proof_points)
+    conversion_actions = _list_items(conversion.next_actions)
     return f"""
 <!doctype html>
 <html lang="ko">
@@ -232,9 +235,26 @@ def public_report_html(report: PublicReport) -> str:
       background: var(--teal);
       color: white;
     }}
+    .cta.secondary {{
+      margin-left: 8px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+    }}
+    .conversion {{
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(260px, 0.48fr);
+      gap: 14px;
+      border-color: rgba(13, 117, 109, 0.36);
+      background: linear-gradient(135deg, #fff 0%, #eef8f5 100%);
+    }}
+    .conversion strong {{
+      color: var(--teal);
+    }}
     @media (max-width: 900px) {{
       header {{ align-items: flex-start; flex-direction: column; gap: 8px; padding: 14px 16px; }}
-      .hero, .cards, .two {{ grid-template-columns: 1fr; }}
+      .hero, .cards, .two, .conversion {{ grid-template-columns: 1fr; }}
+      .cta.secondary {{ margin-left: 0; }}
     }}
   </style>
 </head>
@@ -250,12 +270,29 @@ def public_report_html(report: PublicReport) -> str:
         <h1>{escape(report.title)}</h1>
         <p>{escape(purchase.summary)}</p>
         <p>{escape(purchase.purchase_timing)}</p>
-        <a class="cta" href="/">내 조건으로 다시 분석하기</a>
+        <a class="cta" href="{escape(conversion.primary_path)}">{escape(conversion.primary_label)}</a>
+        <a class="cta secondary" href="{escape(conversion.secondary_path)}">{escape(conversion.secondary_label)}</a>
       </div>
       <aside class="panel metric">
         <span class="kicker">최종 후보</span>
         <strong>{escape(report.top_model_name or purchase.final_pick_id or "추천 후보")}</strong>
         <p>공유 조회 {report.share_views}회 · 공개 시각 {escape(report.shared_at[:10])}</p>
+      </aside>
+    </section>
+    <section class="panel section conversion">
+      <div>
+        <span class="kicker">Public report conversion</span>
+        <h2>{escape(conversion.headline)}</h2>
+        <p>{escape(conversion.body)}</p>
+        <a class="cta" href="{escape(conversion.primary_path)}">{escape(conversion.primary_label)}</a>
+        <a class="cta secondary" href="{escape(conversion.secondary_path)}">{escape(conversion.secondary_label)}</a>
+      </div>
+      <aside>
+        <p><strong>리포트 Ref {escape(conversion.report_ref)}</strong></p>
+        <h3>다음 액션</h3>
+        <ul>{conversion_actions}</ul>
+        <h3>왜 이어가야 하나</h3>
+        <ul>{conversion_points}</ul>
       </aside>
     </section>
     <section class="grid cards">{top_cards}</section>

@@ -1880,6 +1880,21 @@ class ReportShareAssets(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class PublicReportConversionCta(BaseModel):
+    cta_version: str = "specpilot.public_report_conversion.v1"
+    headline: str
+    body: str
+    primary_label: str
+    primary_path: str
+    secondary_label: str
+    secondary_path: str
+    source: str = "public-report"
+    surface: str = "public_report"
+    report_ref: str
+    proof_points: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PublicReport(BaseModel):
     report_id: str
     title: str
@@ -1889,6 +1904,7 @@ class PublicReport(BaseModel):
     share_views: int = 0
     response: AnalyzeResponse
     purchase_links: list[PurchaseLink] = Field(default_factory=list)
+    conversion_cta: PublicReportConversionCta
 
 
 class AlertSubscriptionRequest(BaseModel):

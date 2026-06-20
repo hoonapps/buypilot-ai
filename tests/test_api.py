@@ -1865,10 +1865,18 @@ def test_report_save_alert_subscription_and_metrics_flow() -> None:
     assert public_report.json()["share_views"] == 1
     assert len(public_report.json()["purchase_links"]) >= 2
     assert any(item["is_affiliate"] for item in public_report.json()["purchase_links"])
+    conversion_cta = public_report.json()["conversion_cta"]
+    assert conversion_cta["primary_path"].startswith("/?source=public-report")
+    assert conversion_cta["secondary_path"].startswith("/join?source=public-report")
+    assert conversion_cta["report_ref"]
+    assert "추천 코드" in " ".join(conversion_cta["proof_points"])
 
     public_page = client.get(f"/r/{share_payload['share_token']}")
     assert public_page.status_code == 200
     assert "테스트 구매 리포트" in public_page.text
+    assert "Public report conversion" in public_page.text
+    assert "내 조건으로 분석 시작" in public_page.text
+    assert "공개 베타 대기열 등록" in public_page.text
     assert "공유용 검토 브리프" in public_page.text
     assert "후보 비교표" in public_page.text
     assert "결제 전 체크리스트" in public_page.text

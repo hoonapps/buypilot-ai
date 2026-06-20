@@ -339,6 +339,8 @@ curl http://127.0.0.1:8000/public/reports/share_xxxxxxxxxxxxxxxxxxxx
 http://127.0.0.1:8000/r/share_xxxxxxxxxxxxxxxxxxxx
 ```
 
+공개 리포트 JSON과 HTML에는 `conversion_cta`가 포함됩니다. 공유받은 사람은 같은 리포트에서 바로 “내 조건으로 분석 시작” 또는 “공개 베타 대기열 등록”으로 이동하고, 가입 후 본인 추천 코드를 발급받아 다시 초대 링크로 확산할 수 있습니다.
+
 공유 자산 생성:
 
 ```bash
@@ -1297,7 +1299,7 @@ make docker-build
 - `/intake/diagnose`가 누락 조건, 추가 질문, 정규화 요청을 반환하는지
 - `/analyze`, `/alerts/preview`, `/traces/{trace_id}`가 동작하는지
 - `/reports/save`, `/reports/{report_id}`, `/alerts/subscribe`, `/ops/metrics`가 동작하는지
-- `/reports/{report_id}/share`, `/reports/{report_id}/share-assets`, `/public/reports/{share_token}`, `/r/{share_token}`이 공개 공유 리포트와 채널별 공유 문구를 만들고 해제하는지
+- `/reports/{report_id}/share`, `/reports/{report_id}/share-assets`, `/public/reports/{share_token}`, `/r/{share_token}`이 공개 공유 리포트, 전환 CTA, 채널별 공유 문구를 만들고 해제하는지
 - `/reports/{report_id}/advisor-questions`, `/advisor-questions`가 저장 리포트 기반 구매 상담 답변, 근거, 다음 행동, 워크스페이스 격리를 처리하는지
 - `/reports/{report_id}/checkout-review`, `/reports/{report_id}/checkout-reviews`, `/checkout-reviews`가 결제 전 검수와 워크스페이스 격리를 처리하는지
 - `/reports/{report_id}/purchase-links`, `/reports/{report_id}/purchase-link-governance`, `/buy/{link_id}`가 제휴/비제휴 구매 링크, 정책 경고, 공개 클릭 redirect, 클릭 지표를 처리하는지

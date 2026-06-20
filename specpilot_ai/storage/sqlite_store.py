@@ -91,6 +91,7 @@ from specpilot_ai.core.models import (
     PublicProofEvidence,
     PublicProofHub,
     PublicReport,
+    PublicReportConversionCta,
     PurchaseDecisionBoard,
     PurchaseDecisionBoardItem,
     PurchaseLink,
@@ -1700,6 +1701,11 @@ class SpecPilotStore:
             share_views=data["share_views"] + 1,
             response=AnalyzeResponse.model_validate_json(data["response_json"]),
             purchase_links=purchase_links,
+            conversion_cta=_public_report_conversion_cta(
+                share_token=share_token,
+                title=data["title"],
+                top_model_name=data["top_model_name"],
+            ),
         )
 
     def create_alert_subscription(
@@ -10277,6 +10283,38 @@ def _retention_next_actions(
     if not deduped:
         deduped.append("리텐션 루프가 안정적입니다. 완료 리포트와 추천 대기열 CTA를 확대하세요.")
     return deduped[:6]
+
+
+def _public_report_conversion_cta(
+    *,
+    share_token: str,
+    title: str,
+    top_model_name: str | None,
+) -> PublicReportConversionCta:
+    report_ref = share_token.replace("share_", "")[:10].upper()
+    model_label = top_model_name or "공유된 추천 후보"
+    return PublicReportConversionCta(
+        headline="이 리포트를 내 조건으로 다시 검증하세요",
+        body=(
+            f"{model_label} 리포트를 공유받았다면 예산, 용도, 필수 조건을 바꿔 "
+            "내 상황에 맞는 TOP 3와 구매 전 체크리스트를 다시 받을 수 있습니다."
+        ),
+        primary_label="내 조건으로 분석 시작",
+        primary_path=f"/?source=public-report&report={share_token}#analysis",
+        secondary_label="공개 베타 대기열 등록",
+        secondary_path=f"/join?source=public-report&report={share_token}",
+        report_ref=report_ref,
+        proof_points=[
+            "공유 리포트의 가격, 호환성, 리뷰 리스크 구조를 그대로 재사용",
+            "가입 후 본인 추천 코드를 발급해 초대 링크로 다시 확산",
+            "결제 전 옵션명, 배송비, 카드 혜택 확인 체크리스트 제공",
+        ],
+        next_actions=[
+            f"{title}를 내 예산과 구매 시점으로 다시 분석",
+            "대기열에 등록하고 새 추천 코드로 주변 구매자를 초대",
+            "구매 직전 판매 페이지 옵션명과 최종 결제 금액 재확인",
+        ],
+    )
 
 
 def _build_report_share_assets(report: SavedReportDetail) -> ReportShareAssets:
