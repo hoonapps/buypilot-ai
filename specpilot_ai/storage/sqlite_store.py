@@ -75,6 +75,9 @@ from specpilot_ai.core.models import (
     LaunchCommunityRisk,
     LaunchActivationOffer,
     LaunchActivationOfferDashboard,
+    LaunchIncidentCenter,
+    LaunchIncidentRunbookStep,
+    LaunchIncidentSignal,
     LaunchMediaAsset,
     LaunchMediaKit,
     LaunchMediaPitch,
@@ -3405,6 +3408,87 @@ class SpecPilotStore:
             plays=plays,
             escalation_paths=_launch_war_room_escalation_paths(signals),
             next_actions=_launch_war_room_next_actions(signals, plays),
+        )
+
+    def launch_incident_center_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 12,
+    ) -> LaunchIncidentCenter:
+        metrics = self.metrics_for_workspace(workspace_id)
+        readiness = self.beta_readiness_for_workspace(workspace_id)
+        regression = self.ops_regression_for_workspace(workspace_id, window_size=5)
+        integrations = self.integration_readiness_for_workspace(workspace_id)
+        data_governance = self.data_governance_for_workspace(workspace_id)
+        observability_exports = self.list_observability_exports_for_workspace(
+            workspace_id,
+            limit=max(5, min(limit, 30)),
+        )
+        signals = _launch_incident_signals(
+            metrics=metrics,
+            readiness=readiness,
+            regression=regression,
+            integrations=integrations,
+            data_governance=data_governance,
+            observability_exports=observability_exports,
+            public_site_url=self.public_site_url,
+        )
+        incident_score = _launch_incident_score(
+            readiness=readiness,
+            regression=regression,
+            integrations=integrations,
+            data_governance=data_governance,
+            observability_exports=observability_exports,
+            metrics=metrics,
+            public_site_url=self.public_site_url,
+        )
+        status = _launch_incident_status(signals, incident_score)
+        incident_level = _launch_incident_level(status, incident_score, signals)
+        runbook = _launch_incident_runbook(signals, incident_level)
+        return LaunchIncidentCenter(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            status=status,
+            incident_level=incident_level,
+            incident_score=incident_score,
+            commander_brief=_launch_incident_commander_brief(
+                incident_level,
+                incident_score,
+                signals,
+            ),
+            summary=_launch_incident_summary(
+                metrics=metrics,
+                regression=regression,
+                integrations=integrations,
+                data_governance=data_governance,
+                observability_exports=observability_exports,
+            ),
+            metric_cards={
+                "incident_score": incident_score,
+                "readiness_score": readiness.launch_readiness_score,
+                "regression_status": regression.status.value,
+                "integration_score": integrations.readiness_score,
+                "integration_blockers": integrations.blocker_count,
+                "data_governance_status": data_governance.status.value,
+                "queued_observability_exports": len(
+                    [item for item in observability_exports if item.status == "queued"],
+                ),
+                "failed_observability_exports": len(
+                    [item for item in observability_exports if item.status == "failed"],
+                ),
+                "growth_events": metrics.growth_events,
+                "public_site_url": self.public_site_url or "not_configured",
+            },
+            signals=signals,
+            runbook=runbook,
+            escalation_paths=_launch_incident_escalation_paths(signals, incident_level),
+            tracking_events=[
+                "launch_incident_center_view",
+                "launch_incident_runbook_open",
+                "launch_incident_escalation_click",
+                "launch_incident_resolved",
+            ],
+            next_actions=_launch_incident_next_actions(signals, runbook, incident_level),
         )
 
     def launch_week_recap_for_workspace(
@@ -13109,6 +13193,332 @@ def _launch_war_room_next_actions(
         actions.append("D+1 배포 플랜에 가장 반응이 높은 CTA와 공유 문구를 반영하세요.")
     actions.append("24시간 후 Pulse, 스모크, 전환 보드 점수를 다시 캡처해 다음 배포 여부를 결정하세요.")
     return list(dict.fromkeys(actions))[:6]
+
+
+def _launch_incident_score(
+    *,
+    readiness: BetaReadinessDashboard,
+    regression: OpsRegressionDashboard,
+    integrations: IntegrationReadinessDashboard,
+    data_governance: DataGovernanceDashboard,
+    observability_exports: list[ObservabilityExportRecord],
+    metrics: OperationsMetrics,
+    public_site_url: str,
+) -> float:
+    queued_exports = len([item for item in observability_exports if item.status == "queued"])
+    failed_exports = len([item for item in observability_exports if item.status == "failed"])
+    observability_score = max(
+        0.0,
+        100.0 - queued_exports * 8 - failed_exports * 18,
+    )
+    measurement_score = min(
+        100.0,
+        metrics.growth_events * 8
+        + metrics.growth_unique_traces * 10
+        + metrics.share_cta_clicks * 8
+        + metrics.subscription_cta_clicks * 10,
+    )
+    public_surface_score = 95.0 if public_site_url else 45.0
+    return round(
+        readiness.launch_readiness_score * 0.2
+        + _status_score(regression.status) * 0.18
+        + integrations.readiness_score * 0.18
+        + _status_score(data_governance.status) * 0.14
+        + observability_score * 0.14
+        + measurement_score * 0.1
+        + public_surface_score * 0.06,
+        1,
+    )
+
+
+def _launch_incident_signals(
+    *,
+    metrics: OperationsMetrics,
+    readiness: BetaReadinessDashboard,
+    regression: OpsRegressionDashboard,
+    integrations: IntegrationReadinessDashboard,
+    data_governance: DataGovernanceDashboard,
+    observability_exports: list[ObservabilityExportRecord],
+    public_site_url: str,
+) -> list[LaunchIncidentSignal]:
+    queued_exports = len([item for item in observability_exports if item.status == "queued"])
+    failed_exports = len([item for item in observability_exports if item.status == "failed"])
+    return [
+        _launch_incident_signal(
+            key="public_surface",
+            label="공개 표면",
+            status=CheckStatus.ok if public_site_url else CheckStatus.warning,
+            owner="launch-ops",
+            metric=public_site_url or "PUBLIC_SITE_URL 미설정",
+            impact="공유 링크 미리보기와 런칭룸 절대 URL 신뢰도에 직접 영향",
+            first_response=(
+                "공개 URL, canonical, sitemap, 공유 이미지를 실제 메신저에서 확인하세요."
+                if public_site_url
+                else "PUBLIC_SITE_URL을 실제 공개 도메인으로 설정한 뒤 런칭 링크를 다시 확인하세요."
+            ),
+        ),
+        _launch_incident_signal(
+            key="readiness_gate",
+            label="출시 준비도",
+            status=_launch_readiness_gate_status(readiness.launch_readiness_score),
+            owner="ops",
+            metric=f"{readiness.launch_readiness_score}점 · {readiness.readiness_label}",
+            impact="낮은 준비도는 공개 확대 시 분석 품질, 공유, 알림, 피드백 루프 실패로 이어짐",
+            first_response=readiness.next_actions[0]
+            if readiness.next_actions
+            else "준비도 점수와 blocker 수를 유지하세요.",
+        ),
+        _launch_incident_signal(
+            key="quality_regression",
+            label="품질/비용 회귀",
+            status=regression.status,
+            owner="engineering",
+            metric=(
+                f"품질 변화 {regression.quality_delta}점 · "
+                f"비용 변화 {round(regression.cost_delta_rate * 100)}%"
+            ),
+            impact="추천 품질 하락이나 비용 급증은 오픈 직후 신뢰와 운영 비용을 동시에 훼손",
+            first_response=regression.next_actions[0]
+            if regression.next_actions
+            else "최근 trace와 provider reliability를 확인하세요.",
+        ),
+        _launch_incident_signal(
+            key="integration_blockers",
+            label="외부 연동",
+            status=integrations.status,
+            owner="platform",
+            metric=(
+                f"verified {integrations.verified_count}개 · "
+                f"blocker {integrations.blocker_count}개 · mock {integrations.mock_count}개"
+            ),
+            impact="가격/마켓/이메일/관측성 연동 누락은 실제 사용자 플로우를 중단시킴",
+            first_response=integrations.required_actions[0]
+            if integrations.required_actions
+            else "필수 연동 verified 상태를 유지하세요.",
+        ),
+        _launch_incident_signal(
+            key="data_governance",
+            label="개인정보/보존",
+            status=data_governance.status,
+            owner="privacy",
+            metric=(
+                f"raw contact {data_governance.raw_contact_surfaces}개 · "
+                f"records {data_governance.total_records}건"
+            ),
+            impact="연락처 원문 노출이나 보존 정책 누락은 공개 출시 신뢰와 법적 리스크로 연결",
+            first_response=(
+                data_governance.retention_actions[0]
+                if data_governance.retention_actions
+                else data_governance.deletion_controls[0]
+                if data_governance.deletion_controls
+                else "데이터 인벤토리와 삭제 통제를 유지하세요."
+            ),
+        ),
+        _launch_incident_signal(
+            key="observability_outbox",
+            label="관측성 outbox",
+            status=(
+                CheckStatus.blocker
+                if failed_exports >= 3
+                else CheckStatus.warning
+                if queued_exports or failed_exports
+                else CheckStatus.ok
+            ),
+            owner="engineering",
+            metric=f"queued {queued_exports}개 · failed {failed_exports}개",
+            impact="trace export가 쌓이면 공개 직후 오류 원인 분석 시간이 길어짐",
+            first_response=(
+                "failed export를 dry-run dispatch로 재시도하고 provider_message를 확인하세요."
+                if failed_exports
+                else "queued export를 dispatch해 관측성 backend 도착 여부를 확인하세요."
+                if queued_exports
+                else "신규 trace가 생기면 export outbox에 즉시 적재되는지 확인하세요."
+            ),
+        ),
+        _launch_incident_signal(
+            key="measurement_feed",
+            label="성장 이벤트",
+            status=CheckStatus.ok if metrics.growth_events else CheckStatus.warning,
+            owner="analytics",
+            metric=(
+                f"growth {metrics.growth_events}건 · "
+                f"unique traces {metrics.growth_unique_traces}개"
+            ),
+            impact="측정 누락은 실제 호응이 있어도 전환/공유/요금제 관심 판단을 불가능하게 만듦",
+            first_response=(
+                "CTA, 공유, 요금제 관심 이벤트가 계속 쌓이는지 30분마다 확인하세요."
+                if metrics.growth_events
+                else "런칭 페이지 주요 CTA에 growth event 기록을 먼저 확인하세요."
+            ),
+        ),
+    ]
+
+
+def _launch_incident_signal(
+    *,
+    key: str,
+    label: str,
+    status: CheckStatus,
+    owner: str,
+    metric: str,
+    impact: str,
+    first_response: str,
+) -> LaunchIncidentSignal:
+    return LaunchIncidentSignal(
+        key=key,
+        label=label,
+        status=status,
+        owner=owner,
+        metric=metric,
+        impact=impact,
+        first_response=first_response,
+    )
+
+
+def _launch_incident_status(
+    signals: list[LaunchIncidentSignal],
+    incident_score: float,
+) -> CheckStatus:
+    if any(signal.status == CheckStatus.blocker for signal in signals) or incident_score < 45:
+        return CheckStatus.blocker
+    if incident_score < 76 or any(signal.status == CheckStatus.warning for signal in signals):
+        return CheckStatus.warning
+    return CheckStatus.ok
+
+
+def _launch_incident_level(
+    status: CheckStatus,
+    incident_score: float,
+    signals: list[LaunchIncidentSignal],
+) -> str:
+    blocker_count = sum(1 for signal in signals if signal.status == CheckStatus.blocker)
+    warning_count = sum(1 for signal in signals if signal.status == CheckStatus.warning)
+    if status == CheckStatus.blocker or blocker_count >= 2:
+        return "sev1_hold_launch"
+    if incident_score < 62 or warning_count >= 4:
+        return "sev2_limited_launch"
+    if status == CheckStatus.warning:
+        return "sev3_watch"
+    return "green_scale"
+
+
+def _launch_incident_runbook(
+    signals: list[LaunchIncidentSignal],
+    incident_level: str,
+) -> list[LaunchIncidentRunbookStep]:
+    active = [signal for signal in signals if signal.status != CheckStatus.ok]
+    if not active:
+        active = signals[:3]
+    steps = [
+        _launch_incident_runbook_step(
+            step="01_triage",
+            owner="incident-commander",
+            trigger=incident_level,
+            action="가장 높은 severity signal의 owner를 호출하고 15분 단위 상태 업데이트를 시작",
+            success_signal="모든 blocker owner가 지정되고 첫 대응 ETA가 공유됨",
+        ),
+    ]
+    steps.extend(
+        _launch_incident_runbook_step(
+            step=f"{index + 2:02d}_{signal.key}",
+            owner=signal.owner,
+            trigger=f"{signal.label}: {signal.metric}",
+            action=signal.first_response,
+            success_signal=f"{signal.label} 상태가 ok 또는 다음 owner에게 handoff됨",
+        )
+        for index, signal in enumerate(active[:5])
+    )
+    steps.append(
+        _launch_incident_runbook_step(
+            step="99_postmortem",
+            owner="ops",
+            trigger="incident_level이 green_scale로 내려감",
+            action="원인, 영향, 감지 시간, 복구 시간을 D+7 리포트와 런칭 워룸 next action에 반영",
+            success_signal="반복 방지 액션이 백로그에 등록되고 owner가 지정됨",
+        ),
+    )
+    return steps[:7]
+
+
+def _launch_incident_runbook_step(
+    *,
+    step: str,
+    owner: str,
+    trigger: str,
+    action: str,
+    success_signal: str,
+) -> LaunchIncidentRunbookStep:
+    return LaunchIncidentRunbookStep(
+        step=step,
+        owner=owner,
+        trigger=trigger,
+        action=action,
+        success_signal=success_signal,
+    )
+
+
+def _launch_incident_commander_brief(
+    incident_level: str,
+    incident_score: float,
+    signals: list[LaunchIncidentSignal],
+) -> str:
+    active = [signal for signal in signals if signal.status != CheckStatus.ok]
+    if not active:
+        return f"{incident_level} · {round(incident_score)}점. 공개 확대를 유지하되 30분 단위로 측정 이벤트와 품질 회귀를 확인하세요."
+    lead = active[0]
+    return (
+        f"{incident_level} · {round(incident_score)}점. "
+        f"우선 대응은 {lead.owner}의 {lead.label}입니다: {lead.first_response}"
+    )
+
+
+def _launch_incident_summary(
+    *,
+    metrics: OperationsMetrics,
+    regression: OpsRegressionDashboard,
+    integrations: IntegrationReadinessDashboard,
+    data_governance: DataGovernanceDashboard,
+    observability_exports: list[ObservabilityExportRecord],
+) -> str:
+    queued_exports = len([item for item in observability_exports if item.status == "queued"])
+    failed_exports = len([item for item in observability_exports if item.status == "failed"])
+    return (
+        f"성장 이벤트 {metrics.growth_events}건, 품질 회귀 {regression.status.value}, "
+        f"연동 blocker {integrations.blocker_count}개, 데이터 거버넌스 {data_governance.status.value}, "
+        f"observability queued {queued_exports}개/failed {failed_exports}개 기준으로 "
+        "공개 출시 중단, 제한 배포, 관찰, 확대 여부를 판단합니다."
+    )
+
+
+def _launch_incident_escalation_paths(
+    signals: list[LaunchIncidentSignal],
+    incident_level: str,
+) -> list[str]:
+    paths = [
+        f"{signal.owner}: {signal.label} - {signal.first_response}"
+        for signal in signals
+        if signal.status != CheckStatus.ok
+    ]
+    if incident_level.startswith("sev1"):
+        paths.insert(0, "incident-commander: 공개 채널 확대를 멈추고 blocker owner에게 15분 ETA 요청")
+    if not paths:
+        paths.append("growth: 반응이 높은 채널을 D+1 배포 슬롯으로 확장")
+        paths.append("engineering: 회귀와 observability outbox를 30분 단위로 확인")
+    return paths[:7]
+
+
+def _launch_incident_next_actions(
+    signals: list[LaunchIncidentSignal],
+    runbook: list[LaunchIncidentRunbookStep],
+    incident_level: str,
+) -> list[str]:
+    actions = [signal.first_response for signal in signals if signal.status != CheckStatus.ok]
+    if incident_level.startswith("sev1"):
+        actions.insert(0, "SEV1 동안에는 외부 채널 추가 배포를 보류하고 기존 유입 응답에 집중하세요.")
+    elif incident_level == "green_scale":
+        actions.append("green 상태가 30분 유지되면 런칭 배포 플랜의 다음 채널을 열어도 됩니다.")
+    actions.extend(step.action for step in runbook[:2])
+    return list(dict.fromkeys(actions))[:8]
 
 
 def _launch_week_recap_score(

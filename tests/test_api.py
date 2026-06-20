@@ -1878,6 +1878,76 @@ def test_growth_launch_war_room_prioritizes_first_day_actions() -> None:
     assert payload["next_actions"]
 
 
+def test_growth_launch_incident_center_builds_release_runbook() -> None:
+    workspace = {"X-SpecPilot-Key": f"pytest-incident-center-{uuid4().hex}"}
+    analysis = client.post(
+        "/analyze",
+        headers=workspace,
+        json={
+            "query": "영상 편집과 QHD 게임용 데스크톱을 180만원 안에서 추천해줘",
+            "category": "desktop_pc",
+            "budget_krw": 1800000,
+            "purpose": "qhd_creator",
+            "must_haves": ["RTX 4070", "32GB RAM"],
+        },
+    )
+    assert analysis.status_code == 200
+    trace_id = analysis.json()["graph_trace_id"]
+    event = client.post(
+        "/growth/events",
+        headers=workspace,
+        json={
+            "event_type": "share_cta",
+            "trace_id": trace_id,
+            "source": "pytest-incident-center",
+            "surface": "launch",
+            "label": "인시던트 센터 공유 CTA",
+        },
+    )
+    assert event.status_code == 200
+    export = client.post(
+        "/ops/observability/exports",
+        headers=workspace,
+        json={
+            "trace_id": trace_id,
+            "destination": "opentelemetry",
+            "include_payload": True,
+        },
+    )
+    assert export.status_code == 200
+
+    response = client.get("/growth/launch-incident-center?limit=8", headers=workspace)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["center_version"] == "specpilot.launch_incident_center.v1"
+    assert payload["workspace_id"].startswith("workspace_")
+    assert payload["status"] in {"ok", "warning", "blocker"}
+    assert payload["incident_level"] in {
+        "green_scale",
+        "sev3_watch",
+        "sev2_limited_launch",
+        "sev1_hold_launch",
+    }
+    assert payload["incident_score"] > 0
+    signal_keys = {signal["key"] for signal in payload["signals"]}
+    assert {
+        "public_surface",
+        "readiness_gate",
+        "quality_regression",
+        "integration_blockers",
+        "data_governance",
+        "observability_outbox",
+        "measurement_feed",
+    } <= signal_keys
+    assert payload["metric_cards"]["queued_observability_exports"] >= 1
+    assert payload["metric_cards"]["growth_events"] >= 1
+    assert payload["commander_brief"]
+    assert payload["runbook"]
+    assert payload["escalation_paths"]
+    assert "launch_incident_center_view" in payload["tracking_events"]
+    assert payload["next_actions"]
+
+
 def test_growth_launch_week_recap_summarizes_first_week_response() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-week-recap-{uuid4().hex}"}
     for event_type in ["analysis_view", "share_cta", "subscription_cta"]:

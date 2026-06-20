@@ -73,6 +73,7 @@ from specpilot_ai.core.models import (
     LaunchExperimentEventRequest,
     LaunchExperimentRequest,
     LaunchGateDashboard,
+    LaunchIncidentCenter,
     LaunchMediaKit,
     LaunchPulseDashboard,
     LaunchWeekRecapDashboard,
@@ -1826,6 +1827,17 @@ def growth_launch_war_room(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> LaunchWarRoomDashboard:
     return _store().launch_war_room_for_workspace(workspace.workspace_id, limit=limit)
+
+
+@app.get("/growth/launch-incident-center", response_model=LaunchIncidentCenter)
+def growth_launch_incident_center(
+    limit: int = 12,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> LaunchIncidentCenter:
+    return _store().launch_incident_center_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
 
 
 @app.get("/growth/launch-week-recap", response_model=LaunchWeekRecapDashboard)

@@ -1931,6 +1931,41 @@ class LaunchWarRoomDashboard(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class LaunchIncidentSignal(BaseModel):
+    key: str
+    label: str
+    status: CheckStatus
+    owner: str
+    metric: str
+    impact: str
+    first_response: str
+
+
+class LaunchIncidentRunbookStep(BaseModel):
+    step: str
+    owner: str
+    trigger: str
+    action: str
+    success_signal: str
+
+
+class LaunchIncidentCenter(BaseModel):
+    center_version: str = "specpilot.launch_incident_center.v1"
+    workspace_id: str
+    generated_at: str
+    status: CheckStatus
+    incident_level: str
+    incident_score: float = Field(ge=0, le=100)
+    commander_brief: str
+    summary: str
+    metric_cards: dict[str, int | float | str] = Field(default_factory=dict)
+    signals: list[LaunchIncidentSignal] = Field(default_factory=list)
+    runbook: list[LaunchIncidentRunbookStep] = Field(default_factory=list)
+    escalation_paths: list[str] = Field(default_factory=list)
+    tracking_events: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class LaunchWeekRecapWin(BaseModel):
     key: str
     label: str
