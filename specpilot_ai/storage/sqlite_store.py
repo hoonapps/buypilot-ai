@@ -92,6 +92,8 @@ from specpilot_ai.core.models import (
     PublicProofAsset,
     PublicProofEvidence,
     PublicProofHub,
+    PublicReferralLeaderboard,
+    PublicReferralLeaderboardEntry,
     PublicReport,
     PublicReportConversionCta,
     PurchaseDecisionBoard,
@@ -3579,6 +3581,84 @@ class SpecPilotStore:
             top_referrers=top_referrers,
             latest_referrals=latest,
             next_actions=_waitlist_referral_next_actions(int(total or 0), share_rate_hint),
+        )
+
+    def public_referral_leaderboard_for_workspace(
+        self,
+        workspace_id: str,
+        referral_code: str = "",
+        limit: int = 10,
+    ) -> PublicReferralLeaderboard:
+        current_code = referral_code.strip().upper()
+        with self._connect() as conn:
+            total = conn.execute(
+                "SELECT COUNT(*) FROM waitlist_referrals WHERE workspace_id = ?",
+                (workspace_id,),
+            ).fetchone()[0]
+            referred = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM waitlist_referrals
+                WHERE workspace_id = ? AND referred_by_code != ''
+                """,
+                (workspace_id,),
+            ).fetchone()[0]
+            rows = conn.execute(
+                """
+                SELECT wr.*,
+                    (
+                        SELECT COUNT(*)
+                        FROM waitlist_referrals child
+                        WHERE child.workspace_id = wr.workspace_id
+                          AND child.referred_by_code = wr.referral_code
+                    ) AS referred_signup_count
+                FROM waitlist_referrals wr
+                WHERE wr.workspace_id = ?
+                ORDER BY referred_signup_count DESC, wr.created_at ASC
+                LIMIT 100
+                """,
+                (workspace_id,),
+            ).fetchall()
+        entries = [
+            _public_referral_leaderboard_entry(
+                row=row,
+                rank=rank,
+                current_code=current_code,
+            )
+            for rank, row in enumerate(rows, start=1)
+        ]
+        current_entry = next(
+            (entry for entry in entries if entry.referral_code == current_code),
+            None,
+        )
+        current_rank = current_entry.rank if current_entry else None
+        visible_entries = entries[: max(1, min(limit, 25))]
+        if current_entry and all(
+            entry.referral_code != current_entry.referral_code
+            for entry in visible_entries
+        ):
+            visible_entries = [*visible_entries[:-1], current_entry]
+        return PublicReferralLeaderboard(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            headline=_public_referral_leaderboard_headline(
+                total=int(total or 0),
+                current_rank=current_rank,
+            ),
+            summary=_public_referral_leaderboard_summary(
+                total=int(total or 0),
+                referred=int(referred or 0),
+                current_entry=current_entry,
+            ),
+            total_referrals=int(total or 0),
+            referred_signup_count=int(referred or 0),
+            current_rank=current_rank,
+            current_entry=current_entry,
+            entries=visible_entries,
+            next_actions=_public_referral_leaderboard_next_actions(
+                current_entry=current_entry,
+                total=int(total or 0),
+            ),
         )
 
     def referral_share_kit_for_workspace(
@@ -9263,6 +9343,86 @@ def _referral_share_kit_variants(
             ),
         ),
     ]
+
+
+def _public_referral_leaderboard_entry(
+    row: sqlite3.Row,
+    rank: int,
+    current_code: str,
+) -> PublicReferralLeaderboardEntry:
+    referred_signup_count = int(row["referred_signup_count"] or 0)
+    referral_code = row["referral_code"]
+    return PublicReferralLeaderboardEntry(
+        rank=rank,
+        referral_code=referral_code,
+        email_masked=row["email_masked"],
+        persona=row["persona"],
+        referred_signup_count=referred_signup_count,
+        priority_score=_waitlist_priority_score(
+            referred_signup_count,
+            bool(row["contact_consent"]),
+        ),
+        reward_label=_referral_leaderboard_reward_label(referred_signup_count),
+        status="current" if current_code and referral_code == current_code else "ranked",
+    )
+
+
+def _referral_leaderboard_reward_label(referred_signup_count: int) -> str:
+    if referred_signup_count >= 10:
+        return "팀 구매 상담 달성"
+    if referred_signup_count >= 5:
+        return "Premium 체험 달성"
+    if referred_signup_count >= 3:
+        return "우선 초대권 달성"
+    if referred_signup_count >= 1:
+        return "첫 공유 성취"
+    return "첫 추천 대기"
+
+
+def _public_referral_leaderboard_headline(
+    total: int,
+    current_rank: int | None,
+) -> str:
+    if not total:
+        return "아직 추천 경쟁이 시작되지 않았습니다."
+    if current_rank is not None:
+        return f"내 추천 순위는 현재 {current_rank}위입니다."
+    return f"추천 대기열 {total}명이 공개 베타 초대를 공유 중입니다."
+
+
+def _public_referral_leaderboard_summary(
+    total: int,
+    referred: int,
+    current_entry: PublicReferralLeaderboardEntry | None,
+) -> str:
+    if current_entry is not None:
+        return (
+            f"{current_entry.referral_code} 코드는 추천 유입 "
+            f"{current_entry.referred_signup_count}명, 우선순위 "
+            f"{current_entry.priority_score}점입니다."
+        )
+    if not total:
+        return "첫 추천 코드를 만든 사용자가 리더보드 1위가 됩니다."
+    return f"전체 {total}명 중 추천 코드 유입 {referred}명이 리더보드에 반영됐습니다."
+
+
+def _public_referral_leaderboard_next_actions(
+    current_entry: PublicReferralLeaderboardEntry | None,
+    total: int,
+) -> list[str]:
+    actions = [
+        "상위 추천자 순위를 가입 결과 화면과 추천 초대 페이지에 노출하세요.",
+        "추천 유입 3명 이상 사용자는 우선 초대권 메시지를 공유 문구에 붙이세요.",
+    ]
+    if current_entry is None:
+        actions.insert(0, "추천 코드를 발급받으면 내 순위와 다음 보상이 표시됩니다.")
+    elif current_entry.referred_signup_count < 3:
+        actions.insert(0, "우선 초대권까지 남은 추천 수를 초대 링크 옆에 표시하세요.")
+    else:
+        actions.insert(0, "상위 추천자 badge로 공개 베타 초기 지지자를 강조하세요.")
+    if total < 10:
+        actions.append("첫 10명 리더보드 채우기를 공개 런칭룸 proof로 사용하세요.")
+    return actions[:4]
 
 
 def _referral_reward_progress(

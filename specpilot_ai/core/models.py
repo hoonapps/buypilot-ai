@@ -780,6 +780,31 @@ class WaitlistReferralDashboard(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class PublicReferralLeaderboardEntry(BaseModel):
+    rank: int
+    referral_code: str
+    email_masked: str
+    persona: str
+    referred_signup_count: int = 0
+    priority_score: int = 0
+    reward_label: str
+    status: str = "ranked"
+
+
+class PublicReferralLeaderboard(BaseModel):
+    leaderboard_version: str = "specpilot.public_referral_leaderboard.v1"
+    workspace_id: str
+    generated_at: str
+    headline: str
+    summary: str
+    total_referrals: int = 0
+    referred_signup_count: int = 0
+    current_rank: int | None = None
+    current_entry: PublicReferralLeaderboardEntry | None = None
+    entries: list[PublicReferralLeaderboardEntry] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class ReferralShareKitVariant(BaseModel):
     channel: str
     label: str

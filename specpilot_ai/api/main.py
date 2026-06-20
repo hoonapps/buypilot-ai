@@ -89,6 +89,7 @@ from specpilot_ai.core.models import (
     PublicLaunchRoomCard,
     PublicLaunchRoomMarketLink,
     PublicProofHub,
+    PublicReferralLeaderboard,
     PublicReport,
     PurchaseDecisionBoard,
     PurchaseLink,
@@ -1420,6 +1421,19 @@ def waitlist_referral_dashboard(
 ) -> WaitlistReferralDashboard:
     return _store().waitlist_referral_dashboard_for_workspace(
         workspace.workspace_id,
+        limit=limit,
+    )
+
+
+@app.get("/growth/referral-leaderboard", response_model=PublicReferralLeaderboard)
+def referral_leaderboard(
+    referral_code: str = "",
+    limit: int = 10,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> PublicReferralLeaderboard:
+    return _store().public_referral_leaderboard_for_workspace(
+        workspace.workspace_id,
+        referral_code=referral_code,
         limit=limit,
     )
 

@@ -500,6 +500,24 @@ def test_waitlist_referrals_create_share_loop_and_dashboard() -> None:
     }
     assert rewards_payload["next_actions"]
 
+    leaderboard = client.get(
+        f"/growth/referral-leaderboard?referral_code={first_payload['referral_code']}",
+        headers=workspace,
+    )
+    assert leaderboard.status_code == 200
+    leaderboard_payload = leaderboard.json()
+    assert (
+        leaderboard_payload["leaderboard_version"]
+        == "specpilot.public_referral_leaderboard.v1"
+    )
+    assert leaderboard_payload["current_rank"] == 1
+    assert leaderboard_payload["current_entry"]["referral_code"] == first_payload["referral_code"]
+    assert leaderboard_payload["current_entry"]["status"] == "current"
+    assert leaderboard_payload["current_entry"]["referred_signup_count"] == 1
+    assert leaderboard_payload["entries"][0]["rank"] == 1
+    assert leaderboard_payload["entries"][0]["reward_label"]
+    assert leaderboard_payload["next_actions"]
+
     isolated_kit = client.get(
         f"/growth/referral-share-kit/{first_payload['referral_code']}",
         headers=other_workspace,
@@ -511,6 +529,13 @@ def test_waitlist_referrals_create_share_loop_and_dashboard() -> None:
         headers=other_workspace,
     )
     assert isolated_rewards.status_code == 404
+
+    isolated_leaderboard = client.get(
+        f"/growth/referral-leaderboard?referral_code={first_payload['referral_code']}",
+        headers=other_workspace,
+    )
+    assert isolated_leaderboard.status_code == 200
+    assert isolated_leaderboard.json()["current_rank"] is None
 
     isolated = client.get("/growth/referral-dashboard", headers=other_workspace)
     assert isolated.status_code == 200
