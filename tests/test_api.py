@@ -2169,6 +2169,35 @@ def test_growth_launch_activation_offer_prioritizes_public_ctas() -> None:
     assert payload["next_actions"]
 
 
+def test_growth_launch_activation_offer_does_not_regenerate_heavy_launch_kits(
+    monkeypatch,
+) -> None:
+    workspace = {"X-SpecPilot-Key": f"pytest-activation-fast-{uuid4().hex}"}
+
+    def fail_heavy_launch_kit(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise AssertionError("activation offer must use the fast launch signal path")
+
+    monkeypatch.setattr(
+        SpecPilotStore,
+        "launch_media_kit_for_workspace",
+        fail_heavy_launch_kit,
+    )
+    monkeypatch.setattr(
+        SpecPilotStore,
+        "launch_community_kit_for_workspace",
+        fail_heavy_launch_kit,
+    )
+
+    response = client.get("/growth/launch-activation-offer?limit=4", headers=workspace)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["offer_version"] == "specpilot.launch_activation_offer.v1"
+    assert payload["metric_cards"]["media_score"] >= 0
+    assert payload["metric_cards"]["response_score"] >= 0
+    assert payload["offers"]
+
+
 def test_public_launch_room_packages_demo_proof_and_growth_ctas() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-launch-room-{uuid4().hex}"}
     referral = client.post(

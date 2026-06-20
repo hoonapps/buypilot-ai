@@ -3663,16 +3663,26 @@ class SpecPilotStore:
             workspace_id,
             limit=limit,
         )
-        media = self.launch_media_kit_for_workspace(workspace_id, limit=limit)
-        community = self.launch_community_kit_for_workspace(workspace_id, limit=limit)
         router = self.public_launch_action_router_for_workspace(workspace_id)
+        media_score = _launch_activation_media_score(
+            conversion=conversion,
+            router=router,
+            metrics=metrics,
+        )
+        response_score = _launch_activation_response_score(
+            conversion=conversion,
+            router=router,
+            metrics=metrics,
+        )
+        media_statement = _launch_activation_media_statement(conversion, router)
+        community_update = _launch_activation_community_update(conversion, router)
         activation_score = _launch_activation_score(
             conversion=conversion,
             referrals=referrals,
             pricing=pricing,
             team_consult=team_consult,
-            media=media,
-            community=community,
+            media_score=media_score,
+            response_score=response_score,
             router=router,
             metrics=metrics,
         )
@@ -3680,15 +3690,16 @@ class SpecPilotStore:
             activation_score=activation_score,
             conversion=conversion,
             pricing=pricing,
-            media=media,
+            media_score=media_score,
         )
         offers = _launch_activation_offers(
             conversion=conversion,
             referrals=referrals,
             pricing=pricing,
             team_consult=team_consult,
-            media=media,
-            community=community,
+            media_statement=media_statement,
+            community_update=community_update,
+            response_score=response_score,
             router=router,
             activation_score=activation_score,
         )
@@ -3699,12 +3710,18 @@ class SpecPilotStore:
             status=status,
             activation_score=activation_score,
             headline=_launch_activation_headline(status, activation_score, primary_offer),
-            summary=_launch_activation_summary(conversion, pricing, referrals, media, offers),
+            summary=_launch_activation_summary(
+                conversion,
+                pricing,
+                referrals,
+                media_score,
+                offers,
+            ),
             metric_cards={
                 "activation_score": activation_score,
                 "conversion_score": conversion.conversion_score,
-                "media_score": media.media_score,
-                "response_score": community.response_score,
+                "media_score": media_score,
+                "response_score": response_score,
                 "routing_score": router.routing_score,
                 "waitlist_referrals": referrals.total_referrals,
                 "referred_signups": referrals.referred_signup_count,
@@ -3717,8 +3734,8 @@ class SpecPilotStore:
             handoff_prompts=_launch_activation_handoff_prompts(primary_offer, offers),
             proof_points=_launch_activation_proof_points(
                 conversion,
-                media,
-                community,
+                media_statement,
+                community_update,
                 team_consult,
             ),
             tracking_events=[
@@ -14006,14 +14023,81 @@ def _launch_media_next_actions(
     return list(dict.fromkeys(actions))[:7]
 
 
+def _launch_activation_media_score(
+    *,
+    conversion: PublicConversionBoard,
+    router: PublicLaunchActionRouter,
+    metrics: OperationsMetrics,
+) -> float:
+    audience_signal = min(
+        100.0,
+        metrics.public_share_views * 4
+        + metrics.share_cta_clicks * 10
+        + metrics.growth_events * 2,
+    )
+    surface_signal = min(100.0, len(conversion.priority_surfaces) * 18 + len(router.routes) * 8)
+    return round(
+        conversion.conversion_score * 0.42
+        + router.routing_score * 0.24
+        + audience_signal * 0.2
+        + surface_signal * 0.14,
+        1,
+    )
+
+
+def _launch_activation_response_score(
+    *,
+    conversion: PublicConversionBoard,
+    router: PublicLaunchActionRouter,
+    metrics: OperationsMetrics,
+) -> float:
+    routing_coverage = min(100.0, len(router.routes) * 16 + len(router.measurement_events) * 8)
+    action_signal = min(
+        100.0,
+        metrics.share_cta_clicks * 10
+        + metrics.subscription_cta_clicks * 12
+        + metrics.growth_events * 2,
+    )
+    return round(
+        router.routing_score * 0.38
+        + conversion.conversion_score * 0.32
+        + routing_coverage * 0.16
+        + action_signal * 0.14,
+        1,
+    )
+
+
+def _launch_activation_media_statement(
+    conversion: PublicConversionBoard,
+    router: PublicLaunchActionRouter,
+) -> str:
+    surface = conversion.priority_surfaces[0] if conversion.priority_surfaces else None
+    if surface:
+        return f"{conversion.summary} 대표 표면은 {surface.label}이며 CTA는 '{surface.primary_cta}'입니다."
+    return f"{conversion.summary} {router.summary}"
+
+
+def _launch_activation_community_update(
+    conversion: PublicConversionBoard,
+    router: PublicLaunchActionRouter,
+) -> str:
+    route = router.routes[0] if router.routes else None
+    if route:
+        return (
+            f"{route.persona} 방문자는 '{route.cta_label}'로 보내세요. "
+            f"근거: {route.why_now}"
+        )
+    return "댓글과 공유 글에는 분석 시작, 추천 대기열, Team 상담 중 하나만 남겨 선택 피로를 줄이세요."
+
+
 def _launch_activation_score(
     *,
     conversion: PublicConversionBoard,
     referrals: WaitlistReferralDashboard,
     pricing: PricingDashboard,
     team_consult: TeamPurchaseConsultKit,
-    media: LaunchMediaKit,
-    community: LaunchCommunityKit,
+    media_score: float,
+    response_score: float,
     router: PublicLaunchActionRouter,
     metrics: OperationsMetrics,
 ) -> float:
@@ -14029,8 +14113,8 @@ def _launch_activation_score(
     team_signal = min(100.0, team_consult.team_intent_count * 18 + team_consult.estimated_team_mrr_krw / 6000)
     return round(
         conversion.conversion_score * 0.22
-        + media.media_score * 0.16
-        + community.response_score * 0.12
+        + media_score * 0.16
+        + response_score * 0.12
         + router.routing_score * 0.14
         + _status_score(pricing.readiness_status) * 0.1
         + _status_score(team_consult.status) * 0.08
@@ -14045,19 +14129,19 @@ def _launch_activation_status(
     activation_score: float,
     conversion: PublicConversionBoard,
     pricing: PricingDashboard,
-    media: LaunchMediaKit,
+    media_score: float,
 ) -> CheckStatus:
     if (
         activation_score < 42
         or conversion.status == CheckStatus.blocker
-        or media.status == CheckStatus.blocker
+        or media_score < 36
     ):
         return CheckStatus.blocker
     if (
         activation_score < 74
         or conversion.status == CheckStatus.warning
         or pricing.readiness_status == CheckStatus.warning
-        or media.status == CheckStatus.warning
+        or media_score < 68
     ):
         return CheckStatus.warning
     return CheckStatus.ok
@@ -14069,8 +14153,9 @@ def _launch_activation_offers(
     referrals: WaitlistReferralDashboard,
     pricing: PricingDashboard,
     team_consult: TeamPurchaseConsultKit,
-    media: LaunchMediaKit,
-    community: LaunchCommunityKit,
+    media_statement: str,
+    community_update: str,
+    response_score: float,
     router: PublicLaunchActionRouter,
     activation_score: float,
 ) -> list[LaunchActivationOffer]:
@@ -14084,7 +14169,7 @@ def _launch_activation_offers(
             cta_label="구매 조건 분석 시작",
             cta_path="/#start-concierge",
             value_prop="예산, 용도, 후보를 넣으면 적합도, 제외 이유, 가격 대기 여부를 한 번에 봅니다.",
-            proof=media.hero_statement,
+            proof=media_statement,
             friction="회원가입 전에 최소 입력만 받고 리포트 저장은 결과 화면에서 요청하세요.",
             tracking_event="launch_activation_quick_analysis",
             priority_score=min(100.0, activation_score + 8),
@@ -14139,10 +14224,10 @@ def _launch_activation_offers(
             cta_label="내 견적 검수하기",
             cta_path=route.cta_path if route else "/launch#launch-action-router",
             value_prop="댓글 답변을 복사하는 데서 끝내지 않고 개인 조건 분석으로 넘깁니다.",
-            proof=community.pinned_update,
+            proof=community_update,
             friction="답변에는 한 문장 proof와 한 개 CTA만 남겨 선택 피로를 줄이세요.",
             tracking_event="launch_activation_community_to_analysis",
-            priority_score=min(100.0, 46 + community.response_score * 0.32 + conversion.conversion_score * 0.2),
+            priority_score=min(100.0, 46 + response_score * 0.32 + conversion.conversion_score * 0.2),
         ),
     ]
     return sorted(offers, key=lambda offer: offer.priority_score, reverse=True)
@@ -14193,11 +14278,11 @@ def _launch_activation_summary(
     conversion: PublicConversionBoard,
     pricing: PricingDashboard,
     referrals: WaitlistReferralDashboard,
-    media: LaunchMediaKit,
+    media_score: float,
     offers: list[LaunchActivationOffer],
 ) -> str:
     return (
-        f"전환 보드 {round(conversion.conversion_score)}점, 미디어 키트 {round(media.media_score)}점, "
+        f"전환 보드 {round(conversion.conversion_score)}점, 미디어 신호 {round(media_score)}점, "
         f"추천 {referrals.total_referrals}건, 요금제 의향 {pricing.intent_count}건을 기반으로 "
         f"런칭 방문자를 {len(offers)}개 행동으로 분기합니다."
     )
@@ -14218,12 +14303,17 @@ def _launch_activation_handoff_prompts(
 
 def _launch_activation_proof_points(
     conversion: PublicConversionBoard,
-    media: LaunchMediaKit,
-    community: LaunchCommunityKit,
+    media_statement: str,
+    community_update: str,
     team_consult: TeamPurchaseConsultKit,
 ) -> list[str]:
-    points = [conversion.summary, media.hero_statement, community.summary, team_consult.decision_maker_brief]
-    points.extend(media.proof_points[:3])
+    points = [
+        conversion.summary,
+        media_statement,
+        community_update,
+        team_consult.decision_maker_brief,
+    ]
+    points.extend(surface.proof for surface in conversion.priority_surfaces[:3])
     return list(dict.fromkeys(points))[:7]
 
 
