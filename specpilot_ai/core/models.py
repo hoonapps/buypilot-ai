@@ -864,6 +864,47 @@ class SavedReportDetail(SavedReportSummary):
     notes: str = ""
 
 
+class PurchaseDecisionBoardItem(BaseModel):
+    report_id: str
+    trace_id: str
+    title: str
+    owner_label: str
+    category: Category
+    purpose: str
+    top_model_name: str | None = None
+    final_pick_id: str | None = None
+    decision_label: str
+    board_status: CheckStatus
+    recommended_action: str
+    effective_price_krw: int | None = None
+    target_price_krw: int | None = None
+    price_gap_krw: int | None = None
+    confidence: float = Field(ge=0, le=100)
+    checkout_blocked: bool = False
+    has_purchase_outcome: bool = False
+    has_purchase_links: bool = False
+    is_shared: bool = False
+    next_steps: list[str] = Field(default_factory=list)
+    risk_flags: list[str] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+
+
+class PurchaseDecisionBoard(BaseModel):
+    workspace_id: str
+    generated_at: str
+    status: CheckStatus
+    summary: str
+    report_count: int = 0
+    ready_to_buy_count: int = 0
+    price_wait_count: int = 0
+    checkout_blocked_count: int = 0
+    missing_outcome_count: int = 0
+    total_ready_value_krw: int = 0
+    next_actions: list[str] = Field(default_factory=list)
+    items: list[PurchaseDecisionBoardItem] = Field(default_factory=list)
+
+
 class ReportAdvisorQuestionRequest(BaseModel):
     question: str = Field(min_length=2)
     context: str = ""

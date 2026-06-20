@@ -278,6 +278,120 @@ def test_intake_diagnosis_returns_questions_and_normalized_request() -> None:
     assert "출처 없는 가격" in strong_payload["normalized_request"]["exclusions"]
 
 
+def test_purchase_decision_board_tracks_saved_report_next_actions() -> None:
+    workspace = {"X-SpecPilot-Key": f"pytest-board-{uuid4().hex}"}
+    other_workspace = {"X-SpecPilot-Key": f"pytest-board-other-{uuid4().hex}"}
+
+    empty_board = client.get("/reports/decision-board", headers=workspace)
+    assert empty_board.status_code == 200
+    assert empty_board.json()["report_count"] == 0
+    assert empty_board.json()["status"] == "warning"
+
+    analysis = client.post(
+        "/analyze",
+        headers=workspace,
+        json={
+            "query": "출장과 영상 편집용 노트북 180만원 안에서 추천해줘",
+            "category": "laptop",
+            "budget_krw": 1_800_000,
+            "purpose": "출장, 영상 편집, 발표",
+            "must_haves": ["가벼운 무게", "32GB RAM", "긴 배터리"],
+        },
+    ).json()
+    saved = client.post(
+        "/reports/save",
+        headers=workspace,
+        json={
+            "trace_id": analysis["graph_trace_id"],
+            "title": "출장 편집 노트북 구매 보드",
+            "owner_label": "pytest-board",
+        },
+    ).json()
+
+    board = client.get("/reports/decision-board", headers=workspace)
+    assert board.status_code == 200
+    board_payload = board.json()
+    assert board_payload["report_count"] == 1
+    assert board_payload["missing_outcome_count"] == 1
+    assert board_payload["items"][0]["report_id"] == saved["report_id"]
+    assert board_payload["items"][0]["has_purchase_outcome"] is False
+    assert board_payload["items"][0]["has_purchase_links"] is False
+    assert board_payload["items"][0]["category"] == "laptop"
+    assert board_payload["next_actions"]
+
+    isolated_board = client.get("/reports/decision-board", headers=other_workspace)
+    assert isolated_board.status_code == 200
+    assert all(
+        item["report_id"] != saved["report_id"]
+        for item in isolated_board.json()["items"]
+    )
+
+    top = analysis["report"]["top_recommendations"][0]
+    blocked_checkout = client.post(
+        f"/reports/{saved['report_id']}/checkout-review",
+        headers=workspace,
+        json={
+            "product_id": top["product"]["id"],
+            "confirmed_price_krw": top["price"]["effective_price_krw"],
+            "seller_answers": {},
+        },
+    ).json()
+    blocked_board = client.get("/reports/decision-board", headers=workspace).json()
+    assert blocked_board["checkout_blocked_count"] == 1
+    assert blocked_board["items"][0]["checkout_blocked"] is True
+    assert blocked_board["items"][0]["board_status"] == "blocker"
+
+    acknowledged_checkout = client.post(
+        f"/reports/{saved['report_id']}/checkout-review",
+        headers=workspace,
+        json={
+            "product_id": top["product"]["id"],
+            "confirmed_price_krw": top["price"]["effective_price_krw"],
+            "acknowledged_risks": blocked_checkout["missing_acknowledgements"],
+            "seller_answers": {
+                question: "판매자 확인 완료"
+                for question in blocked_checkout["seller_questions"]
+            },
+        },
+    ).json()
+    unblocked_board = client.get("/reports/decision-board", headers=workspace).json()
+    assert unblocked_board["checkout_blocked_count"] == 0
+    assert unblocked_board["items"][0]["checkout_blocked"] is False
+
+    link = client.post(
+        f"/reports/{saved['report_id']}/purchase-links",
+        headers=workspace,
+        json={
+            "product_id": top["product"]["id"],
+            "seller_name": "Pytest 공식몰",
+            "url": "https://official.example.com/board-laptop",
+            "is_affiliate": False,
+            "price_krw": top["price"]["effective_price_krw"],
+            "rank": 1,
+        },
+    )
+    assert link.status_code == 200
+    outcome = client.post(
+        f"/reports/{saved['report_id']}/purchase-outcomes",
+        headers=workspace,
+        json={
+            "product_id": top["product"]["id"],
+            "checkout_review_id": acknowledged_checkout["review_id"],
+            "status": "purchased",
+            "final_paid_price_krw": top["price"]["effective_price_krw"],
+            "satisfaction": 5,
+            "reason": "구매 보드 테스트 완료",
+        },
+    )
+    assert outcome.status_code == 200
+
+    completed_board = client.get("/reports/decision-board", headers=workspace).json()
+    assert completed_board["missing_outcome_count"] == 0
+    assert completed_board["items"][0]["has_purchase_links"] is True
+    assert completed_board["items"][0]["has_purchase_outcome"] is True
+    assert "구매 결과 기록 완료" in completed_board["items"][0]["recommended_action"]
+
+
 def test_analyze_endpoint_returns_trace_and_alerts() -> None:
     response = client.post(
         "/analyze",

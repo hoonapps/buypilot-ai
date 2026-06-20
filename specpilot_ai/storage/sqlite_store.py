@@ -71,6 +71,8 @@ from specpilot_ai.core.models import (
     ProviderReliabilityMetric,
     ProviderReviewStatus,
     PublicReport,
+    PurchaseDecisionBoard,
+    PurchaseDecisionBoardItem,
     PurchaseLink,
     PurchaseLinkClick,
     PurchaseLinkGovernance,
@@ -391,6 +393,73 @@ class SpecPilotStore:
                 (workspace_id, limit),
             ).fetchall()
         return [_saved_report_summary_from_row(row) for row in rows]
+
+    def purchase_decision_board_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 20,
+    ) -> PurchaseDecisionBoard:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT sr.*, ar.response_json,
+                       COUNT(DISTINCT cr.review_id) AS checkout_review_count,
+                       SUM(
+                           CASE
+                               WHEN cr.checkout_blocked = 1 THEN 1
+                               ELSE 0
+                           END
+                       ) AS checkout_blocked_count,
+                       (
+                           SELECT latest_cr.checkout_blocked
+                           FROM checkout_reviews latest_cr
+                           WHERE latest_cr.report_id = sr.report_id
+                             AND latest_cr.workspace_id = sr.workspace_id
+                           ORDER BY latest_cr.created_at DESC
+                           LIMIT 1
+                       ) AS latest_checkout_blocked,
+                       COUNT(DISTINCT po.outcome_id) AS purchase_outcome_count,
+                       COUNT(DISTINCT pl.link_id) AS purchase_link_count
+                FROM saved_reports sr
+                JOIN analysis_runs ar
+                    ON ar.trace_id = sr.trace_id AND ar.workspace_id = sr.workspace_id
+                LEFT JOIN checkout_reviews cr
+                    ON cr.report_id = sr.report_id AND cr.workspace_id = sr.workspace_id
+                LEFT JOIN purchase_outcomes po
+                    ON po.report_id = sr.report_id AND po.workspace_id = sr.workspace_id
+                LEFT JOIN purchase_links pl
+                    ON pl.report_id = sr.report_id AND pl.workspace_id = sr.workspace_id
+                WHERE sr.workspace_id = ?
+                GROUP BY sr.report_id
+                ORDER BY sr.created_at DESC
+                LIMIT ?
+                """,
+                (workspace_id, limit),
+            ).fetchall()
+        items = [_decision_board_item_from_row(row) for row in rows]
+        ready_items = [item for item in items if item.board_status == CheckStatus.ok]
+        price_wait_count = sum(
+            1 for item in items if "가격" in item.decision_label or item.price_gap_krw
+        )
+        checkout_blocked_count = sum(1 for item in items if item.checkout_blocked)
+        missing_outcome_count = sum(1 for item in items if not item.has_purchase_outcome)
+        status = _decision_board_status(items)
+        return PurchaseDecisionBoard(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            status=status,
+            summary=_decision_board_summary(items, status),
+            report_count=len(items),
+            ready_to_buy_count=len(ready_items),
+            price_wait_count=price_wait_count,
+            checkout_blocked_count=checkout_blocked_count,
+            missing_outcome_count=missing_outcome_count,
+            total_ready_value_krw=sum(
+                item.effective_price_krw or 0 for item in ready_items
+            ),
+            next_actions=_decision_board_next_actions(items),
+            items=items,
+        )
 
     def upsert_completion_report_template_for_workspace(
         self,
@@ -5290,6 +5359,205 @@ def _saved_report_summary_from_row(row: sqlite3.Row) -> SavedReportSummary:
         created_at=data["created_at"],
         updated_at=data["updated_at"],
     )
+
+
+def _decision_board_item_from_row(row: sqlite3.Row) -> PurchaseDecisionBoardItem:
+    data = dict(row)
+    response = AnalyzeResponse.model_validate_json(data["response_json"])
+    report = response.report
+    final_pick_id = report.final_pick_id
+    top = _decision_board_top_recommendation(response)
+    decision = report.purchase_decision
+    deal = _decision_board_deal_window(response)
+    checkout_blocked = bool(data["latest_checkout_blocked"] or 0)
+    has_purchase_outcome = (data["purchase_outcome_count"] or 0) > 0
+    has_purchase_links = (data["purchase_link_count"] or 0) > 0
+    decision_label = decision.label if decision else "검수 후 구매"
+    effective_price = top.price.effective_price_krw if top else None
+    target_price = deal.target_price_krw if deal else None
+    price_gap = (
+        max(0, effective_price - target_price)
+        if effective_price is not None and target_price is not None
+        else None
+    )
+    status = _decision_board_item_status(
+        decision_label=decision_label,
+        checkout_blocked=checkout_blocked,
+        price_gap_krw=price_gap,
+    )
+    next_steps = _decision_board_item_next_steps(
+        decision_steps=decision.next_steps if decision else [],
+        has_purchase_links=has_purchase_links,
+        has_purchase_outcome=has_purchase_outcome,
+        is_shared=data["share_token"] is not None,
+        checkout_blocked=checkout_blocked,
+        price_gap_krw=price_gap,
+    )
+    risk_flags = list(decision.risk_flags if decision else [])
+    risk_flags.extend(report.verification_flags[:2])
+    return PurchaseDecisionBoardItem(
+        report_id=data["report_id"],
+        trace_id=data["trace_id"],
+        title=data["title"],
+        owner_label=data["owner_label"],
+        category=response.criteria.category,
+        purpose=response.criteria.purpose,
+        top_model_name=top.product.model_name if top else data["top_model_name"],
+        final_pick_id=final_pick_id,
+        decision_label=decision_label,
+        board_status=status,
+        recommended_action=_decision_board_recommended_action(
+            decision_label=decision_label,
+            execution_action=report.execution_plan.primary_action
+            if report.execution_plan
+            else "",
+            checkout_blocked=checkout_blocked,
+            has_purchase_outcome=has_purchase_outcome,
+            has_purchase_links=has_purchase_links,
+            price_gap_krw=price_gap,
+        ),
+        effective_price_krw=effective_price,
+        target_price_krw=target_price,
+        price_gap_krw=price_gap,
+        confidence=decision.confidence if decision else 0,
+        checkout_blocked=checkout_blocked,
+        has_purchase_outcome=has_purchase_outcome,
+        has_purchase_links=has_purchase_links,
+        is_shared=data["share_token"] is not None,
+        next_steps=next_steps,
+        risk_flags=risk_flags[:5],
+        created_at=data["created_at"],
+        updated_at=data["updated_at"],
+    )
+
+
+def _decision_board_top_recommendation(response: AnalyzeResponse):
+    final_pick_id = response.report.final_pick_id
+    if final_pick_id:
+        for recommendation in response.report.top_recommendations:
+            if recommendation.product.id == final_pick_id:
+                return recommendation
+    return response.report.top_recommendations[0] if response.report.top_recommendations else None
+
+
+def _decision_board_deal_window(response: AnalyzeResponse):
+    final_pick_id = response.report.final_pick_id
+    if final_pick_id:
+        for deal in response.report.deal_windows:
+            if deal.product_id == final_pick_id:
+                return deal
+    return response.report.deal_windows[0] if response.report.deal_windows else None
+
+
+def _decision_board_item_status(
+    *,
+    decision_label: str,
+    checkout_blocked: bool,
+    price_gap_krw: int | None,
+) -> CheckStatus:
+    if checkout_blocked or "차단" in decision_label:
+        return CheckStatus.blocker
+    if "대기" in decision_label or "검수" in decision_label or (price_gap_krw or 0) > 0:
+        return CheckStatus.warning
+    return CheckStatus.ok
+
+
+def _decision_board_item_next_steps(
+    *,
+    decision_steps: list[str],
+    has_purchase_links: bool,
+    has_purchase_outcome: bool,
+    is_shared: bool,
+    checkout_blocked: bool,
+    price_gap_krw: int | None,
+) -> list[str]:
+    steps = list(decision_steps[:3])
+    if checkout_blocked:
+        steps.insert(0, "결제 전 검수의 차단 항목을 먼저 해소하세요.")
+    if (price_gap_krw or 0) > 0:
+        steps.append("목표가 알림을 유지하고 가격 재조회 후 결제하세요.")
+    if not has_purchase_links:
+        steps.append("공개 전 제휴 링크와 비제휴 구매 대안을 함께 등록하세요.")
+    if not is_shared:
+        steps.append("검토자에게 보낼 공개 공유 리포트를 생성하세요.")
+    if not has_purchase_outcome:
+        steps.append("구매, 지연, 이탈 중 하나로 결과를 닫아 학습 신호를 남기세요.")
+    return _unique_non_empty(steps)[:6]
+
+
+def _decision_board_recommended_action(
+    *,
+    decision_label: str,
+    execution_action: str,
+    checkout_blocked: bool,
+    has_purchase_outcome: bool,
+    has_purchase_links: bool,
+    price_gap_krw: int | None,
+) -> str:
+    if checkout_blocked:
+        return "결제 보류: 판매자 답변과 리스크 승인 누락을 먼저 처리하세요."
+    if has_purchase_outcome:
+        return "구매 결과 기록 완료: 학습 인사이트에서 유사 조건 랭킹 반영 여부를 확인하세요."
+    if (price_gap_krw or 0) > 0 or "대기" in decision_label:
+        return "가격 대기: 목표가 알림과 재조회 기준을 유지하세요."
+    if not has_purchase_links:
+        return "구매 링크 보강: 비제휴 대안까지 등록한 뒤 공유하세요."
+    return execution_action or "결제 직전 가격, 옵션명, 반품 조건을 재확인하세요."
+
+
+def _decision_board_status(items: list[PurchaseDecisionBoardItem]) -> CheckStatus:
+    if any(item.board_status == CheckStatus.blocker for item in items):
+        return CheckStatus.blocker
+    if not items or any(item.board_status == CheckStatus.warning for item in items):
+        return CheckStatus.warning
+    return CheckStatus.ok
+
+
+def _decision_board_summary(
+    items: list[PurchaseDecisionBoardItem],
+    status: CheckStatus,
+) -> str:
+    if not items:
+        return "아직 비교할 저장 리포트가 없습니다. 분석을 실행하고 리포트를 저장하세요."
+    ready = sum(1 for item in items if item.board_status == CheckStatus.ok)
+    blocked = sum(1 for item in items if item.board_status == CheckStatus.blocker)
+    waiting = sum(1 for item in items if item.board_status == CheckStatus.warning)
+    if status == CheckStatus.blocker:
+        return f"저장 리포트 {len(items)}건 중 {blocked}건은 결제 전 차단 항목 해소가 필요합니다."
+    if status == CheckStatus.warning:
+        return (
+            f"저장 리포트 {len(items)}건 중 {waiting}건은 "
+            "가격 대기 또는 검수 후 구매 상태입니다."
+        )
+    return f"저장 리포트 {len(items)}건 중 {ready}건은 결제 전 최종 확인 단계로 이동할 수 있습니다."
+
+
+def _decision_board_next_actions(items: list[PurchaseDecisionBoardItem]) -> list[str]:
+    if not items:
+        return ["대표 구매 시나리오를 분석하고 리포트를 저장하세요."]
+    actions: list[str] = []
+    if any(item.checkout_blocked for item in items):
+        actions.append("결제 전 검수 차단 리포트의 판매자 답변과 리스크 승인을 완료하세요.")
+    if any((item.price_gap_krw or 0) > 0 for item in items):
+        actions.append("가격 대기 리포트는 목표가 알림과 URL 모니터 refresh를 연결하세요.")
+    if any(not item.has_purchase_links for item in items):
+        actions.append("공개 공유 전 제휴 링크와 비제휴 구매 대안을 함께 등록하세요.")
+    if any(not item.has_purchase_outcome for item in items):
+        actions.append("구매, 지연, 이탈, 반품 결과를 기록해 추천 학습 루프를 닫으세요.")
+    if not actions:
+        actions.append("준비 완료 리포트를 공유하고 구매 결과 추적을 유지하세요.")
+    return actions[:5]
+
+
+def _unique_non_empty(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    unique: list[str] = []
+    for item in items:
+        normalized = item.strip()
+        if normalized and normalized not in seen:
+            unique.append(normalized)
+            seen.add(normalized)
+    return unique
 
 
 def _report_advisor_answer_from_row(row: sqlite3.Row) -> ReportAdvisorAnswer:

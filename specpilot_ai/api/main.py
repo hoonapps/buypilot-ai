@@ -69,6 +69,7 @@ from specpilot_ai.core.models import (
     PrivacyPolicySummary,
     ProductBrief,
     PublicReport,
+    PurchaseDecisionBoard,
     PurchaseLink,
     PurchaseLinkGovernance,
     PurchaseLinkRequest,
@@ -351,6 +352,17 @@ def list_reports(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> list[SavedReportSummary]:
     return _store().list_reports_for_workspace(workspace.workspace_id, limit=limit)
+
+
+@app.get("/reports/decision-board", response_model=PurchaseDecisionBoard)
+def report_decision_board(
+    limit: int = 20,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> PurchaseDecisionBoard:
+    return _store().purchase_decision_board_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
 
 
 @app.post("/reports/completion-templates", response_model=CompletionReportTemplate)
