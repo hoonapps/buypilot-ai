@@ -841,6 +841,108 @@ def test_launch_experiment_hub_tracks_variant_winner() -> None:
     assert funnel.json()["paid_intent_rate"] > 0
 
 
+def test_public_proof_hub_publishes_trust_and_conversion_evidence() -> None:
+    workspace = {"X-SpecPilot-Key": f"pytest-proof-hub-{uuid4().hex}"}
+    analysis = client.post(
+        "/analyze",
+        headers=workspace,
+        json={
+            "query": "영상 편집용 데스크톱 200만원 안에서 구매 실패 줄이게 추천해줘",
+            "category": "desktop_pc",
+            "budget_krw": 2_000_000,
+            "purpose": "Premiere Pro, QHD gaming",
+            "must_haves": ["32GB RAM", "QHD 144Hz"],
+            "exclusions": ["중고"],
+        },
+    )
+    assert analysis.status_code == 200
+    analysis_payload = analysis.json()
+    trace_id = analysis_payload["graph_trace_id"]
+    top = analysis_payload["report"]["top_recommendations"][0]
+
+    saved = client.post(
+        "/reports/save",
+        headers=workspace,
+        json={"trace_id": trace_id, "title": "공개 검증 허브 테스트"},
+    )
+    assert saved.status_code == 200
+    report_id = saved.json()["report_id"]
+
+    share = client.post(f"/reports/{report_id}/share", headers=workspace)
+    assert share.status_code == 200
+    public_report = client.get(f"/public/reports/{share.json()['share_token']}")
+    assert public_report.status_code == 200
+
+    feedback = client.post(
+        "/feedback",
+        headers=workspace,
+        json={
+            "trace_id": trace_id,
+            "rating": 5,
+            "purchase_intent": True,
+            "selected_product_id": top["product"]["id"],
+            "reason": "근거와 결제 전 체크가 명확해서 공유하기 좋았습니다.",
+            "improvement_requests": ["실제 구매 링크 더 보기"],
+            "contact": "proof@example.com",
+        },
+    )
+    assert feedback.status_code == 200
+
+    experiment = client.post(
+        "/growth/launch-experiments",
+        headers=workspace,
+        json={
+            "name": "공개 proof CTA",
+            "channel": "landing",
+            "audience": "desktop_pc_buyer",
+            "hypothesis": "신뢰 proof CTA가 유료 관심 전환을 만든다.",
+            "primary_metric": "subscription_cta",
+            "target_surface": "proof-hub",
+        },
+    )
+    assert experiment.status_code == 200
+    experiment_payload = experiment.json()
+    variant_id = experiment_payload["variants"][0]["variant_id"]
+    for event_type in ["impression", "conversion"]:
+        event = client.post(
+            f"/growth/launch-experiments/{experiment_payload['experiment_id']}/events",
+            headers=workspace,
+            json={
+                "variant_id": variant_id,
+                "event_type": event_type,
+                "source": "pytest",
+                "surface": "proof-hub",
+                "label": f"proof {event_type}",
+            },
+        )
+        assert event.status_code == 200
+
+    proof = client.get("/public/proof-hub?limit=10", headers=workspace)
+    assert proof.status_code == 200
+    payload = proof.json()
+    assert payload["proof_version"] == "specpilot.public_proof_hub.v1"
+    assert payload["workspace_id"].startswith("workspace_")
+    assert payload["proof_score"] > 0
+    assert payload["status"] in {"ok", "warning", "blocker"}
+    assert payload["metric_cards"]["feedback_count"] >= 1
+    assert payload["metric_cards"]["public_share_views"] >= 1
+    assert payload["trust_badges"]
+    asset_keys = {asset["key"] for asset in payload["proof_assets"]}
+    assert {
+        "trust_center",
+        "market_reports",
+        "share_review",
+        "buyer_feedback",
+        "cta_experiment",
+        "public_surfaces",
+    } <= asset_keys
+    assert any(path == "/policy/trust-center" for path in payload["public_paths"])
+    assert payload["objection_answers"]
+    assert payload["cta_cards"]
+    assert payload["recent_feedback"]
+    assert payload["next_actions"]
+
+
 def test_growth_retention_hub_prioritizes_reengagement_loops() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-retention-{uuid4().hex}"}
     analysis = client.post(

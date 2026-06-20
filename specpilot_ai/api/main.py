@@ -82,6 +82,7 @@ from specpilot_ai.core.models import (
     ProductBrief,
     PublicAcquisitionHub,
     PublicCategoryMarketReport,
+    PublicProofHub,
     PublicReport,
     PurchaseDecisionBoard,
     PurchaseLink,
@@ -1073,6 +1074,17 @@ def public_onboarding_playbooks(
     category: Category | None = None,
 ) -> list[PurchaseOnboardingPlaybook]:
     return purchase_onboarding_playbooks(category=category)
+
+
+@app.get("/public/proof-hub", response_model=PublicProofHub)
+def public_proof_hub(
+    limit: int = 8,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> PublicProofHub:
+    return _store().public_proof_hub_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
 
 
 @app.get("/market/category-reports", response_model=CategoryMarketReport)

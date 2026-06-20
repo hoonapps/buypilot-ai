@@ -86,6 +86,9 @@ from specpilot_ai.core.models import (
     ProviderReviewStatus,
     PublicAcquisitionHub,
     PublicAcquisitionSurface,
+    PublicObjectionAnswer,
+    PublicProofAsset,
+    PublicProofHub,
     PublicReport,
     PurchaseDecisionBoard,
     PurchaseDecisionBoardItem,
@@ -3233,6 +3236,48 @@ class SpecPilotStore:
             recent_events=growth.recent_events,
             recent_advisor_answers=advisors[:5],
             recent_purchase_outcomes=outcomes[:5],
+        )
+
+    def public_proof_hub_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 8,
+    ) -> PublicProofHub:
+        metrics = self.metrics_for_workspace(workspace_id)
+        acquisition = self.public_acquisition_hub_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        experiments = self.launch_experiment_dashboard_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        feedback = self.list_feedback_for_workspace(workspace_id, limit=limit)
+        proof_assets = _public_proof_assets(metrics, acquisition, experiments)
+        proof_score = _public_proof_score(metrics, proof_assets, experiments)
+        status = _score_status(proof_score, warning=55, ok=78)
+        return PublicProofHub(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            status=status,
+            proof_score=proof_score,
+            headline=_public_proof_headline(status, proof_score),
+            summary=_public_proof_summary(metrics, proof_assets),
+            metric_cards=_public_proof_metric_cards(metrics, experiments),
+            trust_badges=_public_proof_badges(metrics),
+            proof_assets=proof_assets,
+            objection_answers=_public_objection_answers(metrics),
+            cta_cards=_public_proof_cta_cards(acquisition, experiments),
+            public_paths=[
+                "/",
+                "/market/desktop-pc",
+                "/market/laptop",
+                "/policy/trust-center",
+                "/public/onboarding/playbooks",
+                "/r/{share_token}",
+            ],
+            recent_feedback=feedback[:5],
+            next_actions=_public_proof_next_actions(status, proof_assets, experiments),
         )
 
     def create_beta_lead_for_workspace(
@@ -9620,6 +9665,286 @@ def _retention_signal(
         insight=insight,
         next_action=next_action,
     )
+
+
+def _public_proof_asset(
+    *,
+    key: str,
+    label: str,
+    score: float,
+    metric: str,
+    proof: str,
+    public_path: str,
+    cta_label: str,
+    next_action: str,
+) -> PublicProofAsset:
+    return PublicProofAsset(
+        key=key,
+        label=label,
+        status=_score_status(score, warning=45, ok=75),
+        metric=metric,
+        proof=proof,
+        public_path=public_path,
+        cta_label=cta_label,
+        next_action=next_action,
+    )
+
+
+def _public_proof_assets(
+    metrics: OperationsMetrics,
+    acquisition: PublicAcquisitionHub,
+    experiments: LaunchExperimentDashboard,
+) -> list[PublicProofAsset]:
+    feedback_score = min(
+        100.0,
+        metrics.feedback_count * 10
+        + metrics.average_satisfaction * 12
+        + metrics.purchase_intent_rate * 35,
+    )
+    market_score = min(
+        100.0,
+        metrics.analysis_runs * 2
+        + metrics.saved_reports * 5
+        + metrics.public_share_views * 3,
+    )
+    experiment_score = min(
+        100.0,
+        experiments.total_impressions * 1.2
+        + experiments.total_conversions * 15
+        + experiments.conversion_rate * 120,
+    )
+    return [
+        _public_proof_asset(
+            key="trust_center",
+            label="공개 신뢰 기준",
+            score=85,
+            metric="Trust Center 공개",
+            proof="추천 공정성, 출처 검수, 개인정보 최소화, 사람 검수 기준을 공개합니다.",
+            public_path="/policy/trust-center",
+            cta_label="신뢰 기준 보기",
+            next_action="Trust Center 링크를 랜딩 상단과 공개 리포트 하단에 고정하세요.",
+        ),
+        _public_proof_asset(
+            key="market_reports",
+            label="공개 시장 리포트",
+            score=market_score,
+            metric=(
+                f"분석 {metrics.analysis_runs}건 / "
+                f"저장 리포트 {metrics.saved_reports}건"
+            ),
+            proof="데스크톱 PC와 노트북 추천 픽, 가격 구간, 리스크 신호를 공개 리포트화합니다.",
+            public_path="/market/desktop-pc",
+            cta_label="시장 리포트 보기",
+            next_action="공개 카테고리 리포트에 현재 승자 CTA를 연결하세요.",
+        ),
+        _public_proof_asset(
+            key="share_review",
+            label="공유 검토 흐름",
+            score=min(100.0, metrics.shared_reports * 18 + metrics.public_share_views * 8),
+            metric=(
+                f"공유 리포트 {metrics.shared_reports}개 / "
+                f"공개 조회 {metrics.public_share_views}회"
+            ),
+            proof="공개 토큰 리포트로 가족, 동료, 커뮤니티가 같은 근거를 검토할 수 있습니다.",
+            public_path="/r/{share_token}",
+            cta_label="공유 리포트 열기",
+            next_action="공유 리포트에 검토 질문과 가격 알림 CTA를 같이 배치하세요.",
+        ),
+        _public_proof_asset(
+            key="buyer_feedback",
+            label="구매자 피드백",
+            score=feedback_score,
+            metric=(
+                f"피드백 {metrics.feedback_count}건 / "
+                f"만족도 {metrics.average_satisfaction}점 / "
+                f"구매 의향 {round(metrics.purchase_intent_rate * 100)}%"
+            ),
+            proof=(
+                "추천 만족도, 구매 의향, 개선 요청을 원문 연락처 없이 "
+                "마스킹해 학습 신호로 씁니다."
+            ),
+            public_path="/#conversion",
+            cta_label="피드백 남기기",
+            next_action="만족도 4점 이상 피드백을 공개 proof 문구로 재가공하세요.",
+        ),
+        _public_proof_asset(
+            key="cta_experiment",
+            label="CTA 실험 검증",
+            score=experiment_score,
+            metric=(
+                f"노출 {experiments.total_impressions}회 / "
+                f"전환 {experiments.total_conversions}건 / "
+                f"전환율 {round(experiments.conversion_rate * 100, 1)}%"
+            ),
+            proof="launch-kit 카피를 실제 variant 노출과 전환으로 검증해 승자 후보를 고릅니다.",
+            public_path="/#launch-experiments",
+            cta_label="실험 결과 보기",
+            next_action="승자 CTA를 공개 유입 허브의 primary CTA와 SEO 페이지에 반영하세요.",
+        ),
+        _public_proof_asset(
+            key="public_surfaces",
+            label="공개 유입 표면",
+            score=acquisition.launch_score,
+            metric=f"유입 허브 {round(acquisition.launch_score)}점",
+            proof=(
+                "데모, SEO 리포트, 공유 리포트, 추천 대기열, "
+                "Trust Center 표면을 함께 관리합니다."
+            ),
+            public_path="/#acquisition-hub",
+            cta_label="유입 허브 보기",
+            next_action="점수가 낮은 공개 표면부터 채널 액션을 완료하세요.",
+        ),
+    ]
+
+
+def _public_proof_score(
+    metrics: OperationsMetrics,
+    proof_assets: list[PublicProofAsset],
+    experiments: LaunchExperimentDashboard,
+) -> float:
+    asset_score = sum(_status_score(asset.status) for asset in proof_assets) / max(
+        len(proof_assets),
+        1,
+    )
+    signal_bonus = min(
+        12.0,
+        metrics.public_share_views * 0.8
+        + metrics.feedback_count
+        + experiments.total_conversions * 1.5,
+    )
+    return round(min(100.0, asset_score + signal_bonus), 1)
+
+
+def _status_score(status: CheckStatus) -> float:
+    if status == CheckStatus.ok:
+        return 82.0
+    if status == CheckStatus.warning:
+        return 58.0
+    return 28.0
+
+
+def _public_proof_headline(status: CheckStatus, score: float) -> str:
+    if status == CheckStatus.ok:
+        return f"공개 검증 허브 {score}점, 바로 신뢰 proof로 밀 수 있습니다."
+    if status == CheckStatus.warning:
+        return f"공개 검증 허브 {score}점, proof는 있으나 표본을 더 쌓아야 합니다."
+    return f"공개 검증 허브 {score}점, 신뢰 proof를 먼저 만들어야 합니다."
+
+
+def _public_proof_summary(
+    metrics: OperationsMetrics,
+    proof_assets: list[PublicProofAsset],
+) -> str:
+    ok_assets = sum(1 for asset in proof_assets if asset.status == CheckStatus.ok)
+    return (
+        f"신뢰/시장/공유/피드백/실험/유입 증거 {len(proof_assets)}개 중 "
+        f"{ok_assets}개가 공개 proof로 사용 가능합니다. 공개 조회 "
+        f"{metrics.public_share_views}회, 피드백 {metrics.feedback_count}건을 함께 반영했습니다."
+    )
+
+
+def _public_proof_metric_cards(
+    metrics: OperationsMetrics,
+    experiments: LaunchExperimentDashboard,
+) -> dict[str, int | float | str]:
+    return {
+        "analysis_runs": metrics.analysis_runs,
+        "shared_reports": metrics.shared_reports,
+        "public_share_views": metrics.public_share_views,
+        "feedback_count": metrics.feedback_count,
+        "average_satisfaction": metrics.average_satisfaction,
+        "purchase_intent_rate": f"{round(metrics.purchase_intent_rate * 100)}%",
+        "launch_experiment_conversions": experiments.total_conversions,
+        "launch_experiment_rate": f"{round(experiments.conversion_rate * 100, 1)}%",
+    }
+
+
+def _public_proof_badges(metrics: OperationsMetrics) -> list[str]:
+    badges = [
+        "제휴 여부와 추천 순위 분리",
+        "출처 신뢰도와 캐시 TTL 공개",
+        "공개 리포트 토큰 격리",
+        "연락처 원문 대신 마스킹 저장",
+    ]
+    if metrics.purchase_outcomes:
+        badges.append("실제 구매 결과 학습 루프")
+    if metrics.checkout_ready_reviews or metrics.checkout_blocked_reviews:
+        badges.append("결제 전 옵션/금액 검수")
+    return badges
+
+
+def _public_objection_answers(
+    metrics: OperationsMetrics,
+) -> list[PublicObjectionAnswer]:
+    return [
+        PublicObjectionAnswer(
+            question="최저가 광고 링크만 밀어주는 서비스인가요?",
+            answer=(
+                "아닙니다. 추천 순위는 목적 적합도, 가격, 호환성, 리뷰 신뢰도, "
+                "구매 안정성으로 계산하고 제휴 링크 여부는 분리합니다."
+            ),
+            evidence=[
+                "제휴/비제휴 구매 링크 governance",
+                "추천 공정성 Trust Center",
+            ],
+        ),
+        PublicObjectionAnswer(
+            question="가격 정보가 오래되면 어떻게 하나요?",
+            answer=(
+                "가격 캐시 TTL, 수집 시각, 출처 링크, 목표가 알림, URL 모니터를 "
+                "함께 제공해 재확인 흐름을 유지합니다."
+            ),
+            evidence=[
+                f"가격 알림 {metrics.alert_subscriptions}개",
+                f"소스 모니터 {metrics.source_monitors}개",
+            ],
+        ),
+        PublicObjectionAnswer(
+            question="실제 구매 실패를 줄이는 근거가 있나요?",
+            answer=(
+                "결제 전 검수, 구매 결과 추적, 학습 인사이트, 공개 공유 검토를 "
+                "닫힌 루프로 묶어 다음 추천 품질에 반영합니다."
+            ),
+            evidence=[
+                f"결제 검수 {metrics.checkout_reviews}건",
+                f"구매 결과 {metrics.purchase_outcomes}건",
+            ],
+        ),
+    ]
+
+
+def _public_proof_cta_cards(
+    acquisition: PublicAcquisitionHub,
+    experiments: LaunchExperimentDashboard,
+) -> list[str]:
+    cards = [
+        acquisition.primary_cta,
+        "내 예산과 용도에 맞춰 바로 분석하기",
+        "Trust Center에서 추천 기준 확인하기",
+    ]
+    if experiments.best_variant_label:
+        cards.insert(0, f"검증된 CTA 적용: {experiments.best_variant_label}")
+    return list(dict.fromkeys(cards))[:5]
+
+
+def _public_proof_next_actions(
+    status: CheckStatus,
+    proof_assets: list[PublicProofAsset],
+    experiments: LaunchExperimentDashboard,
+) -> list[str]:
+    actions = [
+        asset.next_action for asset in proof_assets if asset.status != CheckStatus.ok
+    ][:4]
+    if experiments.best_variant_label:
+        actions.insert(
+            0,
+            f"{experiments.best_variant_label} CTA를 랜딩 hero와 공개 리포트 CTA로 승격하세요.",
+        )
+    if status == CheckStatus.blocker:
+        actions.append("피드백, 공유 조회, CTA 실험 표본을 먼저 만들어 공개 proof를 보강하세요.")
+    if not actions:
+        actions.append("공개 검증 허브 지표를 랜딩 상단 proof strip으로 노출하세요.")
+    return list(dict.fromkeys(actions))[:6]
 
 
 def _retention_signals(

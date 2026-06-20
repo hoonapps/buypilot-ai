@@ -916,6 +916,41 @@ class PublicCategoryMarketReport(BaseModel):
     report: CategoryMarketReport
 
 
+class PublicProofAsset(BaseModel):
+    key: str
+    label: str
+    status: CheckStatus
+    metric: str
+    proof: str
+    public_path: str
+    cta_label: str
+    next_action: str
+
+
+class PublicObjectionAnswer(BaseModel):
+    question: str
+    answer: str
+    evidence: list[str] = Field(default_factory=list)
+
+
+class PublicProofHub(BaseModel):
+    proof_version: str = "specpilot.public_proof_hub.v1"
+    workspace_id: str
+    generated_at: str
+    status: CheckStatus
+    proof_score: float = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    metric_cards: dict[str, int | float | str] = Field(default_factory=dict)
+    trust_badges: list[str] = Field(default_factory=list)
+    proof_assets: list[PublicProofAsset] = Field(default_factory=list)
+    objection_answers: list[PublicObjectionAnswer] = Field(default_factory=list)
+    cta_cards: list[str] = Field(default_factory=list)
+    public_paths: list[str] = Field(default_factory=list)
+    recent_feedback: list[FeedbackRecord] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PurchaseOnboardingStep(BaseModel):
     title: str
     description: str
