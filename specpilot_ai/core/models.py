@@ -962,6 +962,46 @@ class PublicProofHub(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class PublicLaunchRoomCard(BaseModel):
+    key: str
+    title: str
+    status: CheckStatus
+    metric: str
+    body: str
+    cta_label: str
+    cta_path: str
+
+
+class PublicLaunchRoomMarketLink(BaseModel):
+    category: Category
+    title: str
+    path: str
+    share_text: str
+    lead_pick: str
+    risk_count: int = 0
+
+
+class PublicLaunchRoom(BaseModel):
+    room_version: str = "specpilot.public_launch_room.v1"
+    workspace_id: str
+    generated_at: str
+    status: CheckStatus
+    launch_score: float = Field(ge=0, le=100)
+    headline: str
+    hero_message: str
+    share_title: str
+    share_text: str
+    primary_cta: str
+    primary_cta_path: str
+    proof_strip: list[str] = Field(default_factory=list)
+    demo_cards: list[PublicLaunchRoomCard] = Field(default_factory=list)
+    launch_cards: list[PublicLaunchRoomCard] = Field(default_factory=list)
+    market_links: list[PublicLaunchRoomMarketLink] = Field(default_factory=list)
+    secondary_ctas: list[str] = Field(default_factory=list)
+    channel_posts: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PurchaseOnboardingStep(BaseModel):
     title: str
     description: str

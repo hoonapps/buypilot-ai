@@ -36,6 +36,7 @@ from specpilot_ai.core.models import (
     CategoryMarketReport,
     CheckoutReview,
     CheckoutReviewRequest,
+    CheckStatus,
     CompletionDeliveryEngagement,
     CompletionDeliveryEngagementRequest,
     CompletionDeliveryProviderEvent,
@@ -82,6 +83,9 @@ from specpilot_ai.core.models import (
     ProductBrief,
     PublicAcquisitionHub,
     PublicCategoryMarketReport,
+    PublicLaunchRoom,
+    PublicLaunchRoomCard,
+    PublicLaunchRoomMarketLink,
     PublicProofHub,
     PublicReport,
     PurchaseDecisionBoard,
@@ -1087,6 +1091,150 @@ def public_proof_hub(
     )
 
 
+@app.get("/public/launch-room", response_model=PublicLaunchRoom)
+def public_launch_room(
+    limit: int = 8,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> PublicLaunchRoom:
+    store = _store()
+    demos = build_demo_scenario_gallery()
+    launch_kit = build_launch_campaign_kit()
+    proof = store.public_proof_hub_for_workspace(workspace.workspace_id, limit=limit)
+    acquisition = store.public_acquisition_hub_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+    pulse = store.launch_pulse_for_workspace(workspace.workspace_id, limit=limit)
+    referrals = store.waitlist_referral_dashboard_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+    pricing = store.pricing_dashboard_for_workspace(workspace.workspace_id)
+    desktop_report = build_category_market_report(
+        workspace_id="public-launch-room",
+        metrics=store.metrics_for_workspace(workspace.workspace_id),
+        category_filter=Category.desktop_pc,
+    )
+    laptop_report = build_category_market_report(
+        workspace_id="public-launch-room",
+        metrics=store.metrics_for_workspace(workspace.workspace_id),
+        category_filter=Category.laptop,
+    )
+    launch_score = round(
+        (proof.proof_score + acquisition.launch_score + pulse.pulse_score) / 3,
+        1,
+    )
+    status = _score_status_for_public_room(launch_score)
+    lead_demo = demos.scenarios[0]
+    headline = "컴퓨터와 노트북 구매 실패를 줄이는 공개 AI 구매 리포트"
+    hero_message = (
+        "예산과 용도를 넣으면 TOP 3 추천, 제외 후보, 가격 타이밍, "
+        "공유 검토, 결제 전 체크까지 한 번에 이어집니다."
+    )
+    return PublicLaunchRoom(
+        workspace_id=workspace.workspace_id,
+        generated_at=datetime.now(UTC).isoformat(),
+        status=status,
+        launch_score=launch_score,
+        headline=headline,
+        hero_message=hero_message,
+        share_title="SpecPilot AI 공개 런칭룸",
+        share_text=(
+            "최저가 링크가 아니라 가격, 호환성, 리뷰 리스크, 구매 타이밍, "
+            "결제 전 검수를 함께 보는 PC/노트북 구매 AI입니다."
+        ),
+        primary_cta=lead_demo.demo_cta,
+        primary_cta_path="/#analysis",
+        proof_strip=proof.hero_proof_strip,
+        demo_cards=[
+            PublicLaunchRoomCard(
+                key=scenario.scenario_id,
+                title=scenario.title,
+                status=CheckStatus.ok,
+                metric=scenario.expected_outcome,
+                body=scenario.one_liner,
+                cta_label=scenario.demo_cta,
+                cta_path="/#analysis",
+            )
+            for scenario in demos.scenarios
+        ],
+        launch_cards=[
+            PublicLaunchRoomCard(
+                key="proof_hub",
+                title="공개 검증 허브",
+                status=proof.status,
+                metric=f"{round(proof.proof_score)}점",
+                body=proof.summary,
+                cta_label="검증 허브 보기",
+                cta_path="/#proof-hub",
+            ),
+            PublicLaunchRoomCard(
+                key="acquisition_hub",
+                title="공개 유입 허브",
+                status=acquisition.status,
+                metric=f"{round(acquisition.launch_score)}점",
+                body=acquisition.summary,
+                cta_label=acquisition.primary_cta,
+                cta_path=acquisition.primary_cta_path,
+            ),
+            PublicLaunchRoomCard(
+                key="launch_pulse",
+                title="런치 반응 Pulse",
+                status=pulse.status,
+                metric=f"{round(pulse.pulse_score)}점",
+                body=pulse.summary,
+                cta_label="반응 Pulse 보기",
+                cta_path="/#launch-pulse",
+            ),
+            PublicLaunchRoomCard(
+                key="referral_waitlist",
+                title="추천 대기열",
+                status=_count_status(referrals.total_referrals, warning=1, ok=5),
+                metric=(
+                    f"{referrals.total_referrals}명 대기 / "
+                    f"추천 {referrals.referred_signup_count}명"
+                ),
+                body=referrals.summary,
+                cta_label="초대 링크 만들기",
+                cta_path="/#referrals",
+            ),
+            PublicLaunchRoomCard(
+                key="pricing_interest",
+                title="수익화 관심",
+                status=pricing.readiness_status,
+                metric=f"예상 MRR {pricing.estimated_mrr_krw:,}원",
+                body=pricing.summary,
+                cta_label="요금제 관심 등록",
+                cta_path="/#pricing-ops",
+            ),
+        ],
+        market_links=[
+            _launch_room_market_link(Category.desktop_pc, desktop_report),
+            _launch_room_market_link(Category.laptop, laptop_report),
+        ],
+        secondary_ctas=[
+            launch_kit.primary_cta,
+            "공개 리포트로 구매 검토 받기",
+            "추천 대기열 초대 링크 만들기",
+            "Trust Center에서 추천 기준 확인하기",
+        ],
+        channel_posts=[
+            variant.body
+            for playbook in launch_kit.channel_playbooks
+            for variant in playbook.copy_variants[:1]
+        ][:3],
+        next_actions=list(
+            dict.fromkeys(
+                [
+                    *proof.next_actions[:2],
+                    *acquisition.next_actions[:2],
+                    *pulse.top_actions[:2],
+                ],
+            ),
+        )[:6],
+    )
+
+
 @app.get("/market/category-reports", response_model=CategoryMarketReport)
 def category_market_report(
     category: Category | None = None,
@@ -1922,6 +2070,41 @@ def _limited_header(value: str | None, limit: int = 180) -> str:
     if not value:
         return ""
     return value[:limit]
+
+
+def _score_status_for_public_room(score: float) -> CheckStatus:
+    if score >= 75:
+        return CheckStatus.ok
+    if score >= 55:
+        return CheckStatus.warning
+    return CheckStatus.blocker
+
+
+def _count_status(value: int, *, warning: int, ok: int) -> CheckStatus:
+    if value >= ok:
+        return CheckStatus.ok
+    if value >= warning:
+        return CheckStatus.warning
+    return CheckStatus.blocker
+
+
+def _launch_room_market_link(
+    category: Category,
+    report: CategoryMarketReport,
+) -> PublicLaunchRoomMarketLink:
+    slug = "desktop-pc" if category == Category.desktop_pc else "laptop"
+    category_label = "데스크톱 PC" if category == Category.desktop_pc else "노트북"
+    lead_pick = report.picks[0].model_name if report.picks else "추천 후보 준비 중"
+    return PublicLaunchRoomMarketLink(
+        category=category,
+        title=f"{report.report_month} {category_label} 공개 구매 리포트",
+        path=f"/market/{slug}",
+        share_text=(
+            f"{category_label} 구매 전 가격 구간, 추천 픽, 리스크 신호를 먼저 확인하세요."
+        ),
+        lead_pick=lead_pick,
+        risk_count=len(report.risk_signals),
+    )
 
 
 def _validate_public_purchase_url(url: str) -> None:

@@ -964,6 +964,62 @@ def test_public_proof_hub_has_launch_evidence_for_empty_workspace() -> None:
     assert payload["objection_answers"]
 
 
+def test_public_launch_room_packages_demo_proof_and_growth_ctas() -> None:
+    workspace = {"X-SpecPilot-Key": f"pytest-launch-room-{uuid4().hex}"}
+    referral = client.post(
+        "/growth/waitlist-referrals",
+        headers=workspace,
+        json={
+            "email": "launch-room@example.com",
+            "persona": "creator",
+            "use_case": "친구에게 공개 구매 리포트를 공유하고 싶습니다.",
+            "contact_consent": True,
+            "source": "launch-room-test",
+        },
+    )
+    assert referral.status_code == 200
+    intent = client.post(
+        "/billing/subscription-intents",
+        headers=workspace,
+        json={
+            "email": "launch-room@example.com",
+            "plan_id": "premium",
+            "persona": "creator",
+            "use_case": "가격 알림과 결제 전 검수를 쓰고 싶습니다.",
+            "feature_priorities": ["가격 알림", "공유 리포트"],
+            "source": "launch-room-test",
+        },
+    )
+    assert intent.status_code == 200
+
+    room = client.get("/public/launch-room?limit=6", headers=workspace)
+    assert room.status_code == 200
+    payload = room.json()
+    assert payload["room_version"] == "specpilot.public_launch_room.v1"
+    assert payload["workspace_id"].startswith("workspace_")
+    assert payload["headline"]
+    assert payload["primary_cta_path"] == "/#analysis"
+    assert payload["proof_strip"]
+    assert len(payload["demo_cards"]) >= 3
+    demo_keys = {card["key"] for card in payload["demo_cards"]}
+    assert "creator-qhd-desktop" in demo_keys
+    launch_keys = {card["key"] for card in payload["launch_cards"]}
+    assert {
+        "proof_hub",
+        "acquisition_hub",
+        "launch_pulse",
+        "referral_waitlist",
+        "pricing_interest",
+    } <= launch_keys
+    assert {item["path"] for item in payload["market_links"]} == {
+        "/market/desktop-pc",
+        "/market/laptop",
+    }
+    assert payload["secondary_ctas"]
+    assert payload["channel_posts"]
+    assert payload["next_actions"]
+
+
 def test_growth_retention_hub_prioritizes_reengagement_loops() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-retention-{uuid4().hex}"}
     analysis = client.post(

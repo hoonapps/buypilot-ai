@@ -67,6 +67,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 프라이버시/데이터 거버넌스: 공개 개인정보 정책, 워크스페이스별 데이터 인벤토리, 보존 기간, 원문 연락처 표면을 출시 게이트에 반영
 - 공개 Trust Center: 추천 공정성, 출처 검수, 개인정보 최소화, 사람 검수 기준과 구매자 권리/위험 고지를 한 응답으로 공개
 - 공개 검증 허브: Trust Center, 시장 리포트, 공유 조회, 피드백, CTA 실험, 공개 유입 표면을 proof 카드와 출시 proof strip으로 집계
+- 공개 런칭룸: 데모 갤러리, 시장 리포트, proof strip, 유입/반응/추천/수익화 CTA를 외부 공유용 출시 페이지 패키지로 집계
 - SQLite 기반 분석 결과 저장
 - 저장 리포트 조회와 가격 알림 구독
 - 저장 리포트 공개 공유 링크 생성과 공개 리포트 페이지
@@ -273,6 +274,13 @@ curl http://127.0.0.1:8000/policy/trust-center
 
 ```bash
 curl http://127.0.0.1:8000/public/proof-hub \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
+공개 런칭룸:
+
+```bash
+curl http://127.0.0.1:8000/public/launch-room \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
@@ -1185,6 +1193,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/policy/privacy`: 저장 데이터 범위, 마스킹, 보존 기간, 사용자 제어, 금지 데이터를 공개 정책으로 반환
 - `/policy/trust-center`: 추천 공정성, 출처 검수, 개인정보 최소화, 사람 검수 게이트, 구매자 권리, 위험 고지, 다음 액션을 공개 신뢰 대시보드로 반환
 - `/public/proof-hub`: Trust Center, 공개 시장 리포트, 공유 조회, 피드백, 출시 CTA 실험, 공개 유입 표면을 공개 proof 카드, hero proof strip, evidence kit, 반박 답변으로 집계
+- `/public/launch-room`: 데모 갤러리, 공개 시장 리포트, proof strip, 유입 허브, 런치 Pulse, 추천 대기열, 요금제 관심을 외부 공유용 런칭룸 카드로 집계
 - `/ops/data-governance`: 워크스페이스별 테이블 인벤토리, 원문 연락처 표면, 마스킹 표면, 보존 초과 액션을 집계
 - `share_token`, `shared_at`, `share_views`: 저장 리포트 공개 공유 상태
 - `/reports/{report_id}/share-assets`: 공개 리포트 URL, 구매 판정, 최종 후보, 검토 질문을 조합해 카카오톡/커뮤니티/블로그 공유 문구와 OG 메타를 생성
