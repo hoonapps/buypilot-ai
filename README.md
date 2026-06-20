@@ -52,6 +52,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 공개 카테고리 리포트: 월간 데스크톱 PC/노트북 리포트를 SEO 제목, 공유 문구, CTA와 함께 API 키 없이 공개 발행
 - 구매 온보딩 플레이북: 데스크톱/노트북/팀 구매 상황별 시작 질문, 필수 입력 슬롯, 검수 게이트, 분석 CTA를 공개 API로 제공
 - 공개 구매 실패 방지 체크리스트: 카테고리, 예산, 구매자 상황별 필수 확인 항목, 위험 신호, 결제 전 증거 캡처, 분석 prefill을 공개 lead magnet으로 제공
+- 공개 구매 성향 진단 퀴즈: 30초 질문으로 구매 persona, 추천 카테고리/예산, 분석 prefill, 체크리스트 경로, 공유 문구를 제공
 - 첫 구매 진단 콘시어지: 입력 조건을 즉시 진단해 맞춤 온보딩 플레이북, 누락 질문, 분석/공유/검수 다음 행동으로 연결
 - 성장 퍼널: 분석 결과 조회, 추천 카드 클릭, 대안 시나리오 클릭, 공유/알림/구독 CTA를 이벤트로 저장하고 출시 게이트에 반응 지표로 반영
 - 공개 유입 허브: 데모, SEO 카테고리 리포트, 공유 리포트, 추천 대기열, Trust Center, 요금제 관심을 표면별 준비도와 채널 액션으로 집계
@@ -185,6 +186,24 @@ curl "http://127.0.0.1:8000/public/onboarding/playbooks?category=laptop"
 
 ```bash
 curl "http://127.0.0.1:8000/public/buyer-checklist?category=desktop_pc&budget_krw=2200000&persona=creator_gamer"
+```
+
+공개 구매 성향 진단 퀴즈는 네 가지 질문으로 방문자의 구매 persona를 분류하고, 추천 카테고리/예산, 분석 prefill, 체크리스트 경로, 공유 문구를 반환합니다.
+
+```bash
+curl http://127.0.0.1:8000/public/buyer-persona-quiz
+
+curl -X POST http://127.0.0.1:8000/public/buyer-persona-quiz/result \
+  -H "Content-Type: application/json" \
+  -d '{
+    "answers": [
+      {"question_id": "use_case", "option_id": "team_refresh"},
+      {"question_id": "priority", "option_id": "approval_delay"},
+      {"question_id": "timing", "option_id": "rollout_schedule"},
+      {"question_id": "budget", "option_id": "budget_team"}
+    ],
+    "source": "launch_page"
+  }'
 ```
 
 첫 구매 진단 콘시어지는 현재 입력값을 진단하고 가장 가까운 플레이북, 누락 질문, 분석 실행, 공유/가격 대기, 결제 전 검수 다음 행동을 한 응답으로 반환합니다.
@@ -1274,6 +1293,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/public/market/category-reports/{category}`: 데스크톱 PC/노트북 월간 카테고리 리포트를 SEO 제목, canonical path, 공유 문구, CTA 카드와 함께 공개 조회
 - `/public/onboarding/playbooks`: 데스크톱 PC, 휴대형 노트북, 팀 구매자용 시작 질문, 예산 힌트, 필수 입력 슬롯, 신뢰 검수 게이트, 분석 CTA를 공개 조회
 - `/public/buyer-checklist`: 카테고리/예산/구매자 상황별 구매 실패 방지 체크리스트, 결제 전 증거, 위험 신호, 분석 prefill을 공개 조회
+- `/public/buyer-persona-quiz`, `/public/buyer-persona-quiz/result`: 공개 30초 구매 성향 진단 질문과 persona별 추천 카테고리/예산, 분석 prefill, 체크리스트 경로, 공유 문구 조회
 - `/reports/completion-templates`, `/reports/completion-recipient-groups`, `/reports/completion-preview`, `/reports/completion-batches`, `/reports/completion-engagement`, `/reports/completion-provider-events`, `/reports/completion-deliveries/provider-webhooks`, `/t/o/{tracking_token}.png`, `/t/c/{tracking_token}`: 완료 리포트 템플릿, 수신자 그룹, unsubscribe 제외, 발송 전 렌더링 미리보기, batch와 개별 delivery 성공/실패/재시도/열람/클릭/반송/신고/수신 제외 상태, provider 삽입용 공개 추적 픽셀/클릭 리다이렉트
 - `purchase_outcomes`, `completed_purchase_outcomes`, `purchase_conversion_rate`, `average_final_price_delta_krw`, `purchase_outcome_value_krw`: 실제 구매 결과와 최종 결제 금액 차이를 보는 운영 지표
 - `/ops/learning-insights`: 실제 구매 결과, 결제 전 검수 차단, 만족도 피드백을 제품별 전환율, 반품률, 가격 차이, 개선 액션으로 집계

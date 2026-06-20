@@ -32,6 +32,8 @@ from specpilot_ai.core.models import (
     BetaLead,
     BetaLeadRequest,
     BetaReadinessDashboard,
+    BuyerPersonaQuizRequest,
+    BuyerPersonaQuizResult,
     Category,
     CategoryMarketReport,
     CheckoutReview,
@@ -84,6 +86,7 @@ from specpilot_ai.core.models import (
     ProductBrief,
     PublicAcquisitionHub,
     PublicBuyerChecklist,
+    PublicBuyerPersonaQuiz,
     PublicCategoryMarketReport,
     PublicConversionBoard,
     PublicLaunchRoom,
@@ -149,6 +152,10 @@ from specpilot_ai.core.models import (
 from specpilot_ai.graph.neo4j_client import Neo4jRepository
 from specpilot_ai.graph.product_graph import pc_purchase_graph_schema
 from specpilot_ai.services.buyer_checklist import build_public_buyer_checklist
+from specpilot_ai.services.buyer_persona_quiz import (
+    build_public_buyer_persona_quiz,
+    score_buyer_persona_quiz,
+)
 from specpilot_ai.services.demo_gallery import build_demo_scenario_gallery
 from specpilot_ai.services.intake import diagnose_intake
 from specpilot_ai.services.launch_campaign import (
@@ -1103,6 +1110,18 @@ def public_buyer_checklist(
         budget_krw=budget_krw,
         persona=persona,
     )
+
+
+@app.get("/public/buyer-persona-quiz", response_model=PublicBuyerPersonaQuiz)
+def public_buyer_persona_quiz() -> PublicBuyerPersonaQuiz:
+    return build_public_buyer_persona_quiz()
+
+
+@app.post("/public/buyer-persona-quiz/result", response_model=BuyerPersonaQuizResult)
+def public_buyer_persona_quiz_result(
+    request: BuyerPersonaQuizRequest,
+) -> BuyerPersonaQuizResult:
+    return score_buyer_persona_quiz(request)
 
 
 @app.get("/public/proof-hub", response_model=PublicProofHub)

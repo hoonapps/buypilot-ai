@@ -372,6 +372,51 @@ def test_public_buyer_checklist_turns_budget_and_category_into_lead_magnet() -> 
     assert default_checklist.json()["category"] == "desktop_pc"
 
 
+def test_public_buyer_persona_quiz_recommends_path_and_prefill() -> None:
+    quiz = client.get("/public/buyer-persona-quiz")
+
+    assert quiz.status_code == 200
+    quiz_payload = quiz.json()
+    assert quiz_payload["quiz_version"] == "specpilot.public_buyer_persona_quiz.v1"
+    assert quiz_payload["headline"]
+    assert quiz_payload["summary"]
+    assert quiz_payload["result_endpoint"] == "/public/buyer-persona-quiz/result"
+    assert len(quiz_payload["questions"]) >= 4
+    assert all(question["options"] for question in quiz_payload["questions"])
+
+    result = client.post(
+        "/public/buyer-persona-quiz/result",
+        json={
+            "answers": [
+                {"question_id": "use_case", "option_id": "team_refresh"},
+                {"question_id": "priority", "option_id": "approval_delay"},
+                {"question_id": "timing", "option_id": "rollout_schedule"},
+                {"question_id": "budget", "option_id": "budget_team"},
+            ],
+            "source": "pytest",
+        },
+    )
+
+    assert result.status_code == 200
+    payload = result.json()
+    assert payload["result_version"] == "specpilot.buyer_persona_quiz_result.v1"
+    assert payload["persona_id"] == "team_buyer"
+    assert payload["category"] == "laptop"
+    assert payload["recommended_plan_id"] == "team"
+    assert payload["recommended_budget_krw"] == 1_500_000
+    assert payload["confidence_score"] >= 80
+    assert "팀" in payload["analysis_prefill"]
+    assert payload["checklist_path"].startswith("/public/buyer-checklist")
+    assert payload["primary_cta_path"] == "#analysis"
+    assert payload["proof_points"]
+    assert "SpecPilot AI 구매 성향 진단 결과" in payload["share_copy"]
+    assert payload["next_actions"]
+
+    default_result = client.post("/public/buyer-persona-quiz/result", json={})
+    assert default_result.status_code == 200
+    assert default_result.json()["persona_id"] == "creator_gamer"
+
+
 def test_growth_funnel_tracks_product_reaction_events() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-growth-{uuid4().hex}"}
     other_workspace = {"X-SpecPilot-Key": f"pytest-growth-other-{uuid4().hex}"}

@@ -1186,6 +1186,59 @@ class PublicBuyerChecklist(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class BuyerPersonaQuizOption(BaseModel):
+    option_id: str
+    label: str
+    description: str
+
+
+class BuyerPersonaQuizQuestion(BaseModel):
+    question_id: str
+    title: str
+    helper: str
+    options: list[BuyerPersonaQuizOption] = Field(default_factory=list)
+
+
+class PublicBuyerPersonaQuiz(BaseModel):
+    quiz_version: str = "specpilot.public_buyer_persona_quiz.v1"
+    generated_at: str
+    headline: str
+    summary: str
+    questions: list[BuyerPersonaQuizQuestion] = Field(default_factory=list)
+    result_endpoint: str = "/public/buyer-persona-quiz/result"
+    next_actions: list[str] = Field(default_factory=list)
+
+
+class BuyerPersonaQuizAnswer(BaseModel):
+    question_id: str
+    option_id: str
+
+
+class BuyerPersonaQuizRequest(BaseModel):
+    answers: list[BuyerPersonaQuizAnswer] = Field(default_factory=list)
+    source: str = "web"
+
+
+class BuyerPersonaQuizResult(BaseModel):
+    result_version: str = "specpilot.buyer_persona_quiz_result.v1"
+    generated_at: str
+    persona_id: str
+    persona_label: str
+    category: Category
+    recommended_plan_id: str
+    recommended_budget_krw: int
+    confidence_score: float = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    analysis_prefill: str
+    checklist_path: str
+    primary_cta_label: str
+    primary_cta_path: str
+    proof_points: list[str] = Field(default_factory=list)
+    share_copy: str
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class StartConciergeMilestone(BaseModel):
     step: str
     title: str
