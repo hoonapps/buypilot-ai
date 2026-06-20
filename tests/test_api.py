@@ -452,6 +452,33 @@ def test_trust_policy_endpoint_exposes_cache_and_fairness_rules() -> None:
     assert payload["source_assessments"]
 
 
+def test_growth_launch_kit_exposes_campaign_copy_and_measurement_plan() -> None:
+    response = client.get("/growth/launch-kit?category=laptop&audience=team_buyer")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kit_version"] == "specpilot.launch_kit.v1"
+    assert payload["category"] == "laptop"
+    assert payload["audience"] == "team_buyer"
+    assert "무료 AI 구매 리포트" in payload["offer"]
+    assert payload["primary_cta_path"] == "/#analysis"
+    assert len(payload["proof_points"]) >= 4
+    assert len(payload["target_segments"]) >= 3
+    assert {item["channel"] for item in payload["channel_playbooks"]} >= {
+        "community",
+        "seo",
+        "referral",
+    }
+    community = next(
+        item for item in payload["channel_playbooks"] if item["channel"] == "community"
+    )
+    assert community["copy_variants"]
+    assert any("리포트" in variant["body"] for variant in community["copy_variants"])
+    assert any("Trust Center" in item for item in payload["launch_checklist"])
+    assert payload["risk_disclosures"]
+    assert "추천 만족도와 구매 의향률" in payload["measurement_plan"]
+
+
 def test_privacy_policy_endpoint_exposes_retention_and_controls() -> None:
     response = client.get("/policy/privacy")
 

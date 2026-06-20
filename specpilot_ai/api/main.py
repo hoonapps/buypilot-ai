@@ -59,6 +59,7 @@ from specpilot_ai.core.models import (
     IntegrationProvider,
     IntegrationProviderRequest,
     IntegrationReadinessDashboard,
+    LaunchCampaignKit,
     LaunchGateDashboard,
     ObservabilityDispatchRequest,
     ObservabilityDispatchResponse,
@@ -124,6 +125,7 @@ from specpilot_ai.core.models import (
 from specpilot_ai.graph.neo4j_client import Neo4jRepository
 from specpilot_ai.graph.product_graph import pc_purchase_graph_schema
 from specpilot_ai.services.intake import diagnose_intake
+from specpilot_ai.services.launch_campaign import build_launch_campaign_kit
 from specpilot_ai.services.market import build_category_market_report
 from specpilot_ai.services.onboarding import purchase_onboarding_playbooks
 from specpilot_ai.services.trust import build_privacy_policy, build_trust_center, build_trust_policy
@@ -1247,6 +1249,14 @@ def waitlist_referral_dashboard(
         workspace.workspace_id,
         limit=limit,
     )
+
+
+@app.get("/growth/launch-kit", response_model=LaunchCampaignKit)
+def growth_launch_kit(
+    category: Category | None = None,
+    audience: str = "creator",
+) -> LaunchCampaignKit:
+    return build_launch_campaign_kit(category=category, audience=audience)
 
 
 @app.get("/beta/readiness", response_model=BetaReadinessDashboard)

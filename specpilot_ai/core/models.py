@@ -972,6 +972,45 @@ class GrowthFunnelDashboard(BaseModel):
     recent_events: list[GrowthEventRecord] = Field(default_factory=list)
 
 
+class LaunchCopyVariant(BaseModel):
+    variant_id: str
+    channel: str
+    headline: str
+    body: str
+    cta_label: str
+    cta_path: str
+    tracking_event: GrowthEventType = GrowthEventType.share_cta
+
+
+class LaunchChannelPlaybook(BaseModel):
+    channel: str
+    audience: str
+    angle: str
+    post_timing: str
+    copy_variants: list[LaunchCopyVariant] = Field(default_factory=list)
+    checklist: list[str] = Field(default_factory=list)
+    success_metric: str
+
+
+class LaunchCampaignKit(BaseModel):
+    kit_version: str = "specpilot.launch_kit.v1"
+    generated_at: str
+    category: Category | None = None
+    audience: str
+    offer: str
+    positioning: str
+    hero_message: str
+    primary_cta: str
+    primary_cta_path: str
+    proof_points: list[str] = Field(default_factory=list)
+    target_segments: list[str] = Field(default_factory=list)
+    channel_playbooks: list[LaunchChannelPlaybook] = Field(default_factory=list)
+    cta_experiments: list[str] = Field(default_factory=list)
+    launch_checklist: list[str] = Field(default_factory=list)
+    risk_disclosures: list[str] = Field(default_factory=list)
+    measurement_plan: list[str] = Field(default_factory=list)
+
+
 class BetaCohortRequest(BaseModel):
     name: str = Field(min_length=2)
     scenario: str = Field(min_length=2)

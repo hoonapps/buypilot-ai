@@ -52,6 +52,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 구매 온보딩 플레이북: 데스크톱/노트북/팀 구매 상황별 시작 질문, 필수 입력 슬롯, 검수 게이트, 분석 CTA를 공개 API로 제공
 - 성장 퍼널: 분석 결과 조회, 추천 카드 클릭, 대안 시나리오 클릭, 공유/알림/구독 CTA를 이벤트로 저장하고 출시 게이트에 반응 지표로 반영
 - 추천 대기열: 가입자별 추천 코드와 공유 URL을 발급하고 추천 유입, 우선순위 점수, 리더보드로 공개 전 확산 루프를 검증
+- 출시 캠페인 키트: 커뮤니티/검색/추천 채널별 공개 베타 카피, CTA 실험, 출시 체크리스트, 위험 고지, 측정 계획 생성
 - 출처 신뢰도, 캐시 만료 기준, 제휴 고지 정책
 - Agent trace 조회와 SQLite span 저장
 - Observability export outbox: trace span과 품질 감사 payload를 OpenTelemetry/LangSmith 연동 전 큐로 저장하고 dispatch/retry 상태 추적
@@ -836,6 +837,12 @@ curl http://127.0.0.1:8000/growth/referral-dashboard \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
+출시 캠페인 키트:
+
+```bash
+curl 'http://127.0.0.1:8000/growth/launch-kit?category=desktop_pc&audience=creator'
+```
+
 분석 품질/비용 감사:
 
 ```bash
@@ -1078,6 +1085,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/ops/learning-insights`: 실제 구매 결과, 결제 전 검수 차단, 만족도 피드백을 제품별 전환율, 반품률, 가격 차이, 개선 액션으로 집계
 - `/growth/events`, `/growth/funnel`: 추천 카드, 대안 시나리오, 공유 리포트, 가격 알림, 요금제 CTA 반응을 저장하고 단계별 전환율과 다음 액션을 집계
 - `/growth/waitlist-referrals`, `/growth/referral-dashboard`: 추천 대기열 가입, 추천 코드/공유 URL, 추천 유입 수, 우선순위 점수, 리더보드를 워크스페이스별로 집계
+- `/growth/launch-kit`: 공개 베타 채널별 카피, CTA 실험, 출시 체크리스트, 위험 고지, 측정 계획을 반환
 - `/beta/launch-gate`: readiness, 품질 회귀, 학습 인사이트, 백로그 SLA, 전환/성장/발송/외부 연동/데이터 거버넌스 운영 상태를 공개 go/no-go 판정과 필수 액션으로 집계
 - `feedback_count`, `average_satisfaction`, `purchase_intent_rate`: 추천 결과가 실제 구매 판단으로 이어지는지 보는 운영 지표
 - `beta_leads`: 베타 신청 리드 수
