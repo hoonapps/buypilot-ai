@@ -98,6 +98,7 @@ from specpilot_ai.core.models import (
     PurchaseOutcomeRequest,
     PurchaseStartConcierge,
     QualityDashboard,
+    ReferralShareKit,
     ReportAdvisorAnswer,
     ReportAdvisorQuestionRequest,
     ReportShare,
@@ -1416,6 +1417,20 @@ def waitlist_referral_dashboard(
         workspace.workspace_id,
         limit=limit,
     )
+
+
+@app.get("/growth/referral-share-kit/{referral_code}", response_model=ReferralShareKit)
+def referral_share_kit(
+    referral_code: str,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> ReferralShareKit:
+    kit = _store().referral_share_kit_for_workspace(
+        workspace.workspace_id,
+        referral_code,
+    )
+    if kit is None:
+        raise HTTPException(status_code=404, detail="Referral code not found")
+    return kit
 
 
 @app.get("/growth/launch-kit", response_model=LaunchCampaignKit)

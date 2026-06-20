@@ -105,6 +105,8 @@ from specpilot_ai.core.models import (
     PurchaseOutcomeStatus,
     QualityDashboard,
     ReferralLeaderboardItem,
+    ReferralShareKit,
+    ReferralShareKitVariant,
     ReportAdvisorAnswer,
     ReportAdvisorQuestionRequest,
     ReportShare,
@@ -3575,6 +3577,56 @@ class SpecPilotStore:
             top_referrers=top_referrers,
             latest_referrals=latest,
             next_actions=_waitlist_referral_next_actions(int(total or 0), share_rate_hint),
+        )
+
+    def referral_share_kit_for_workspace(
+        self,
+        workspace_id: str,
+        referral_code: str,
+    ) -> ReferralShareKit | None:
+        code = referral_code.strip().upper()
+        if not code:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT wr.*,
+                    (
+                        SELECT COUNT(*)
+                        FROM waitlist_referrals child
+                        WHERE child.workspace_id = wr.workspace_id
+                          AND child.referred_by_code = wr.referral_code
+                    ) AS referred_signup_count
+                FROM waitlist_referrals wr
+                WHERE wr.workspace_id = ? AND wr.referral_code = ?
+                LIMIT 1
+                """,
+                (workspace_id, code),
+            ).fetchone()
+        if row is None:
+            return None
+        referral = _waitlist_referral_from_row(row)
+        referral_url = self._referral_url(referral.referral_code)
+        variants = _referral_share_kit_variants(
+            referral=referral,
+            referral_url=referral_url,
+        )
+        return ReferralShareKit(
+            workspace_id=workspace_id,
+            referral_code=referral.referral_code,
+            referral_url=referral_url,
+            generated_at=_now(),
+            headline="컴퓨터·노트북 구매 실패를 줄이는 AI 리포트 초대",
+            subheadline=(
+                "지인에게 바로 보낼 수 있는 추천 링크와 채널별 문구를 제공합니다."
+            ),
+            hashtags=["SpecPilotAI", "컴퓨터구매", "노트북추천", "AI구매리포트"],
+            variants=variants,
+            next_actions=[
+                "가장 가까운 구매 예정자 3명에게 개인 초대 문구를 먼저 보내세요.",
+                "커뮤니티에는 예산, 용도, 구매 시점이 보이는 문구로 반응을 확인하세요.",
+                "추천 유입이 생기면 상위 추천자에게 우선 초대나 팀 구매 인터뷰를 제안하세요.",
+            ],
         )
 
     def create_subscription_intent_for_workspace(
@@ -9111,6 +9163,71 @@ def _waitlist_referral_next_actions(total: int, share_rate_hint: float) -> list[
         actions.append("추천 코드 공유 문구와 혜택 메시지를 A/B 테스트하세요.")
     actions.append("상위 추천자에게 우선 초대와 팀 구매 인터뷰를 제안하세요.")
     return actions[:3]
+
+
+def _referral_share_kit_variants(
+    referral: WaitlistReferral,
+    referral_url: str,
+) -> list[ReferralShareKitVariant]:
+    social_proof = (
+        f"현재 내 추천 코드로 {referral.referred_signup_count}명이 합류했습니다."
+        if referral.referred_signup_count
+        else "지금 등록하면 본인 추천 코드도 바로 받을 수 있습니다."
+    )
+    return [
+        ReferralShareKitVariant(
+            channel="kakao",
+            label="카카오톡",
+            headline="컴퓨터·노트북 구매 전에 AI 리포트 먼저 받아보세요",
+            body=(
+                "예산과 용도만 넣으면 후보 비교, 가격 대기, 결제 전 체크리스트를 "
+                "한 번에 정리해주는 공개 베타 초대입니다."
+            ),
+            cta="초대 링크 열기",
+            copy_text=(
+                "컴퓨터나 노트북 살 때 모델이 너무 많으면 이거 써보세요.\n"
+                "SpecPilot AI가 예산·용도 기준으로 후보 비교와 구매 전 확인점을 정리해줍니다.\n"
+                f"{social_proof}\n"
+                f"{referral_url}"
+            ),
+        ),
+        ReferralShareKitVariant(
+            channel="community",
+            label="커뮤니티",
+            headline="PC/노트북 구매 조건을 AI 리포트로 검토하는 공개 베타",
+            body=(
+                "최저가만 고르는 대신 호환성, 리뷰 리스크, 구매 타이밍, 결제 전 검수까지 "
+                "같이 보는 구매 의사결정 도구입니다."
+            ),
+            cta="무료 리포트 대기열 등록",
+            copy_text=(
+                "[공개 베타 초대]\n"
+                "컴퓨터 견적이나 노트북을 고를 때 예산, 용도, 제외 조건을 넣으면 "
+                "후보 비교표와 구매 타이밍, 결제 전 체크리스트를 리포트로 만들어주는 "
+                "SpecPilot AI입니다.\n"
+                f"추천 코드: {referral.referral_code}\n"
+                f"대기열 링크: {referral_url}"
+            ),
+        ),
+        ReferralShareKitVariant(
+            channel="email",
+            label="이메일",
+            headline="SpecPilot AI 공개 베타 초대",
+            body=(
+                "컴퓨터와 노트북 구매 결정을 빠르게 검토할 수 있도록 AI 구매 리포트 "
+                "대기열 링크를 전달합니다."
+            ),
+            cta="공개 베타 대기열 등록",
+            copy_text=(
+                "안녕하세요.\n\n"
+                "컴퓨터 또는 노트북 구매 전에 예산, 용도, 필수 조건을 기준으로 "
+                "후보와 리스크를 정리해주는 SpecPilot AI 공개 베타를 공유드립니다.\n\n"
+                "추천 링크에서 대기열에 등록하면 본인 추천 코드도 발급됩니다.\n"
+                f"{referral_url}\n\n"
+                f"추천 코드: {referral.referral_code}"
+            ),
+        ),
+    ]
 
 
 def _default_channel_name(channel: str) -> str:

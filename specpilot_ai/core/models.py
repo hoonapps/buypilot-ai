@@ -780,6 +780,28 @@ class WaitlistReferralDashboard(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class ReferralShareKitVariant(BaseModel):
+    channel: str
+    label: str
+    headline: str
+    body: str
+    cta: str
+    copy_text: str
+
+
+class ReferralShareKit(BaseModel):
+    kit_version: str = "specpilot.referral_share_kit.v1"
+    workspace_id: str
+    referral_code: str
+    referral_url: str
+    generated_at: str
+    headline: str
+    subheadline: str
+    hashtags: list[str] = Field(default_factory=list)
+    variants: list[ReferralShareKitVariant] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PricingPlan(BaseModel):
     plan_id: str
     name: str

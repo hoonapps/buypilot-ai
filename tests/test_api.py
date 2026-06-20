@@ -462,6 +462,32 @@ def test_waitlist_referrals_create_share_loop_and_dashboard() -> None:
     assert dashboard_payload["top_referrers"][0]["referral_code"] == first_payload["referral_code"]
     assert dashboard_payload["next_actions"]
 
+    share_kit = client.get(
+        f"/growth/referral-share-kit/{first_payload['referral_code']}",
+        headers=workspace,
+    )
+    assert share_kit.status_code == 200
+    share_kit_payload = share_kit.json()
+    assert share_kit_payload["kit_version"] == "specpilot.referral_share_kit.v1"
+    assert share_kit_payload["referral_code"] == first_payload["referral_code"]
+    assert share_kit_payload["referral_url"].endswith(first_payload["referral_code"])
+    assert {variant["channel"] for variant in share_kit_payload["variants"]} == {
+        "kakao",
+        "community",
+        "email",
+    }
+    assert all(
+        share_kit_payload["referral_url"] in variant["copy_text"]
+        for variant in share_kit_payload["variants"]
+    )
+    assert share_kit_payload["next_actions"]
+
+    isolated_kit = client.get(
+        f"/growth/referral-share-kit/{first_payload['referral_code']}",
+        headers=other_workspace,
+    )
+    assert isolated_kit.status_code == 404
+
     isolated = client.get("/growth/referral-dashboard", headers=other_workspace)
     assert isolated.status_code == 200
     assert isolated.json()["total_referrals"] == 0
