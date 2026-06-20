@@ -590,6 +590,58 @@ def test_public_spec_risk_scanner_checks_checkout_options_before_purchase() -> N
     assert hold_payload["next_actions"]
 
 
+def test_public_candidate_compare_exposes_top_candidates_and_scenarios() -> None:
+    response = client.get(
+        "/public/candidate-compare"
+        "?category=desktop_pc&budget_krw=2200000&purpose=qhd_creator"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["compare_version"] == "specpilot.public_candidate_compare.v1"
+    assert payload["category"] == "desktop_pc"
+    assert payload["budget_krw"] == 2_200_000
+    assert payload["purpose"] == "qhd_creator"
+    assert "후보" in payload["headline"]
+    assert payload["winner_product_id"]
+    assert payload["winner_reason"]
+    assert len(payload["items"]) >= 4
+    first = payload["items"][0]
+    assert first["product_id"] == payload["winner_product_id"]
+    assert first["score"] >= payload["items"][-1]["score"]
+    assert first["effective_price_krw"] > 0
+    assert first["option_summary"]
+    assert first["reasons"]
+    assert first["watchouts"]
+    assert first["evidence"]
+    assert {axis["axis_id"] for axis in payload["axes"]} >= {
+        "winner",
+        "budget",
+        "performance",
+        "risk",
+    }
+    assert {scenario["scenario"] for scenario in payload["scenarios"]} == {
+        "balanced",
+        "budget",
+        "performance",
+        "safe",
+    }
+    assert "TOP 3" in payload["analysis_prefill"]
+    assert "SpecPilot AI 공개 후보 비교" in payload["share_copy"]
+    assert payload["primary_cta_path"] == "#analysis"
+    assert payload["next_actions"]
+
+    laptop = client.get(
+        "/public/candidate-compare"
+        "?category=laptop&budget_krw=2000000&purpose=portable_creator"
+    )
+    assert laptop.status_code == 200
+    laptop_payload = laptop.json()
+    assert laptop_payload["category"] == "laptop"
+    assert any(item["category"] == "laptop" for item in laptop_payload["items"])
+    assert "노트북" in laptop_payload["analysis_prefill"]
+
+
 def test_growth_funnel_tracks_product_reaction_events() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-growth-{uuid4().hex}"}
     other_workspace = {"X-SpecPilot-Key": f"pytest-growth-other-{uuid4().hex}"}

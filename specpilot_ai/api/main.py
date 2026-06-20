@@ -90,6 +90,7 @@ from specpilot_ai.core.models import (
     PublicBuyerChallengeKit,
     PublicBuyerChecklist,
     PublicBuyerPersonaQuiz,
+    PublicCandidateCompare,
     PublicCategoryMarketReport,
     PublicConversionBoard,
     PublicLaunchRoom,
@@ -164,6 +165,7 @@ from specpilot_ai.services.buyer_persona_quiz import (
     build_public_buyer_persona_quiz,
     score_buyer_persona_quiz,
 )
+from specpilot_ai.services.candidate_compare import build_public_candidate_compare
 from specpilot_ai.services.demo_gallery import build_demo_scenario_gallery
 from specpilot_ai.services.intake import diagnose_intake
 from specpilot_ai.services.launch_campaign import (
@@ -1181,6 +1183,19 @@ def public_spec_risk_scanner_result(
     request: SpecRiskScannerRequest,
 ) -> SpecRiskScannerResult:
     return scan_spec_risk(request)
+
+
+@app.get("/public/candidate-compare", response_model=PublicCandidateCompare)
+def public_candidate_compare(
+    category: Category | None = None,
+    budget_krw: int | None = None,
+    purpose: str = "qhd_creator",
+) -> PublicCandidateCompare:
+    return build_public_candidate_compare(
+        category=category,
+        budget_krw=budget_krw,
+        purpose=purpose,
+    )
 
 
 @app.get("/public/proof-hub", response_model=PublicProofHub)

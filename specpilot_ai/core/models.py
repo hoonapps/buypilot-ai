@@ -1393,6 +1393,59 @@ class SpecRiskScannerResult(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class CandidateCompareItem(BaseModel):
+    product_id: str
+    model_name: str
+    category: Category
+    role_label: str
+    effective_price_krw: int
+    price_gap_krw: int
+    score: float = Field(ge=0, le=100)
+    status: CheckStatus
+    option_summary: str
+    fit_summary: str
+    reasons: list[str] = Field(default_factory=list)
+    watchouts: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    cta_label: str = "이 후보로 분석"
+
+
+class CandidateCompareAxis(BaseModel):
+    axis_id: str
+    label: str
+    winner_product_id: str | None = None
+    summary: str
+
+
+class CandidateCompareScenario(BaseModel):
+    scenario: str
+    label: str
+    product_id: str
+    model_name: str
+    why: str
+    tradeoff: str
+
+
+class PublicCandidateCompare(BaseModel):
+    compare_version: str = "specpilot.public_candidate_compare.v1"
+    generated_at: str
+    category: Category
+    budget_krw: int
+    purpose: str
+    headline: str
+    summary: str
+    winner_product_id: str | None = None
+    winner_reason: str
+    items: list[CandidateCompareItem] = Field(default_factory=list)
+    axes: list[CandidateCompareAxis] = Field(default_factory=list)
+    scenarios: list[CandidateCompareScenario] = Field(default_factory=list)
+    analysis_prefill: str
+    share_copy: str
+    primary_cta_label: str = "이 비교표로 분석 시작"
+    primary_cta_path: str = "#analysis"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class StartConciergeMilestone(BaseModel):
     step: str
     title: str
