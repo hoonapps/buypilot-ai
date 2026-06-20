@@ -93,6 +93,7 @@ from specpilot_ai.core.models import (
     PublicCandidateCompare,
     PublicCategoryMarketReport,
     PublicConversionBoard,
+    PublicDealTimingWindow,
     PublicLaunchRoom,
     PublicLaunchRoomCard,
     PublicLaunchRoomMarketLink,
@@ -166,6 +167,7 @@ from specpilot_ai.services.buyer_persona_quiz import (
     score_buyer_persona_quiz,
 )
 from specpilot_ai.services.candidate_compare import build_public_candidate_compare
+from specpilot_ai.services.deal_timing import build_public_deal_timing_window
 from specpilot_ai.services.demo_gallery import build_demo_scenario_gallery
 from specpilot_ai.services.intake import diagnose_intake
 from specpilot_ai.services.launch_campaign import (
@@ -1192,6 +1194,19 @@ def public_candidate_compare(
     purpose: str = "qhd_creator",
 ) -> PublicCandidateCompare:
     return build_public_candidate_compare(
+        category=category,
+        budget_krw=budget_krw,
+        purpose=purpose,
+    )
+
+
+@app.get("/public/deal-timing-window", response_model=PublicDealTimingWindow)
+def public_deal_timing_window(
+    category: Category | None = None,
+    budget_krw: int | None = None,
+    purpose: str = "qhd_creator",
+) -> PublicDealTimingWindow:
+    return build_public_deal_timing_window(
         category=category,
         budget_krw=budget_krw,
         purpose=purpose,

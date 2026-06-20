@@ -1446,6 +1446,28 @@ class PublicCandidateCompare(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class PublicDealTimingWindow(BaseModel):
+    timing_version: str = "specpilot.public_deal_timing_window.v1"
+    generated_at: str
+    category: Category
+    budget_krw: int
+    purpose: str
+    headline: str
+    summary: str
+    lead_product_id: str | None = None
+    lead_label: str
+    buy_now_count: int = 0
+    wait_count: int = 0
+    hold_count: int = 0
+    target_savings_krw: int = 0
+    windows: list[ProductDealWindow] = Field(default_factory=list)
+    analysis_prefill: str
+    share_copy: str
+    primary_cta_label: str = "타이밍 조건으로 분석 시작"
+    primary_cta_path: str = "#analysis"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class StartConciergeMilestone(BaseModel):
     step: str
     title: str

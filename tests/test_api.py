@@ -642,6 +642,53 @@ def test_public_candidate_compare_exposes_top_candidates_and_scenarios() -> None
     assert "노트북" in laptop_payload["analysis_prefill"]
 
 
+def test_public_deal_timing_window_separates_buy_now_and_wait() -> None:
+    response = client.get(
+        "/public/deal-timing-window"
+        "?category=desktop_pc&budget_krw=2200000&purpose=qhd_creator"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["timing_version"] == "specpilot.public_deal_timing_window.v1"
+    assert payload["category"] == "desktop_pc"
+    assert payload["budget_krw"] == 2_200_000
+    assert payload["purpose"] == "qhd_creator"
+    assert "결제" in payload["headline"]
+    assert payload["lead_product_id"]
+    assert payload["lead_label"]
+    assert payload["buy_now_count"] >= 1
+    assert payload["wait_count"] >= 1
+    assert payload["hold_count"] >= 1
+    assert payload["target_savings_krw"] > 0
+    assert len(payload["windows"]) >= 5
+    first = payload["windows"][0]
+    assert first["product_id"]
+    assert first["current_price_krw"] > 0
+    assert first["target_price_krw"] > 0
+    assert first["current_price_krw"] >= first["target_price_krw"]
+    assert "원" in first["fair_price_band_krw"]
+    assert first["urgency"]
+    assert first["volatility_risk"]
+    assert first["wait_reason"]
+    assert first["buy_trigger"]
+    assert first["monitoring_plan"]
+    assert "목표가" in payload["analysis_prefill"]
+    assert "SpecPilot AI 공개 구매 타이밍" in payload["share_copy"]
+    assert payload["primary_cta_path"] == "#analysis"
+    assert payload["next_actions"]
+
+    laptop = client.get(
+        "/public/deal-timing-window"
+        "?category=laptop&budget_krw=2000000&purpose=portable_creator"
+    )
+    assert laptop.status_code == 200
+    laptop_payload = laptop.json()
+    assert laptop_payload["category"] == "laptop"
+    assert any(window["product_id"].startswith("laptop-") for window in laptop_payload["windows"])
+    assert "노트북" in laptop_payload["analysis_prefill"]
+
+
 def test_growth_funnel_tracks_product_reaction_events() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-growth-{uuid4().hex}"}
     other_workspace = {"X-SpecPilot-Key": f"pytest-growth-other-{uuid4().hex}"}
