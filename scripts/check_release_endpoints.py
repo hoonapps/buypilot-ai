@@ -143,6 +143,21 @@ CHECKS = (
             "share_copy",
         ),
     ),
+    SmokeCheck(
+        name="public-purchase-aftercare-kit",
+        method="POST",
+        path="/public/purchase-aftercare-kit",
+        required_keys=(
+            "kit_version",
+            "priority",
+            "return_deadline",
+            "warranty_deadline",
+            "deadlines",
+            "outcome_prefill",
+            "messages",
+            "share_copy",
+        ),
+    ),
 )
 
 
@@ -577,6 +592,20 @@ def run_smoke() -> list[dict[str, Any]]:
                 "risk_terms": ["FreeDOS"],
                 "missing_evidence": ["배송 예정일", "반품 조건", "AS 조건"],
                 "must_confirm": ["실제 출고 사양"],
+                "source": "release_smoke",
+            }
+        if check.name == "public-purchase-aftercare-kit":
+            json_body = {
+                "category": "desktop_pc",
+                "product_title": "Creator RTX 4070 SUPER Build",
+                "seller_name": "release-smoke-seller",
+                "purchase_date": "2026-06-01",
+                "delivered_date": "2026-06-03",
+                "final_paid_price_krw": 2_185_000,
+                "expected_price_krw": 2_200_000,
+                "return_window_days": 7,
+                "warranty_months": 12,
+                "issues": [],
                 "source": "release_smoke",
             }
         response = client.request(check.method, check.path, headers=headers, json=json_body)

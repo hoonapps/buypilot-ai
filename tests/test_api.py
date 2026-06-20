@@ -956,6 +956,72 @@ def test_public_seller_evidence_kit_builds_questions_and_scores_answer() -> None
     assert any("판매자 답변" in item for item in answered_payload["evidence_checklist"])
 
 
+def test_public_purchase_aftercare_kit_closes_return_and_outcome_loop() -> None:
+    response = client.post(
+        "/public/purchase-aftercare-kit",
+        json={
+            "category": "desktop_pc",
+            "product_title": "Creator RTX 4070 SUPER Build",
+            "seller_name": "PC Mall",
+            "purchase_date": "2026-06-01",
+            "delivered_date": "2026-06-03",
+            "final_paid_price_krw": 2_185_000,
+            "expected_price_krw": 2_200_000,
+            "return_window_days": 7,
+            "warranty_months": 12,
+            "order_reference": "ORD-123456",
+            "issues": [],
+            "source": "pytest",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kit_version"] == "specpilot.public_purchase_aftercare_kit.v1"
+    assert payload["category"] == "desktop_pc"
+    assert payload["return_deadline"] == "2026-06-10"
+    assert payload["warranty_deadline"] == "2027-06-01"
+    assert payload["price_delta_krw"] == -15_000
+    assert {deadline["deadline_id"] for deadline in payload["deadlines"]} == {
+        "return_window",
+        "warranty_end",
+        "outcome_capture",
+    }
+    assert "주문번호 마스킹값" in payload["capture_checklist"]
+    assert "구매 결과 상태=purchased" in payload["outcome_prefill"]
+    assert {message["channel"] for message in payload["messages"]} == {
+        "self",
+        "seller",
+        "team",
+    }
+    assert "SpecPilot AI 구매 후 케어" in payload["share_copy"]
+    assert "구매 후 케어" in payload["analysis_prefill"]
+    assert payload["primary_cta_path"] == "#analysis"
+    assert payload["next_actions"]
+
+    defect = client.post(
+        "/public/purchase-aftercare-kit",
+        json={
+            "category": "laptop",
+            "product_title": "CreatorBook 16",
+            "seller_name": "Laptop Store",
+            "purchase_date": "2026-06-01",
+            "delivered_date": "2026-06-19",
+            "final_paid_price_krw": 1_780_000,
+            "expected_price_krw": 1_650_000,
+            "return_window_days": 7,
+            "warranty_months": 12,
+            "issues": ["화면 불량", "RAM 옵션 상이"],
+        },
+    )
+    assert defect.status_code == 200
+    defect_payload = defect.json()
+    assert defect_payload["priority"] == "blocker"
+    assert any("초기 불량" in item for item in defect_payload["issue_triage"])
+    assert "구매 결과 상태=returned" in defect_payload["outcome_prefill"]
+    assert any("반품 또는 교환" in action for action in defect_payload["next_actions"])
+
+
 def test_public_checkout_nudge_kit_turns_cart_check_into_followup_plan() -> None:
     hold = client.post(
         "/public/checkout-nudge-kit",

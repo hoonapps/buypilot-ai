@@ -1838,6 +1838,61 @@ class PublicSellerEvidenceKit(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class PurchaseAftercareRequest(BaseModel):
+    category: Category = Category.desktop_pc
+    product_title: str = "구매한 제품"
+    seller_name: str = "판매자"
+    purchase_date: str = ""
+    delivered_date: str = ""
+    final_paid_price_krw: int | None = Field(default=None, ge=0, le=30_000_000)
+    expected_price_krw: int | None = Field(default=None, ge=0, le=30_000_000)
+    return_window_days: int = Field(default=7, ge=0, le=365)
+    warranty_months: int = Field(default=12, ge=0, le=120)
+    order_reference: str = ""
+    issues: list[str] = Field(default_factory=list)
+    source: str = "web"
+
+
+class AftercareDeadline(BaseModel):
+    deadline_id: str
+    label: str
+    status: CheckStatus
+    due_date: str
+    action: str
+    reminder_copy: str
+
+
+class AftercareMessage(BaseModel):
+    channel: str
+    label: str
+    copy_text: str
+    cta_label: str
+
+
+class PublicPurchaseAftercareKit(BaseModel):
+    kit_version: str = "specpilot.public_purchase_aftercare_kit.v1"
+    generated_at: str
+    category: Category
+    product_title: str
+    seller_name: str
+    priority: CheckStatus
+    headline: str
+    summary: str
+    return_deadline: str
+    warranty_deadline: str
+    price_delta_krw: int | None = None
+    deadlines: list[AftercareDeadline] = Field(default_factory=list)
+    capture_checklist: list[str] = Field(default_factory=list)
+    issue_triage: list[str] = Field(default_factory=list)
+    outcome_prefill: str
+    messages: list[AftercareMessage] = Field(default_factory=list)
+    analysis_prefill: str
+    share_copy: str
+    primary_cta_label: str = "구매 결과로 분석 시작"
+    primary_cta_path: str = "#analysis"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class CheckoutNudgeRequest(BaseModel):
     category: Category = Category.desktop_pc
     product_title: str = "구매 후보"

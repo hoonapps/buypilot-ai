@@ -62,6 +62,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 공개 후보 비교 스냅샷: 데스크톱/노트북 후보 5개를 가격, 목적 적합도, 리뷰 신뢰, 구매 안정성으로 정렬하고 예산/성능/안전 우선 대안 시나리오를 제공
 - 공개 구매 타이밍 윈도우: 후보별 현재가, 목표가, 적정가 밴드, 변동 리스크, 결제 트리거를 공개 화면에서 즉시 결제/가격 대기로 분리
 - 공개 목표가 감시 키트: 구매 타이밍 결과를 알림 기준가, 감시 주기, 알림 문구, 결제 판단 규칙, 대체 행동으로 변환
+- 공개 구매 후 케어 키트: 구매일, 배송완료일, 최종 결제 금액, 이슈를 받아 반품/교환 마감, 보증 만료, 초기 불량 대응, 구매 결과 기록 prefill을 제공
 - 첫 구매 진단 콘시어지: 입력 조건을 즉시 진단해 맞춤 온보딩 플레이북, 누락 질문, 분석/공유/검수 다음 행동으로 연결
 - 성장 퍼널: 분석 결과 조회, 추천 카드 클릭, 대안 시나리오 클릭, 공유/알림/구독 CTA를 이벤트로 저장하고 출시 게이트에 반응 지표로 반영
 - 공개 유입 허브: 데모, SEO 카테고리 리포트, 공유 리포트, 추천 대기열, Trust Center, 요금제 관심을 표면별 준비도와 채널 액션으로 집계
@@ -372,6 +373,26 @@ curl -X POST http://127.0.0.1:8000/public/checkout-nudge-kit \
     "blocker_count": 1,
     "warning_count": 2,
     "missing_evidence": ["판매자 답변", "반품 조건"]
+  }'
+```
+
+공개 구매 후 케어 키트는 결제 이후 반품/교환 마감, 보증 만료, 초기 불량 증거, 구매 결과 기록을 한 번에 닫습니다.
+
+```bash
+curl -X POST http://127.0.0.1:8000/public/purchase-aftercare-kit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "category": "desktop_pc",
+    "product_title": "Creator RTX 4070 SUPER Build",
+    "seller_name": "PC Mall",
+    "purchase_date": "2026-06-01",
+    "delivered_date": "2026-06-03",
+    "final_paid_price_krw": 2185000,
+    "expected_price_krw": 2200000,
+    "return_window_days": 7,
+    "warranty_months": 12,
+    "order_reference": "ORD-123456",
+    "issues": []
   }'
 ```
 
@@ -1601,6 +1622,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/public/purchase-approval-brief-kit`: 공개 장바구니 검수 결과를 가족/팀/커뮤니티용 승인 질문, 찬성/반대 투표 옵션, 채널별 복사 문구, 분석 prefill로 변환
 - `/public/seller-evidence-kit`: 공개 판매자 확인 질문, 복사용 문의 문구, 답변 판정 기준, 캡처 체크리스트, 구매 승인 prefill 조회
 - `/public/checkout-nudge-kit`: 공개 장바구니 검수 결과를 후속 알림 문구, 다음 행동, 판매자 답변/가격 재확인/구매 결과 회수 단계, 분석 prefill, 대기열 prefill로 변환
+- `/public/purchase-aftercare-kit`: 공개 구매일/배송완료일/최종 결제 금액/이슈를 반품·교환 마감, 보증 만료, 초기 불량 대응, 구매 결과 기록 prefill, 채널별 후속 문구로 변환
 - `/public/spec-rescue-kit`: 공개 장바구니 보류/확인 필요 결과를 예산 내 대체 후보 3개, 판매자 확인 메시지, 검색 문구, 분석 prefill, 공유 문구로 변환
 - `/public/candidate-compare`: 공개 후보 5개 비교표, 비교 축별 승자, 예산/성능/안전 우선 대안 시나리오, 분석 prefill, 공유 문구 조회
 - `/public/deal-timing-window`: 공개 후보별 현재가, 목표가, 적정가 밴드, 재고/쿠폰 변동 리스크, 결제 트리거, 목표가 알림용 공유 문구 조회
