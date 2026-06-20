@@ -91,6 +91,7 @@ from specpilot_ai.core.models import (
     OperationsMetrics,
     OpsLearningDashboard,
     OpsRegressionDashboard,
+    OwnershipCostRequest,
     PriceAlertPlan,
     PricingDashboard,
     PricingPlan,
@@ -117,6 +118,7 @@ from specpilot_ai.core.models import (
     PublicLaunchSmokeDashboard,
     PublicListingDecoderKit,
     PublicMistakeCostCalculator,
+    PublicOwnershipCostKit,
     PublicPriceWatchKit,
     PublicProofHub,
     PublicPurchaseAftercareKit,
@@ -217,6 +219,7 @@ from specpilot_ai.services.mistake_cost import (
     estimate_mistake_cost,
 )
 from specpilot_ai.services.onboarding import purchase_onboarding_playbooks
+from specpilot_ai.services.ownership_cost import build_public_ownership_cost_kit
 from specpilot_ai.services.price_watch import build_public_price_watch_kit
 from specpilot_ai.services.purchase_aftercare import build_public_purchase_aftercare_kit
 from specpilot_ai.services.purchase_approval import build_public_purchase_approval_brief_kit
@@ -1317,6 +1320,16 @@ def public_upgrade_readiness_kit(
     request: UpgradeReadinessRequest,
 ) -> PublicUpgradeReadinessKit:
     return build_public_upgrade_readiness_kit(request)
+
+
+@app.post(
+    "/public/ownership-cost-kit",
+    response_model=PublicOwnershipCostKit,
+)
+def public_ownership_cost_kit(
+    request: OwnershipCostRequest,
+) -> PublicOwnershipCostKit:
+    return build_public_ownership_cost_kit(request)
 
 
 @app.post(

@@ -2005,6 +2005,61 @@ class PublicUpgradeReadinessKit(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class OwnershipCostRequest(BaseModel):
+    category: Category = Category.desktop_pc
+    product_title: str = "구매 후보"
+    purchase_price_krw: int = Field(default=2_000_000, ge=0, le=50_000_000)
+    expected_years: int = Field(default=3, ge=1, le=8)
+    resale_rate_percent: int | None = Field(default=None, ge=0, le=100)
+    yearly_maintenance_krw: int = Field(default=0, ge=0, le=10_000_000)
+    planned_upgrade_cost_krw: int = Field(default=0, ge=0, le=30_000_000)
+    warranty_months: int = Field(default=12, ge=0, le=120)
+    downtime_days: int = Field(default=0, ge=0, le=365)
+    daily_value_krw: int = Field(default=0, ge=0, le=5_000_000)
+    brand_resale_signal: str = ""
+    condition_risks: list[str] = Field(default_factory=list)
+    source: str = "web"
+
+
+class OwnershipCostLine(BaseModel):
+    line_id: str
+    label: str
+    amount_krw: int
+    explanation: str
+
+
+class OwnershipCostScenario(BaseModel):
+    scenario_id: str
+    label: str
+    resale_value_krw: int
+    net_cost_krw: int
+    monthly_cost_krw: int
+    status: CheckStatus
+
+
+class PublicOwnershipCostKit(BaseModel):
+    kit_version: str = "specpilot.public_ownership_cost_kit.v1"
+    generated_at: str
+    category: Category
+    product_title: str
+    priority: CheckStatus
+    ownership_score: int = Field(ge=0, le=100)
+    expected_resale_value_krw: int
+    net_cost_krw: int
+    monthly_cost_krw: int
+    headline: str
+    summary: str
+    cost_lines: list[OwnershipCostLine] = Field(default_factory=list)
+    scenarios: list[OwnershipCostScenario] = Field(default_factory=list)
+    risk_flags: list[str] = Field(default_factory=list)
+    seller_questions: list[str] = Field(default_factory=list)
+    analysis_prefill: str
+    share_copy: str
+    primary_cta_label: str = "총소유비용으로 분석 시작"
+    primary_cta_path: str = "#analysis"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class CheckoutNudgeRequest(BaseModel):
     category: Category = Category.desktop_pc
     product_title: str = "구매 후보"

@@ -188,6 +188,22 @@ CHECKS = (
             "share_copy",
         ),
     ),
+    SmokeCheck(
+        name="public-ownership-cost-kit",
+        method="POST",
+        path="/public/ownership-cost-kit",
+        required_keys=(
+            "kit_version",
+            "priority",
+            "ownership_score",
+            "expected_resale_value_krw",
+            "net_cost_krw",
+            "monthly_cost_krw",
+            "cost_lines",
+            "scenarios",
+            "share_copy",
+        ),
+    ),
 )
 
 
@@ -670,6 +686,22 @@ def run_smoke() -> list[dict[str, Any]]:
                 "planned_upgrades": ["RAM 64GB", "SSD 2TB", "GPU 교체"],
                 "constraints": ["QHD 144Hz 유지"],
                 "budget_krw": 2_200_000,
+                "source": "release_smoke",
+            }
+        if check.name == "public-ownership-cost-kit":
+            json_body = {
+                "category": "desktop_pc",
+                "product_title": "Creator RTX 4070 SUPER Build",
+                "purchase_price_krw": 2_185_000,
+                "expected_years": 3,
+                "resale_rate_percent": 35,
+                "yearly_maintenance_krw": 60_000,
+                "planned_upgrade_cost_krw": 180_000,
+                "warranty_months": 24,
+                "downtime_days": 1,
+                "daily_value_krw": 120_000,
+                "brand_resale_signal": "medium",
+                "condition_risks": [],
                 "source": "release_smoke",
             }
         response = client.request(check.method, check.path, headers=headers, json=json_body)

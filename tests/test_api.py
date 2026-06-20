@@ -1160,6 +1160,73 @@ def test_public_upgrade_readiness_kit_scores_long_term_upgrade_room() -> None:
     assert any("결제를 보류" in action for action in blocked_payload["next_actions"])
 
 
+def test_public_ownership_cost_kit_estimates_resale_and_monthly_cost() -> None:
+    response = client.post(
+        "/public/ownership-cost-kit",
+        json={
+            "category": "desktop_pc",
+            "product_title": "Creator RTX 4070 SUPER Build",
+            "purchase_price_krw": 2_185_000,
+            "expected_years": 3,
+            "resale_rate_percent": 35,
+            "yearly_maintenance_krw": 60_000,
+            "planned_upgrade_cost_krw": 180_000,
+            "warranty_months": 24,
+            "downtime_days": 1,
+            "daily_value_krw": 120_000,
+            "brand_resale_signal": "medium",
+            "condition_risks": [],
+            "source": "pytest",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kit_version"] == "specpilot.public_ownership_cost_kit.v1"
+    assert payload["category"] == "desktop_pc"
+    assert payload["expected_resale_value_krw"] == 764_750
+    assert payload["net_cost_krw"] == 1_900_250
+    assert payload["monthly_cost_krw"] == 52_785
+    assert {line["line_id"] for line in payload["cost_lines"]} == {
+        "purchase_price",
+        "maintenance",
+        "planned_upgrade",
+        "downtime",
+        "resale_value",
+    }
+    assert {scenario["scenario_id"] for scenario in payload["scenarios"]} == {
+        "conservative",
+        "expected",
+        "optimistic",
+    }
+    assert "총소유비용" in payload["analysis_prefill"]
+    assert "SpecPilot AI 총소유비용 검수" in payload["share_copy"]
+    assert payload["primary_cta_path"] == "#analysis"
+
+    risky = client.post(
+        "/public/ownership-cost-kit",
+        json={
+            "category": "laptop",
+            "product_title": "Unknown Slim Laptop",
+            "purchase_price_krw": 1_700_000,
+            "expected_years": 4,
+            "resale_rate_percent": 18,
+            "yearly_maintenance_krw": 150_000,
+            "planned_upgrade_cost_krw": 450_000,
+            "warranty_months": 6,
+            "downtime_days": 5,
+            "daily_value_krw": 180_000,
+            "brand_resale_signal": "low",
+            "condition_risks": ["해외 병행", "보증 없음"],
+        },
+    )
+    assert risky.status_code == 200
+    risky_payload = risky.json()
+    assert risky_payload["priority"] == "blocker"
+    assert risky_payload["ownership_score"] < 60
+    assert any("결제를 보류" in action for action in risky_payload["next_actions"])
+
+
 def test_public_checkout_nudge_kit_turns_cart_check_into_followup_plan() -> None:
     hold = client.post(
         "/public/checkout-nudge-kit",
