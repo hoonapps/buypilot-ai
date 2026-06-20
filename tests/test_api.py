@@ -826,6 +826,54 @@ def test_intake_diagnosis_returns_questions_and_normalized_request() -> None:
     assert "출처 없는 가격" in strong_payload["normalized_request"]["exclusions"]
 
 
+def test_public_start_concierge_combines_intake_and_playbook() -> None:
+    weak = client.post(
+        "/public/start-concierge",
+        json={
+            "query": "PC 추천",
+            "category": "desktop_pc",
+            "budget_krw": None,
+            "purpose": "",
+            "must_haves": [],
+            "exclusions": [],
+        },
+    )
+
+    assert weak.status_code == 200
+    weak_payload = weak.json()
+    assert weak_payload["concierge_version"] == "specpilot.start_concierge.v1"
+    assert weak_payload["category"] == "desktop_pc"
+    assert weak_payload["readiness_score"] == weak_payload["diagnosis"]["readiness_score"]
+    assert weak_payload["matched_playbook"]["category"] == "desktop_pc"
+    assert weak_payload["primary_action"]["action_type"] == "complete_intake"
+    assert any(
+        item["status"] == "blocker" for item in weak_payload["milestones"]
+    )
+    assert weak_payload["quick_actions"]
+    assert weak_payload["proof_points"]
+
+    strong = client.post(
+        "/public/start-concierge",
+        json={
+            "query": "출장이 많은 영상 편집자용 노트북을 골라줘. 2kg 이하, 32GB RAM, GPU 가속",
+            "category": "laptop",
+            "budget_krw": 2_200_000,
+            "purpose": "출장 편집, Premiere Pro",
+            "must_haves": ["2kg 이하", "32GB RAM", "외장 GPU"],
+            "exclusions": ["중고", "리퍼", "발열 반복 불만"],
+        },
+    )
+
+    assert strong.status_code == 200
+    strong_payload = strong.json()
+    assert strong_payload["category"] == "laptop"
+    assert strong_payload["readiness_score"] >= 78
+    assert strong_payload["primary_action"]["action_type"] == "run_analysis"
+    assert strong_payload["matched_playbook"]["playbook_id"] == "portable-creator-laptop"
+    assert strong_payload["diagnosis"]["normalized_request"]["category"] == "laptop"
+    assert any(action["target"] == "#trust-center" for action in strong_payload["quick_actions"])
+
+
 def test_purchase_decision_board_tracks_saved_report_next_actions() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-board-{uuid4().hex}"}
     other_workspace = {"X-SpecPilot-Key": f"pytest-board-other-{uuid4().hex}"}

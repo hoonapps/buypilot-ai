@@ -51,6 +51,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 월간 카테고리 리포트: 데스크톱 PC/노트북 후보를 가격대, 추천 역할, 리스크, 워크스페이스 구매 신호로 묶어 공개 콘텐츠와 수익화 검증에 사용
 - 공개 카테고리 리포트: 월간 데스크톱 PC/노트북 리포트를 SEO 제목, 공유 문구, CTA와 함께 API 키 없이 공개 발행
 - 구매 온보딩 플레이북: 데스크톱/노트북/팀 구매 상황별 시작 질문, 필수 입력 슬롯, 검수 게이트, 분석 CTA를 공개 API로 제공
+- 첫 구매 진단 콘시어지: 입력 조건을 즉시 진단해 맞춤 온보딩 플레이북, 누락 질문, 분석/공유/검수 다음 행동으로 연결
 - 성장 퍼널: 분석 결과 조회, 추천 카드 클릭, 대안 시나리오 클릭, 공유/알림/구독 CTA를 이벤트로 저장하고 출시 게이트에 반응 지표로 반영
 - 공개 유입 허브: 데모, SEO 카테고리 리포트, 공유 리포트, 추천 대기열, Trust Center, 요금제 관심을 표면별 준비도와 채널 액션으로 집계
 - 추천 대기열: 가입자별 추천 코드와 공유 URL을 발급하고 추천 유입, 우선순위 점수, 리더보드로 공개 전 확산 루프를 검증
@@ -161,6 +162,21 @@ curl http://127.0.0.1:8000/me \
 
 ```bash
 curl "http://127.0.0.1:8000/public/onboarding/playbooks?category=laptop"
+```
+
+첫 구매 진단 콘시어지는 현재 입력값을 진단하고 가장 가까운 플레이북, 누락 질문, 분석 실행, 공유/가격 대기, 결제 전 검수 다음 행동을 한 응답으로 반환합니다.
+
+```bash
+curl -X POST http://127.0.0.1:8000/public/start-concierge \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "출장이 많은 영상 편집자용 노트북을 골라줘. 2kg 이하, 32GB RAM, GPU 가속",
+    "category": "laptop",
+    "budget_krw": 2200000,
+    "purpose": "출장 편집, Premiere Pro",
+    "must_haves": ["2kg 이하", "32GB RAM", "외장 GPU"],
+    "exclusions": ["중고", "리퍼", "발열 반복 불만"]
+  }'
 ```
 
 ### 공개 데모 갤러리
@@ -1081,6 +1097,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/intake/diagnose.readiness_score`: 분석 준비도 점수
 - `/intake/diagnose.clarifying_questions`: 분석 전 되물어볼 핵심 질문
 - `/intake/diagnose.normalized_request`: 추천 조건을 보강한 분석 요청
+- `/public/start-concierge`: 입력 진단, 맞춤 온보딩 플레이북, 시작 마일스톤, 빠른 CTA를 묶은 첫 구매 경로
 - `/demo/scenarios`: 첫 방문자가 10초 안에 분석 폼을 채우는 공개 데모 갤러리, preset 요청, 기대 결과, 공유 포인트
 - `report.top_recommendations`: 최종 추천 TOP 3
 - `report.excluded_products`: 제외 후보 2개와 이유

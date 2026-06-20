@@ -85,6 +85,7 @@ from specpilot_ai.core.models import (
     PurchaseOnboardingPlaybook,
     PurchaseOutcome,
     PurchaseOutcomeRequest,
+    PurchaseStartConcierge,
     QualityDashboard,
     ReportAdvisorAnswer,
     ReportAdvisorQuestionRequest,
@@ -133,6 +134,7 @@ from specpilot_ai.services.intake import diagnose_intake
 from specpilot_ai.services.launch_campaign import build_launch_campaign_kit
 from specpilot_ai.services.market import build_category_market_report
 from specpilot_ai.services.onboarding import purchase_onboarding_playbooks
+from specpilot_ai.services.start_concierge import build_start_concierge
 from specpilot_ai.services.trust import build_privacy_policy, build_trust_center, build_trust_policy
 from specpilot_ai.sources.collector import SourceCollector
 from specpilot_ai.sources.url_ingestion import ingest_source_url
@@ -269,6 +271,13 @@ def categories() -> dict[str, list[str]]:
 @app.post("/intake/diagnose", response_model=IntakeDiagnosisResponse)
 def intake_diagnosis(request: IntakeDiagnosisRequest) -> IntakeDiagnosisResponse:
     return diagnose_intake(request)
+
+
+@app.post("/public/start-concierge", response_model=PurchaseStartConcierge)
+def public_start_concierge(
+    request: IntakeDiagnosisRequest,
+) -> PurchaseStartConcierge:
+    return build_start_concierge(request)
 
 
 @app.get("/graph/schema")

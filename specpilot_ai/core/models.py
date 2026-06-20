@@ -942,6 +942,36 @@ class PurchaseOnboardingPlaybook(BaseModel):
     cta_anchor: str = "#analysis"
 
 
+class StartConciergeMilestone(BaseModel):
+    step: str
+    title: str
+    status: CheckStatus
+    detail: str
+    next_action: str
+
+
+class StartConciergeAction(BaseModel):
+    label: str
+    target: str
+    action_type: str
+    reason: str
+
+
+class PurchaseStartConcierge(BaseModel):
+    concierge_version: str = "specpilot.start_concierge.v1"
+    category: Category
+    readiness_score: float = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    primary_action: StartConciergeAction
+    matched_playbook: PurchaseOnboardingPlaybook
+    diagnosis: IntakeDiagnosisResponse
+    milestones: list[StartConciergeMilestone] = Field(default_factory=list)
+    quick_actions: list[StartConciergeAction] = Field(default_factory=list)
+    proof_points: list[str] = Field(default_factory=list)
+    conversion_prompt: str
+
+
 class GrowthEventRequest(BaseModel):
     event_type: GrowthEventType
     trace_id: str | None = None
