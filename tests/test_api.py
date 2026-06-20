@@ -901,6 +901,61 @@ def test_public_purchase_approval_brief_kit_builds_shareable_vote_packet() -> No
     assert hold_payload["vote_options"][0]["option_id"] == "reject_or_compare"
 
 
+def test_public_seller_evidence_kit_builds_questions_and_scores_answer() -> None:
+    request_payload = {
+        "category": "desktop_pc",
+        "product_title": "Creator RTX 4070 SUPER Build",
+        "seller_name": "PC Mall",
+        "verdict": "verify",
+        "budget_krw": 2_200_000,
+        "cart_total_krw": 2_185_000,
+        "risk_terms": ["FreeDOS", "해외 병행"],
+        "missing_evidence": ["실제 출고 사양", "배송 예정일", "반품 조건", "AS 조건"],
+        "must_confirm": ["파워 용량", "BIOS 업데이트"],
+        "source": "pytest",
+    }
+    response = client.post("/public/seller-evidence-kit", json=request_payload)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kit_version"] == "specpilot.public_seller_evidence_kit.v1"
+    assert payload["category"] == "desktop_pc"
+    assert payload["seller_name"] == "PC Mall"
+    assert payload["priority"] == "blocker"
+    assert payload["answer_status"] == "warning"
+    assert "결제 보류" in payload["headline"]
+    assert "PC Mall" in payload["seller_message"]
+    assert "Creator RTX 4070 SUPER Build" in payload["seller_message"]
+    assert len(payload["questions"]) >= 5
+    assert any(question["question_id"] == "risk_terms" for question in payload["questions"])
+    assert any(rubric["rubric_id"] == "risk_exception" for rubric in payload["answer_rubric"])
+    assert "AS 조건" in payload["evidence_checklist"]
+    assert payload["approval_prefill"]["source"] == "seller_evidence"
+    assert payload["approval_prefill"]["verdict"] == "hold"
+    assert "판매자 답변" in payload["analysis_prefill"]
+    assert "SpecPilot AI 판매자 증거 요청" in payload["share_copy"]
+    assert payload["primary_cta_path"] == "#analysis"
+    assert any("결제를 보류" in action for action in payload["next_actions"])
+
+    answered = client.post(
+        "/public/seller-evidence-kit",
+        json={
+            **request_payload,
+            "risk_terms": [],
+            "answer_text": (
+                "실제 출고 사양은 Ryzen 7 7800X3D, RTX 4070 SUPER, RAM 32GB, "
+                "SSD 1TB로 동일합니다. 배송은 내일 출고 가능하고 반품 7일, "
+                "제조사 AS 1년 보증 가능합니다."
+            ),
+        },
+    )
+    assert answered.status_code == 200
+    answered_payload = answered.json()
+    assert answered_payload["answer_status"] == "ok"
+    assert answered_payload["approval_prefill"]["warning_count"] >= 0
+    assert any("판매자 답변" in item for item in answered_payload["evidence_checklist"])
+
+
 def test_public_checkout_nudge_kit_turns_cart_check_into_followup_plan() -> None:
     hold = client.post(
         "/public/checkout-nudge-kit",

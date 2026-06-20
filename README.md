@@ -340,6 +340,24 @@ curl -X POST http://127.0.0.1:8000/public/purchase-approval-brief-kit \
   }'
 ```
 
+공개 판매자 증거 요청 키트는 실제 출고 사양, 배송 예정일, 반품, AS, 리퍼/전시/해외/FreeDOS 조건을 판매자에게 물을 복사 문구와 답변 판정 기준을 만듭니다.
+
+```bash
+curl -X POST http://127.0.0.1:8000/public/seller-evidence-kit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "category": "desktop_pc",
+    "product_title": "Creator RTX 4070 SUPER Build",
+    "seller_name": "PC Mall",
+    "verdict": "verify",
+    "budget_krw": 2200000,
+    "cart_total_krw": 2185000,
+    "risk_terms": ["FreeDOS"],
+    "missing_evidence": ["배송 예정일", "반품 조건", "AS 조건"],
+    "must_confirm": ["실제 출고 사양", "파워 용량"]
+  }'
+```
+
 공개 결제 후속 넛지 키트는 장바구니 검수 결과를 받아 판매자 답변 요청, 목표가 재확인, 구매 결과 회수까지 이어지는 후속 알림 문구와 분석/대기열 prefill을 반환합니다.
 
 ```bash
@@ -1581,6 +1599,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/public/listing-decoder-kit`: 공개 쇼핑몰 상품명/옵션명에서 핵심 사양과 구매 조건 위험어를 구조화하고 검수 prefill, 판매자 질문, 공유 문구 조회
 - `/public/spec-risk-scanner`, `/public/spec-risk-scanner/result`: 공개 옵션/사양 빠른 검수 메타와 결제 전 예산 초과, CPU/GPU/RAM/SSD/OS 불일치, 배송/반품/AS 증거 누락 판정, 구매 세이프티 브리프, 판매자 질문, 승인 요약, 캡처 체크리스트 조회
 - `/public/purchase-approval-brief-kit`: 공개 장바구니 검수 결과를 가족/팀/커뮤니티용 승인 질문, 찬성/반대 투표 옵션, 채널별 복사 문구, 분석 prefill로 변환
+- `/public/seller-evidence-kit`: 공개 판매자 확인 질문, 복사용 문의 문구, 답변 판정 기준, 캡처 체크리스트, 구매 승인 prefill 조회
 - `/public/checkout-nudge-kit`: 공개 장바구니 검수 결과를 후속 알림 문구, 다음 행동, 판매자 답변/가격 재확인/구매 결과 회수 단계, 분석 prefill, 대기열 prefill로 변환
 - `/public/spec-rescue-kit`: 공개 장바구니 보류/확인 필요 결과를 예산 내 대체 후보 3개, 판매자 확인 메시지, 검색 문구, 분석 prefill, 공유 문구로 변환
 - `/public/candidate-compare`: 공개 후보 5개 비교표, 비교 축별 승자, 예산/성능/안전 우선 대안 시나리오, 분석 prefill, 공유 문구 조회

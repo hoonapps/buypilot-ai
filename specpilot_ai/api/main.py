@@ -121,6 +121,7 @@ from specpilot_ai.core.models import (
     PublicReferralLaunchKit,
     PublicReferralLeaderboard,
     PublicReport,
+    PublicSellerEvidenceKit,
     PublicSetupCompatibilityKit,
     PublicShoppingCartIntakeKit,
     PublicSocialProofWall,
@@ -150,6 +151,7 @@ from specpilot_ai.core.models import (
     SavedReportDetail,
     SavedReportSummary,
     SaveReportRequest,
+    SellerEvidenceRequest,
     SetupCompatibilityRequest,
     ShoppingCartIntakeRequest,
     SourceAdapterStatus,
@@ -210,6 +212,7 @@ from specpilot_ai.services.mistake_cost import (
 from specpilot_ai.services.onboarding import purchase_onboarding_playbooks
 from specpilot_ai.services.price_watch import build_public_price_watch_kit
 from specpilot_ai.services.purchase_approval import build_public_purchase_approval_brief_kit
+from specpilot_ai.services.seller_evidence import build_public_seller_evidence_kit
 from specpilot_ai.services.setup_compatibility import build_public_setup_compatibility_kit
 from specpilot_ai.services.shopping_cart_intake import build_public_shopping_cart_intake_kit
 from specpilot_ai.services.spec_rescue import build_public_spec_rescue_kit
@@ -1265,6 +1268,16 @@ def public_purchase_approval_brief_kit(
     request: PurchaseApprovalBriefRequest,
 ) -> PublicPurchaseApprovalBriefKit:
     return build_public_purchase_approval_brief_kit(request)
+
+
+@app.post(
+    "/public/seller-evidence-kit",
+    response_model=PublicSellerEvidenceKit,
+)
+def public_seller_evidence_kit(
+    request: SellerEvidenceRequest,
+) -> PublicSellerEvidenceKit:
+    return build_public_seller_evidence_kit(request)
 
 
 @app.post(

@@ -128,6 +128,21 @@ CHECKS = (
             "share_copy",
         ),
     ),
+    SmokeCheck(
+        name="public-seller-evidence-kit",
+        method="POST",
+        path="/public/seller-evidence-kit",
+        required_keys=(
+            "kit_version",
+            "priority",
+            "answer_status",
+            "seller_message",
+            "questions",
+            "answer_rubric",
+            "approval_prefill",
+            "share_copy",
+        ),
+    ),
 )
 
 
@@ -549,6 +564,19 @@ def run_smoke() -> list[dict[str, Any]]:
                 "missing_evidence": ["배송 예정일", "AS 조건"],
                 "audience": "family",
                 "decision_deadline": "오늘 결제 전",
+                "source": "release_smoke",
+            }
+        if check.name == "public-seller-evidence-kit":
+            json_body = {
+                "category": "desktop_pc",
+                "product_title": "Creator RTX 4070 SUPER Build",
+                "seller_name": "release-smoke-seller",
+                "verdict": "verify",
+                "budget_krw": 2_200_000,
+                "cart_total_krw": 2_185_000,
+                "risk_terms": ["FreeDOS"],
+                "missing_evidence": ["배송 예정일", "반품 조건", "AS 조건"],
+                "must_confirm": ["실제 출고 사양"],
                 "source": "release_smoke",
             }
         response = client.request(check.method, check.path, headers=headers, json=json_body)

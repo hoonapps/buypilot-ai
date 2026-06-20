@@ -1785,6 +1785,59 @@ class PublicPurchaseApprovalBriefKit(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class SellerEvidenceRequest(BaseModel):
+    category: Category = Category.desktop_pc
+    product_title: str = "구매 후보"
+    seller_name: str = "판매자"
+    verdict: str = "verify"
+    budget_krw: int = Field(default=2_200_000, ge=300_000, le=30_000_000)
+    cart_total_krw: int | None = Field(default=None, ge=0, le=30_000_000)
+    risk_terms: list[str] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
+    must_confirm: list[str] = Field(default_factory=list)
+    answer_text: str = ""
+    source: str = "web"
+
+
+class SellerEvidenceQuestion(BaseModel):
+    question_id: str
+    label: str
+    status: CheckStatus
+    question: str
+    required_answer: str
+    why_it_matters: str
+
+
+class SellerAnswerRubric(BaseModel):
+    rubric_id: str
+    label: str
+    status: CheckStatus
+    pass_signal: str
+    fail_signal: str
+
+
+class PublicSellerEvidenceKit(BaseModel):
+    kit_version: str = "specpilot.public_seller_evidence_kit.v1"
+    generated_at: str
+    category: Category
+    product_title: str
+    seller_name: str
+    priority: CheckStatus
+    answer_status: CheckStatus
+    headline: str
+    summary: str
+    seller_message: str
+    questions: list[SellerEvidenceQuestion] = Field(default_factory=list)
+    answer_rubric: list[SellerAnswerRubric] = Field(default_factory=list)
+    evidence_checklist: list[str] = Field(default_factory=list)
+    approval_prefill: PurchaseApprovalBriefRequest
+    analysis_prefill: str
+    share_copy: str
+    primary_cta_label: str = "판매자 답변으로 분석 시작"
+    primary_cta_path: str = "#analysis"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class CheckoutNudgeRequest(BaseModel):
     category: Category = Category.desktop_pc
     product_title: str = "구매 후보"
