@@ -83,6 +83,7 @@ from specpilot_ai.core.models import (
     ProductBrief,
     PublicAcquisitionHub,
     PublicCategoryMarketReport,
+    PublicConversionBoard,
     PublicLaunchRoom,
     PublicLaunchRoomCard,
     PublicLaunchRoomMarketLink,
@@ -1491,6 +1492,17 @@ def growth_acquisition_hub(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> PublicAcquisitionHub:
     return _store().public_acquisition_hub_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+
+
+@app.get("/growth/public-conversion-board", response_model=PublicConversionBoard)
+def growth_public_conversion_board(
+    limit: int = 12,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> PublicConversionBoard:
+    return _store().public_conversion_board_for_workspace(
         workspace.workspace_id,
         limit=limit,
     )

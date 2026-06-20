@@ -54,6 +54,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 첫 구매 진단 콘시어지: 입력 조건을 즉시 진단해 맞춤 온보딩 플레이북, 누락 질문, 분석/공유/검수 다음 행동으로 연결
 - 성장 퍼널: 분석 결과 조회, 추천 카드 클릭, 대안 시나리오 클릭, 공유/알림/구독 CTA를 이벤트로 저장하고 출시 게이트에 반응 지표로 반영
 - 공개 유입 허브: 데모, SEO 카테고리 리포트, 공유 리포트, 추천 대기열, Trust Center, 요금제 관심을 표면별 준비도와 채널 액션으로 집계
+- 공개 전환 보드: 유입 허브, 성장 퍼널, 런치 Pulse, 추천 대기열, 요금제 관심, readiness를 한 snapshot으로 묶어 출시 직후 채널 배정과 병목 액션을 결정
 - 리텐션 허브: 저장 리포트, 가격 알림, 공유 조회, 구매 상담, 구매 결과, 완료 리포트 반응을 재참여 점수와 플레이로 집계
 - 추천 대기열: 가입자별 추천 코드와 공유 URL을 발급하고 추천 유입, 우선순위 점수, 리더보드로 공개 전 확산 루프를 검증
 - 런치 반응 Pulse: 성장 이벤트, 만족도, 구매 의향, 추천 대기열, 요금제 관심, readiness를 합성해 공개 반응 온도와 다음 액션을 반환
@@ -887,6 +888,13 @@ curl http://127.0.0.1:8000/growth/acquisition-hub \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
+공개 전환 보드:
+
+```bash
+curl http://127.0.0.1:8000/growth/public-conversion-board \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
 리텐션 허브:
 
 ```bash
@@ -1217,6 +1225,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/ops/learning-insights`: 실제 구매 결과, 결제 전 검수 차단, 만족도 피드백을 제품별 전환율, 반품률, 가격 차이, 개선 액션으로 집계
 - `/growth/events`, `/growth/funnel`: 추천 카드, 대안 시나리오, 공유 리포트, 가격 알림, 요금제 CTA 반응을 저장하고 단계별 전환율과 다음 액션을 집계
 - `/growth/acquisition-hub`: 공개 데모, SEO 카테고리 리포트, 공유 리포트, 추천 대기열, Trust Center, 요금제 관심 표면의 준비도와 채널별 액션을 집계
+- `/growth/public-conversion-board`: 공개 유입 허브, 성장 퍼널, 런치 Pulse, 추천 대기열, 요금제 관심, readiness를 전환 점수, 단계별 병목, 우선 표면, 채널 액션으로 합성
 - `/growth/retention-hub`: 저장 리포트, 가격 알림, 공개 조회, 구매 상담, 구매 결과, 완료 리포트 engagement를 재참여 신호, 플레이, 다음 액션으로 집계
 - `/growth/waitlist-referrals`, `/growth/referral-dashboard`: 추천 대기열 가입, 추천 코드/공유 URL, `PUBLIC_SITE_URL` 기반 절대 초대 링크, 추천 유입 수, 우선순위 점수, 리더보드를 워크스페이스별로 집계
 - `/growth/launch-pulse`: 성장 이벤트, 피드백, 추천 대기열, 요금제 관심, readiness를 합성해 공개 반응 Pulse 점수와 다음 액션을 반환
@@ -1311,6 +1320,7 @@ make docker-build
 - `/ops/traces`, `/ops/traces/{trace_id}/spans`가 저장 trace와 단계별 span을 워크스페이스별로 반환하는지
 - `/ops/observability/exports`, `/ops/observability/dispatch`가 trace span과 품질 감사 payload를 outbox로 저장하고 dispatch/retry 상태를 워크스페이스별로 격리하는지
 - `/feedback`, `/beta/leads`, `/beta/readiness`, `/beta/launch-gate`, `/beta/cohorts`, `/beta/backlog`가 만족도, 베타 리드, 출시 준비도, 공개 go/no-go, cohort, 개선 백로그를 워크스페이스별로 격리하는지
+- `/growth/public-conversion-board`가 공개 유입, 활성화, 공유, 추천, 유료 수요, 안정성 단계를 워크스페이스별로 집계하고 격리하는지
 - `/beta/backlog/{backlog_id}`, `/beta/backlog/summary`, `/beta/cohorts/{cohort_id}/report`, `/beta/cohorts/{cohort_id}/report.md`가 백로그 SLA/완료 요약과 cohort export를 워크스페이스별로 처리하는지
 - `/ops/quality`가 품질 감사와 예상 비용을 워크스페이스별로 반환하는지
 - `/ops/regression`이 최근/이전 품질 구간, 비용 변화, provider 차단율을 워크스페이스별로 집계하는지

@@ -1308,6 +1308,31 @@ class PublicAcquisitionHub(BaseModel):
     recent_growth_events: list[GrowthEventRecord] = Field(default_factory=list)
 
 
+class PublicConversionStage(BaseModel):
+    key: str
+    label: str
+    status: CheckStatus
+    metric: str
+    insight: str
+    next_action: str
+
+
+class PublicConversionBoard(BaseModel):
+    board_version: str = "specpilot.public_conversion_board.v1"
+    workspace_id: str
+    generated_at: str
+    status: CheckStatus
+    conversion_score: float = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    metric_cards: dict[str, int | float | str] = Field(default_factory=dict)
+    stages: list[PublicConversionStage] = Field(default_factory=list)
+    priority_surfaces: list[PublicAcquisitionSurface] = Field(default_factory=list)
+    channel_actions: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+    recent_growth_events: list[GrowthEventRecord] = Field(default_factory=list)
+
+
 class RetentionSignal(BaseModel):
     key: str
     label: str

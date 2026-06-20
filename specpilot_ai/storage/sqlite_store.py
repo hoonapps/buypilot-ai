@@ -86,6 +86,8 @@ from specpilot_ai.core.models import (
     ProviderReviewStatus,
     PublicAcquisitionHub,
     PublicAcquisitionSurface,
+    PublicConversionBoard,
+    PublicConversionStage,
     PublicObjectionAnswer,
     PublicProofAsset,
     PublicProofEvidence,
@@ -3208,6 +3210,93 @@ class SpecPilotStore:
             channel_actions=_public_acquisition_channel_actions(surfaces),
             next_actions=_public_acquisition_next_actions(surfaces, growth, referrals),
             recent_growth_events=growth.recent_events,
+        )
+
+    def public_conversion_board_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 12,
+    ) -> PublicConversionBoard:
+        metrics = self.metrics_for_workspace(workspace_id)
+        growth = self.growth_funnel_for_workspace(workspace_id, limit=limit)
+        acquisition = self.public_acquisition_hub_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        pulse = self.launch_pulse_for_workspace(workspace_id, limit=limit)
+        referrals = self.waitlist_referral_dashboard_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        pricing = self.pricing_dashboard_for_workspace(workspace_id)
+        readiness = self.beta_readiness_for_workspace(workspace_id)
+        conversion_score = round(
+            pulse.pulse_score * 0.38
+            + acquisition.launch_score * 0.28
+            + readiness.launch_readiness_score * 0.18
+            + min(100.0, metrics.public_share_views * 4 + metrics.share_cta_clicks * 10)
+            * 0.08
+            + min(100.0, referrals.total_referrals * 12 + pricing.intent_count * 14)
+            * 0.08,
+            1,
+        )
+        status = _public_conversion_status(
+            conversion_score,
+            pulse.status,
+            acquisition.status,
+            readiness,
+        )
+        stages = _public_conversion_stages(
+            growth=growth,
+            acquisition=acquisition,
+            pulse=pulse,
+            referrals=referrals,
+            pricing=pricing,
+            readiness=readiness,
+            metrics=metrics,
+        )
+        return PublicConversionBoard(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            status=status,
+            conversion_score=conversion_score,
+            headline=_public_conversion_headline(status, conversion_score),
+            summary=_public_conversion_summary(
+                metrics=metrics,
+                growth=growth,
+                referrals=referrals,
+                pricing=pricing,
+                pulse=pulse,
+            ),
+            metric_cards={
+                "analysis_runs": metrics.analysis_runs,
+                "public_share_views": metrics.public_share_views,
+                "share_rate_percent": round(growth.share_rate * 100),
+                "referral_waitlist": referrals.total_referrals,
+                "pricing_intents": pricing.intent_count,
+                "estimated_mrr_krw": pricing.estimated_mrr_krw,
+                "pulse_score": pulse.pulse_score,
+                "readiness_score": readiness.launch_readiness_score,
+            },
+            stages=stages,
+            priority_surfaces=sorted(
+                acquisition.surfaces,
+                key=lambda surface: (
+                    _status_priority(surface.status),
+                    -surface.readiness_score,
+                ),
+            )[:4],
+            channel_actions=_public_conversion_channel_actions(
+                acquisition.channel_actions,
+                pulse.hot_surfaces,
+            ),
+            next_actions=_public_conversion_next_actions(
+                stages,
+                acquisition.next_actions,
+                pulse.top_actions,
+                growth.next_actions,
+            ),
+            recent_growth_events=growth.recent_events[:limit],
         )
 
     def retention_hub_for_workspace(
@@ -9659,6 +9748,180 @@ def _public_acquisition_next_actions(
             deduped.append(action)
     if not deduped:
         deduped.append("모든 공개 표면이 안정적입니다. 검색/커뮤니티 트래픽을 더 배정하세요.")
+    return deduped[:6]
+
+
+def _status_priority(status: CheckStatus) -> int:
+    if status == CheckStatus.blocker:
+        return 0
+    if status == CheckStatus.warning:
+        return 1
+    return 2
+
+
+def _public_conversion_status(
+    conversion_score: float,
+    pulse_status: CheckStatus,
+    acquisition_status: CheckStatus,
+    readiness: BetaReadinessDashboard,
+) -> CheckStatus:
+    if (
+        conversion_score < 35
+        or pulse_status == CheckStatus.blocker
+        or acquisition_status == CheckStatus.blocker
+        or readiness.launch_readiness_score < 35
+    ):
+        return CheckStatus.blocker
+    if (
+        conversion_score < 70
+        or pulse_status == CheckStatus.warning
+        or acquisition_status == CheckStatus.warning
+        or readiness.launch_readiness_score < 70
+    ):
+        return CheckStatus.warning
+    return CheckStatus.ok
+
+
+def _public_conversion_headline(status: CheckStatus, conversion_score: float) -> str:
+    if status == CheckStatus.ok:
+        return f"공개 전환 보드 {conversion_score}점, 유입 확대와 실험 배정이 가능합니다."
+    if status == CheckStatus.warning:
+        return f"공개 전환 보드 {conversion_score}점, 반응은 있으나 병목 보강이 필요합니다."
+    return f"공개 전환 보드 {conversion_score}점, 핵심 전환 표본을 먼저 확보해야 합니다."
+
+
+def _public_conversion_summary(
+    *,
+    metrics: OperationsMetrics,
+    growth: GrowthFunnelDashboard,
+    referrals: WaitlistReferralDashboard,
+    pricing: PricingDashboard,
+    pulse: LaunchPulseDashboard,
+) -> str:
+    return (
+        f"분석 {metrics.analysis_runs}건, 공개 조회 {metrics.public_share_views}회, "
+        f"공유 CTA {round(growth.share_rate * 100)}%, 추천 대기열 "
+        f"{referrals.total_referrals}명, 요금제 관심 {pricing.intent_count}건을 "
+        f"Pulse {pulse.pulse_score}점 기준으로 묶었습니다."
+    )
+
+
+def _public_conversion_stages(
+    *,
+    growth: GrowthFunnelDashboard,
+    acquisition: PublicAcquisitionHub,
+    pulse: LaunchPulseDashboard,
+    referrals: WaitlistReferralDashboard,
+    pricing: PricingDashboard,
+    readiness: BetaReadinessDashboard,
+    metrics: OperationsMetrics,
+) -> list[PublicConversionStage]:
+    activation_status = _pulse_rate_status(growth.activation_rate, 0.25, 0.55)
+    share_status = _pulse_rate_status(growth.share_rate, 0.12, 0.3)
+    referral_status = _pulse_count_status(referrals.total_referrals, 1, 5)
+    pricing_status = pricing.readiness_status
+    readiness_status = _launch_readiness_gate_status(readiness.launch_readiness_score)
+    return [
+        PublicConversionStage(
+            key="traffic",
+            label="공개 유입",
+            status=acquisition.status,
+            metric=f"{acquisition.launch_score}점 · 표면 {len(acquisition.surfaces)}개",
+            insight=acquisition.summary,
+            next_action=acquisition.next_actions[0]
+            if acquisition.next_actions
+            else "상위 공개 표면에 트래픽을 더 배정하세요.",
+        ),
+        PublicConversionStage(
+            key="activation",
+            label="첫 분석 활성화",
+            status=activation_status,
+            metric=f"추천 클릭률 {round(growth.activation_rate * 100)}%",
+            insight=f"성장 이벤트 {growth.total_events}건, 고유 trace {growth.unique_traces}개",
+            next_action="공개 데모 preset과 추천 카드 CTA를 첫 화면에서 계속 실험하세요.",
+        ),
+        PublicConversionStage(
+            key="sharing",
+            label="공유 리포트 확산",
+            status=share_status,
+            metric=f"공유 CTA {round(growth.share_rate * 100)}%",
+            insight=(
+                f"공유 리포트 {metrics.shared_reports}개, "
+                f"공개 조회 {metrics.public_share_views}회"
+            ),
+            next_action="공개 리포트 하단의 새 분석/대기열 CTA를 공유 자산 문구와 함께 노출하세요.",
+        ),
+        PublicConversionStage(
+            key="referral",
+            label="추천 대기열",
+            status=referral_status,
+            metric=f"대기열 {referrals.total_referrals}명",
+            insight=(
+                f"추천 유입 {referrals.referred_signup_count}명, "
+                f"공유 유입률 {round(referrals.share_rate_hint * 100)}%"
+            ),
+            next_action="대기열 가입 직후 초대 링크 복사/공유 버튼을 최상단으로 올리세요.",
+        ),
+        PublicConversionStage(
+            key="monetization",
+            label="유료 수요",
+            status=pricing_status,
+            metric=f"요금제 관심 {pricing.intent_count}건",
+            insight=(
+                f"Premium {pricing.premium_intent_count}건, "
+                f"Team {pricing.team_intent_count}건, "
+                f"예상 MRR {pricing.estimated_mrr_krw:,}원"
+            ),
+            next_action=pricing.next_actions[0]
+            if pricing.next_actions
+            else "Team/Premium persona별 가격 검증 CTA를 분리하세요.",
+        ),
+        PublicConversionStage(
+            key="reliability",
+            label="출시 안정성",
+            status=readiness_status,
+            metric=f"readiness {readiness.launch_readiness_score}점",
+            insight=f"품질 {metrics.average_quality_score}점, Pulse {pulse.pulse_score}점",
+            next_action=readiness.next_actions[0]
+            if readiness.next_actions
+            else "launch gate blocker 없이 공개 확대 준비가 가능합니다.",
+        ),
+    ]
+
+
+def _public_conversion_channel_actions(
+    acquisition_actions: list[str],
+    hot_surfaces: list[str],
+) -> list[str]:
+    actions = list(acquisition_actions[:4])
+    actions.extend(f"hot surface: {surface}" for surface in hot_surfaces[:3])
+    deduped: list[str] = []
+    for action in actions:
+        if action and action not in deduped:
+            deduped.append(action)
+    return deduped[:6]
+
+
+def _public_conversion_next_actions(
+    stages: list[PublicConversionStage],
+    acquisition_actions: list[str],
+    pulse_actions: list[str],
+    growth_actions: list[str],
+) -> list[str]:
+    actions = [
+        stage.next_action
+        for stage in sorted(stages, key=lambda item: _status_priority(item.status))
+        if stage.status != CheckStatus.ok
+    ][:4]
+    actions.extend(acquisition_actions[:1])
+    actions.extend(pulse_actions[:1])
+    actions.extend(growth_actions[:1])
+    deduped: list[str] = []
+    for action in actions:
+        if action and action not in deduped:
+            deduped.append(action)
+    if not deduped:
+        deduped.append("전환 보드가 안정적입니다. 상위 유입 채널에 공개 베타 트래픽을 증액하세요.")
     return deduped[:6]
 
 

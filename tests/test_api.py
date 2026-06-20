@@ -769,6 +769,40 @@ def test_growth_acquisition_hub_maps_public_launch_surfaces() -> None:
     assert payload["next_actions"]
     assert payload["recent_growth_events"]
 
+    board = client.get("/growth/public-conversion-board?limit=10", headers=workspace)
+    assert board.status_code == 200
+    board_payload = board.json()
+    assert board_payload["board_version"] == "specpilot.public_conversion_board.v1"
+    assert board_payload["workspace_id"] == payload["workspace_id"]
+    assert board_payload["conversion_score"] > 0
+    assert board_payload["status"] in {"ok", "warning", "blocker"}
+    assert board_payload["metric_cards"]["public_share_views"] >= 1
+    assert board_payload["metric_cards"]["referral_waitlist"] >= 1
+    assert board_payload["metric_cards"]["pricing_intents"] >= 1
+    stage_keys = {stage["key"] for stage in board_payload["stages"]}
+    assert {
+        "traffic",
+        "activation",
+        "sharing",
+        "referral",
+        "monetization",
+        "reliability",
+    } <= stage_keys
+    assert any(
+        surface["key"] == "public_report"
+        for surface in board_payload["priority_surfaces"]
+    )
+    assert board_payload["channel_actions"]
+    assert board_payload["next_actions"]
+    assert board_payload["recent_growth_events"]
+
+    isolated_board = client.get(
+        "/growth/public-conversion-board?limit=10",
+        headers={"X-SpecPilot-Key": f"pytest-acquisition-isolated-{uuid4().hex}"},
+    )
+    assert isolated_board.status_code == 200
+    assert isolated_board.json()["metric_cards"]["public_share_views"] == 0
+
 
 def test_launch_experiment_hub_tracks_variant_winner() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-launch-exp-{uuid4().hex}"}
