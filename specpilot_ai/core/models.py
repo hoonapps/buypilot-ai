@@ -686,6 +686,52 @@ class BetaLead(BaseModel):
     created_at: str
 
 
+class WaitlistReferralRequest(BaseModel):
+    email: str = Field(min_length=3)
+    persona: str = "individual_buyer"
+    use_case: str = ""
+    referred_by_code: str = ""
+    source: str = "web"
+    contact_consent: bool = True
+
+
+class WaitlistReferral(BaseModel):
+    referral_id: str
+    workspace_id: str = "demo"
+    email_masked: str
+    persona: str
+    use_case: str = ""
+    referral_code: str
+    referred_by_code: str = ""
+    referral_url: str
+    referred_signup_count: int = 0
+    priority_score: int = 0
+    contact_consent: bool
+    source: str
+    created_at: str
+
+
+class ReferralLeaderboardItem(BaseModel):
+    referral_code: str
+    email_masked: str
+    persona: str
+    referred_signup_count: int = 0
+    priority_score: int = 0
+    referral_url: str
+
+
+class WaitlistReferralDashboard(BaseModel):
+    workspace_id: str
+    generated_at: str
+    total_referrals: int = 0
+    referred_signup_count: int = 0
+    share_rate_hint: float = 0
+    summary: str
+    top_referrers: list[ReferralLeaderboardItem] = Field(default_factory=list)
+    latest_referrals: list[WaitlistReferral] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PricingPlan(BaseModel):
     plan_id: str
     name: str

@@ -86,6 +86,7 @@ from specpilot_ai.core.models import (
     PurchaseOutcomeRequest,
     PurchaseOutcomeStatus,
     QualityDashboard,
+    ReferralLeaderboardItem,
     ReportAdvisorAnswer,
     ReportAdvisorQuestionRequest,
     ReportShare,
@@ -106,6 +107,9 @@ from specpilot_ai.core.models import (
     TraceEvent,
     TraceRunSummary,
     TraceSpanRecord,
+    WaitlistReferral,
+    WaitlistReferralDashboard,
+    WaitlistReferralRequest,
 )
 
 SUPPORTED_ALERT_CHANNELS = {"email", "webhook", "sms"}
@@ -2743,6 +2747,140 @@ class SpecPilotStore:
             ).fetchall()
         return [_beta_lead_from_row(row) for row in rows]
 
+    def create_waitlist_referral_for_workspace(
+        self,
+        workspace_id: str,
+        request: WaitlistReferralRequest,
+    ) -> WaitlistReferral:
+        now = _now()
+        referral_code = _referral_code(request.persona)
+        referral = WaitlistReferral(
+            referral_id=f"wref_{uuid4().hex[:12]}",
+            workspace_id=workspace_id,
+            email_masked=_mask_contact(request.email),
+            persona=request.persona,
+            use_case=request.use_case,
+            referral_code=referral_code,
+            referred_by_code=request.referred_by_code.strip().upper(),
+            referral_url=f"/join?ref={referral_code}",
+            referred_signup_count=0,
+            priority_score=_waitlist_priority_score(0, request.contact_consent),
+            contact_consent=request.contact_consent,
+            source=request.source,
+            created_at=now,
+        )
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO waitlist_referrals (
+                    referral_id, workspace_id, email_masked, persona, use_case,
+                    referral_code, referred_by_code, referral_url,
+                    contact_consent, source, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    referral.referral_id,
+                    referral.workspace_id,
+                    referral.email_masked,
+                    referral.persona,
+                    referral.use_case,
+                    referral.referral_code,
+                    referral.referred_by_code,
+                    referral.referral_url,
+                    1 if referral.contact_consent else 0,
+                    referral.source,
+                    referral.created_at,
+                ),
+            )
+        return referral
+
+    def list_waitlist_referrals_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 50,
+    ) -> list[WaitlistReferral]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT wr.*,
+                    (
+                        SELECT COUNT(*)
+                        FROM waitlist_referrals child
+                        WHERE child.workspace_id = wr.workspace_id
+                          AND child.referred_by_code = wr.referral_code
+                    ) AS referred_signup_count
+                FROM waitlist_referrals wr
+                WHERE wr.workspace_id = ?
+                ORDER BY wr.created_at DESC
+                LIMIT ?
+                """,
+                (workspace_id, limit),
+            ).fetchall()
+        return [_waitlist_referral_from_row(row) for row in rows]
+
+    def waitlist_referral_dashboard_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 20,
+    ) -> WaitlistReferralDashboard:
+        latest = self.list_waitlist_referrals_for_workspace(workspace_id, limit=limit)
+        with self._connect() as conn:
+            total = conn.execute(
+                "SELECT COUNT(*) FROM waitlist_referrals WHERE workspace_id = ?",
+                (workspace_id,),
+            ).fetchone()[0]
+            referred = conn.execute(
+                """
+                SELECT COUNT(*)
+                FROM waitlist_referrals
+                WHERE workspace_id = ? AND referred_by_code != ''
+                """,
+                (workspace_id,),
+            ).fetchone()[0]
+            rows = conn.execute(
+                """
+                SELECT wr.*,
+                    (
+                        SELECT COUNT(*)
+                        FROM waitlist_referrals child
+                        WHERE child.workspace_id = wr.workspace_id
+                          AND child.referred_by_code = wr.referral_code
+                    ) AS referred_signup_count
+                FROM waitlist_referrals wr
+                WHERE wr.workspace_id = ?
+                ORDER BY referred_signup_count DESC, wr.created_at ASC
+                LIMIT 5
+                """,
+                (workspace_id,),
+            ).fetchall()
+        top_referrers = [
+            ReferralLeaderboardItem(
+                referral_code=row["referral_code"],
+                email_masked=row["email_masked"],
+                persona=row["persona"],
+                referred_signup_count=int(row["referred_signup_count"] or 0),
+                priority_score=_waitlist_priority_score(
+                    int(row["referred_signup_count"] or 0),
+                    bool(row["contact_consent"]),
+                ),
+                referral_url=row["referral_url"],
+            )
+            for row in rows
+        ]
+        share_rate_hint = round(referred / total, 3) if total else 0
+        return WaitlistReferralDashboard(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            total_referrals=int(total or 0),
+            referred_signup_count=int(referred or 0),
+            share_rate_hint=share_rate_hint,
+            summary=_waitlist_referral_summary(int(total or 0), int(referred or 0)),
+            top_referrers=top_referrers,
+            latest_referrals=latest,
+            next_actions=_waitlist_referral_next_actions(int(total or 0), share_rate_hint),
+        )
+
     def create_subscription_intent_for_workspace(
         self,
         workspace_id: str,
@@ -4997,6 +5135,20 @@ class SpecPilotStore:
                     created_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS waitlist_referrals (
+                    referral_id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL DEFAULT 'demo',
+                    email_masked TEXT NOT NULL,
+                    persona TEXT NOT NULL,
+                    use_case TEXT NOT NULL DEFAULT '',
+                    referral_code TEXT NOT NULL,
+                    referred_by_code TEXT NOT NULL DEFAULT '',
+                    referral_url TEXT NOT NULL,
+                    contact_consent INTEGER NOT NULL DEFAULT 1,
+                    source TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS subscription_intents (
                     intent_id TEXT PRIMARY KEY,
                     workspace_id TEXT NOT NULL DEFAULT 'demo',
@@ -5138,6 +5290,12 @@ class SpecPilotStore:
                     ON user_feedback(trace_id);
                 CREATE INDEX IF NOT EXISTS idx_beta_leads_workspace
                     ON beta_leads(workspace_id);
+                CREATE INDEX IF NOT EXISTS idx_waitlist_referrals_workspace
+                    ON waitlist_referrals(workspace_id, created_at);
+                CREATE INDEX IF NOT EXISTS idx_waitlist_referrals_code
+                    ON waitlist_referrals(workspace_id, referral_code);
+                CREATE INDEX IF NOT EXISTS idx_waitlist_referrals_parent
+                    ON waitlist_referrals(workspace_id, referred_by_code);
                 CREATE INDEX IF NOT EXISTS idx_subscription_intents_workspace
                     ON subscription_intents(workspace_id, plan_id, created_at);
                 CREATE INDEX IF NOT EXISTS idx_beta_cohorts_workspace
@@ -6858,6 +7016,29 @@ def _beta_lead_from_row(row: sqlite3.Row) -> BetaLead:
     )
 
 
+def _waitlist_referral_from_row(row: sqlite3.Row) -> WaitlistReferral:
+    data = dict(row)
+    referred_signup_count = int(data.get("referred_signup_count") or 0)
+    return WaitlistReferral(
+        referral_id=data["referral_id"],
+        workspace_id=data["workspace_id"],
+        email_masked=data["email_masked"],
+        persona=data["persona"],
+        use_case=data["use_case"],
+        referral_code=data["referral_code"],
+        referred_by_code=data["referred_by_code"],
+        referral_url=data["referral_url"],
+        referred_signup_count=referred_signup_count,
+        priority_score=_waitlist_priority_score(
+            referred_signup_count,
+            bool(data["contact_consent"]),
+        ),
+        contact_consent=bool(data["contact_consent"]),
+        source=data["source"],
+        created_at=data["created_at"],
+    )
+
+
 def _subscription_intent_from_row(row: sqlite3.Row) -> SubscriptionIntent:
     data = dict(row)
     return SubscriptionIntent(
@@ -8028,6 +8209,34 @@ def _readiness_label(score: float) -> str:
     if score >= 45:
         return "파일럿 보강 필요"
     return "출시 전 검증 부족"
+
+
+def _referral_code(persona: str) -> str:
+    prefix = "".join(ch for ch in persona.upper() if ch.isalnum())[:4] or "SPAI"
+    return f"{prefix}-{uuid4().hex[:6].upper()}"
+
+
+def _waitlist_priority_score(referred_signup_count: int, contact_consent: bool) -> int:
+    consent_bonus = 10 if contact_consent else 0
+    return min(100, 40 + referred_signup_count * 15 + consent_bonus)
+
+
+def _waitlist_referral_summary(total: int, referred: int) -> str:
+    if total == 0:
+        return "아직 추천 대기열 가입이 없어 공개 전 공유 루프를 검증해야 합니다."
+    if referred == 0:
+        return f"추천 대기열 {total}명이 등록됐지만 초대 전환은 아직 없습니다."
+    return f"추천 대기열 {total}명 중 {referred}명이 기존 추천 코드로 유입됐습니다."
+
+
+def _waitlist_referral_next_actions(total: int, share_rate_hint: float) -> list[str]:
+    actions: list[str] = []
+    if total < 10:
+        actions.append("공개 리포트와 온보딩 카드에 추천 대기열 CTA를 노출하세요.")
+    if share_rate_hint < 0.2:
+        actions.append("추천 코드 공유 문구와 혜택 메시지를 A/B 테스트하세요.")
+    actions.append("상위 추천자에게 우선 초대와 팀 구매 인터뷰를 제안하세요.")
+    return actions[:3]
 
 
 def _default_channel_name(channel: str) -> str:

@@ -380,6 +380,66 @@ def test_growth_funnel_tracks_product_reaction_events() -> None:
     assert isolated.json()["total_events"] == 0
 
 
+def test_waitlist_referrals_create_share_loop_and_dashboard() -> None:
+    workspace = {"X-SpecPilot-Key": f"pytest-referral-{uuid4().hex}"}
+    other_workspace = {"X-SpecPilot-Key": f"pytest-referral-other-{uuid4().hex}"}
+
+    first = client.post(
+        "/growth/waitlist-referrals",
+        headers=workspace,
+        json={
+            "email": "creator@example.com",
+            "persona": "creator",
+            "use_case": "QHD 영상 편집 PC를 빠르게 비교하고 싶습니다.",
+            "source": "pytest-referral",
+        },
+    )
+    assert first.status_code == 200
+    first_payload = first.json()
+    assert first_payload["email_masked"] == "cr***@example.com"
+    assert first_payload["referral_code"]
+    assert first_payload["referral_url"].endswith(first_payload["referral_code"])
+    assert first_payload["priority_score"] >= 40
+
+    referred = client.post(
+        "/growth/waitlist-referrals",
+        headers=workspace,
+        json={
+            "email": "friend@example.com",
+            "persona": "gamer",
+            "use_case": "게이밍 PC 추천을 받고 싶습니다.",
+            "referred_by_code": first_payload["referral_code"],
+            "source": "pytest-referral",
+        },
+    )
+    assert referred.status_code == 200
+    assert referred.json()["referred_by_code"] == first_payload["referral_code"]
+
+    referrals = client.get("/growth/waitlist-referrals", headers=workspace)
+    assert referrals.status_code == 200
+    referral_payload = referrals.json()
+    parent = next(
+        item
+        for item in referral_payload
+        if item["referral_code"] == first_payload["referral_code"]
+    )
+    assert parent["referred_signup_count"] == 1
+    assert parent["priority_score"] > first_payload["priority_score"]
+
+    dashboard = client.get("/growth/referral-dashboard", headers=workspace)
+    assert dashboard.status_code == 200
+    dashboard_payload = dashboard.json()
+    assert dashboard_payload["total_referrals"] == 2
+    assert dashboard_payload["referred_signup_count"] == 1
+    assert dashboard_payload["share_rate_hint"] == 0.5
+    assert dashboard_payload["top_referrers"][0]["referral_code"] == first_payload["referral_code"]
+    assert dashboard_payload["next_actions"]
+
+    isolated = client.get("/growth/referral-dashboard", headers=other_workspace)
+    assert isolated.status_code == 200
+    assert isolated.json()["total_referrals"] == 0
+
+
 def test_trust_policy_endpoint_exposes_cache_and_fairness_rules() -> None:
     response = client.get("/policy/trust")
 

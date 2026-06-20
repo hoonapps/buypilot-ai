@@ -51,6 +51,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 공개 카테고리 리포트: 월간 데스크톱 PC/노트북 리포트를 SEO 제목, 공유 문구, CTA와 함께 API 키 없이 공개 발행
 - 구매 온보딩 플레이북: 데스크톱/노트북/팀 구매 상황별 시작 질문, 필수 입력 슬롯, 검수 게이트, 분석 CTA를 공개 API로 제공
 - 성장 퍼널: 분석 결과 조회, 추천 카드 클릭, 대안 시나리오 클릭, 공유/알림/구독 CTA를 이벤트로 저장하고 출시 게이트에 반응 지표로 반영
+- 추천 대기열: 가입자별 추천 코드와 공유 URL을 발급하고 추천 유입, 우선순위 점수, 리더보드로 공개 전 확산 루프를 검증
 - 출처 신뢰도, 캐시 만료 기준, 제휴 고지 정책
 - Agent trace 조회와 SQLite span 저장
 - Observability export outbox: trace span과 품질 감사 payload를 OpenTelemetry/LangSmith 연동 전 큐로 저장하고 dispatch/retry 상태 추적
@@ -807,6 +808,26 @@ curl http://127.0.0.1:8000/growth/funnel \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
+추천 대기열과 리더보드:
+
+```bash
+curl -X POST http://127.0.0.1:8000/growth/waitlist-referrals \
+  -H "Content-Type: application/json" \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY" \
+  -d '{
+    "email": "creator@example.com",
+    "persona": "creator",
+    "use_case": "영상 편집용 PC 구매 비교를 친구에게 공유하고 싶습니다.",
+    "referred_by_code": "",
+    "source": "readme"
+  }'
+```
+
+```bash
+curl http://127.0.0.1:8000/growth/referral-dashboard \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
 분석 품질/비용 감사:
 
 ```bash
@@ -1047,6 +1068,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `purchase_outcomes`, `completed_purchase_outcomes`, `purchase_conversion_rate`, `average_final_price_delta_krw`, `purchase_outcome_value_krw`: 실제 구매 결과와 최종 결제 금액 차이를 보는 운영 지표
 - `/ops/learning-insights`: 실제 구매 결과, 결제 전 검수 차단, 만족도 피드백을 제품별 전환율, 반품률, 가격 차이, 개선 액션으로 집계
 - `/growth/events`, `/growth/funnel`: 추천 카드, 대안 시나리오, 공유 리포트, 가격 알림, 요금제 CTA 반응을 저장하고 단계별 전환율과 다음 액션을 집계
+- `/growth/waitlist-referrals`, `/growth/referral-dashboard`: 추천 대기열 가입, 추천 코드/공유 URL, 추천 유입 수, 우선순위 점수, 리더보드를 워크스페이스별로 집계
 - `/beta/launch-gate`: readiness, 품질 회귀, 학습 인사이트, 백로그 SLA, 전환/성장/발송/외부 연동/데이터 거버넌스 운영 상태를 공개 go/no-go 판정과 필수 액션으로 집계
 - `feedback_count`, `average_satisfaction`, `purchase_intent_rate`: 추천 결과가 실제 구매 판단으로 이어지는지 보는 운영 지표
 - `beta_leads`: 베타 신청 리드 수

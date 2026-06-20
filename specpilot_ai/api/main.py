@@ -115,6 +115,9 @@ from specpilot_ai.core.models import (
     TraceRunSummary,
     TraceSpanRecord,
     TrustPolicySummary,
+    WaitlistReferral,
+    WaitlistReferralDashboard,
+    WaitlistReferralRequest,
     WorkspaceContext,
 )
 from specpilot_ai.graph.neo4j_client import Neo4jRepository
@@ -1205,6 +1208,39 @@ def list_beta_leads(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> list[BetaLead]:
     return _store().list_beta_leads_for_workspace(workspace.workspace_id, limit=limit)
+
+
+@app.post("/growth/waitlist-referrals", response_model=WaitlistReferral)
+def create_waitlist_referral(
+    request: WaitlistReferralRequest,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> WaitlistReferral:
+    return _store().create_waitlist_referral_for_workspace(
+        workspace.workspace_id,
+        request,
+    )
+
+
+@app.get("/growth/waitlist-referrals", response_model=list[WaitlistReferral])
+def list_waitlist_referrals(
+    limit: int = 50,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> list[WaitlistReferral]:
+    return _store().list_waitlist_referrals_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+
+
+@app.get("/growth/referral-dashboard", response_model=WaitlistReferralDashboard)
+def waitlist_referral_dashboard(
+    limit: int = 20,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> WaitlistReferralDashboard:
+    return _store().waitlist_referral_dashboard_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
 
 
 @app.get("/beta/readiness", response_model=BetaReadinessDashboard)
