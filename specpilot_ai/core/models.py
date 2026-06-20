@@ -1999,6 +1999,44 @@ class LaunchCommunityKit(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class LaunchMediaAsset(BaseModel):
+    key: str
+    label: str
+    kind: str
+    path: str
+    usage: str
+    alt_text: str
+    tracking_event: str
+
+
+class LaunchMediaPitch(BaseModel):
+    channel: str
+    audience: str
+    headline: str
+    body: str
+    cta_label: str
+    cta_path: str
+    copy_text: str
+
+
+class LaunchMediaKit(BaseModel):
+    kit_version: str = "specpilot.launch_media_kit.v1"
+    workspace_id: str
+    generated_at: str
+    status: CheckStatus
+    media_score: float = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    metric_cards: dict[str, int | float | str] = Field(default_factory=dict)
+    hero_statement: str
+    proof_points: list[str] = Field(default_factory=list)
+    assets: list[LaunchMediaAsset] = Field(default_factory=list)
+    pitches: list[LaunchMediaPitch] = Field(default_factory=list)
+    usage_guidelines: list[str] = Field(default_factory=list)
+    tracking_events: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PublicAcquisitionSurface(BaseModel):
     key: str
     label: str

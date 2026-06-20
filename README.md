@@ -83,9 +83,10 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 첫 24시간 런칭 워룸: Pulse, 스모크, 전환 보드, 출시 게이트, 품질 회귀, CTA 실험, 추천/유료 수요를 합성해 확대/제한 배포/보류 판단과 owner별 실행 play를 제공
 - D+7 런칭 리포트: 첫 주 성장 이벤트, 공유 조회, 추천 대기열, 요금제 관심, CTA 실험, 리텐션, 품질 리스크를 반복할 성과/닫아야 할 리스크/founder update로 정리
 - 런칭 커뮤니티 대응 키트: D+7 리포트, 반박 FAQ, 공유 확산팩, 액션 라우터를 합성해 고정 댓글, 반복 질문 답변, 운영 리스크, 추적 이벤트를 제공
+- 런칭 미디어 키트: 런칭룸, 공개 proof, 소셜 proof, D+7 리포트, 커뮤니티 대응 키트를 합성해 대표 이미지, 외부 소개 자산, 뉴스레터/크리에이터/커뮤니티/팀 피치, 사용 가이드를 제공
 - 공개 소셜 proof wall: 마스킹 피드백, 실구매 결과, 추천 유입 리더보드를 랜딩에 바로 노출할 공개 반응 카드로 선별
 - 공개 런칭룸: 데모 갤러리, 시장 리포트, proof strip, 유입/반응/추천/수익화 CTA를 외부 공유용 출시 페이지 패키지로 집계
-- Next.js 공개 런칭 페이지: 웹사이트 `/launch`에서 런칭룸, 첫 구매 진단 콘시어지, CTA 실험, 출시 배포 플랜, 공개 유입 허브/전환 보드/런치 Pulse 운영 패널, 첫 24시간 런칭 워룸, D+7 런칭 리포트, 커뮤니티 댓글 대응 키트, 런칭 반박 FAQ, 공개 런칭 공유 확산팩, 공개 런칭 액션 라우터, 공개 런칭 스모크 체크, 공개 검증 허브, 공개 출시 게이트, 구매 후속 리텐션 루프, 가입 전 추천 확산 키트, Team 구매 표준안 프리뷰, 요금제 비교, 소셜 proof wall API를 읽어 제품 스크린샷 배경, 자연어 구매 진단, 실험 기반 CTA, 첫 주 채널 배포 카드, 유입/전환/Pulse 점수, 첫 24시간 확대/복구 play, 첫 주 founder update, 최저가/제휴/가격 최신성/개인정보 답변 템플릿, 채널별 복사용 공유 문구, 방문자 유형별 다음 행동 CTA, 런칭 URL/SEO/측정 스모크 결과, evidence kit, go/no-go 준비도 카드, 구매 후속 액션 카드, 추천 보상 사다리/공유 문구/리더보드 프리뷰, Team 상담 안건/ROI/롤아웃/메일 초안, Free/Premium/Team 요금제 카드, 실제 반응 proof, 시장 리포트, 공유 문구를 외부 공유용 첫 화면으로 렌더링하고 분석 CTA를 메인 분석 폼 자동 채움 handoff로 연결하며 방문자 액션 라우터 클릭, 추천 대기열, 요금제 관심을 즉시 저장하고 robots/sitemap/manifest/canonical/Twitter/JSON-LD 메타로 검색·공유 배포 표면을 준비
+- Next.js 공개 런칭 페이지: 웹사이트 `/launch`에서 런칭룸, 첫 구매 진단 콘시어지, CTA 실험, 출시 배포 플랜, 공개 유입 허브/전환 보드/런치 Pulse 운영 패널, 첫 24시간 런칭 워룸, D+7 런칭 리포트, 커뮤니티 댓글 대응 키트, 런칭 미디어 키트, 런칭 반박 FAQ, 공개 런칭 공유 확산팩, 공개 런칭 액션 라우터, 공개 런칭 스모크 체크, 공개 검증 허브, 공개 출시 게이트, 구매 후속 리텐션 루프, 가입 전 추천 확산 키트, Team 구매 표준안 프리뷰, 요금제 비교, 소셜 proof wall API를 읽어 제품 스크린샷 배경, 자연어 구매 진단, 실험 기반 CTA, 첫 주 채널 배포 카드, 유입/전환/Pulse 점수, 첫 24시간 확대/복구 play, 첫 주 founder update, 최저가/제휴/가격 최신성/개인정보 답변 템플릿, 뉴스레터/크리에이터/커뮤니티/팀 피치, 채널별 복사용 공유 문구, 방문자 유형별 다음 행동 CTA, 런칭 URL/SEO/측정 스모크 결과, evidence kit, go/no-go 준비도 카드, 구매 후속 액션 카드, 추천 보상 사다리/공유 문구/리더보드 프리뷰, Team 상담 안건/ROI/롤아웃/메일 초안, Free/Premium/Team 요금제 카드, 실제 반응 proof, 시장 리포트, 공유 문구를 외부 공유용 첫 화면으로 렌더링하고 분석 CTA를 메인 분석 폼 자동 채움 handoff로 연결하며 방문자 액션 라우터 클릭, 추천 대기열, 요금제 관심을 즉시 저장하고 robots/sitemap/manifest/canonical/Twitter/JSON-LD 메타로 검색·공유 배포 표면을 준비
 - Next.js 추천 초대 페이지: 제품 API가 발급하는 `/join?ref={referral_code}` 공유 URL을 초대 코드가 미리 채워진 대기열/요금제 관심 폼으로 연결하고, 가입 후 절대 초대 링크 복사/공유 액션을 성장 이벤트로 기록
 - SQLite 기반 분석 결과 저장
 - 저장 리포트 조회와 가격 알림 구독
@@ -1113,6 +1114,13 @@ curl http://127.0.0.1:8000/growth/launch-community-kit \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
+런칭 미디어 키트:
+
+```bash
+curl http://127.0.0.1:8000/growth/launch-media-kit \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
 출시 실험 허브:
 
 ```bash
@@ -1433,6 +1441,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/growth/launch-war-room`: Pulse, 스모크, 전환 보드, 출시 게이트, 품질 회귀, CTA 실험, 추천/유료 수요를 합성해 첫 24시간 확대/제한 배포/보류 판단과 owner별 실행 play를 반환
 - `/growth/launch-week-recap`: 첫 주 성장 이벤트, 공개 공유 조회, 추천 대기열, 요금제 관심, CTA 실험, 리텐션, 품질 회귀를 합성해 D+7 성과, 리스크, 채널 액션, founder update를 반환
 - `/growth/launch-community-kit`: D+7 리포트, 반박 FAQ, 공유 확산팩, 액션 라우터, 스모크 신호를 합성해 커뮤니티 고정 댓글, 반복 질문 답변 템플릿, 운영 리스크, 추적 이벤트를 반환
+- `/growth/launch-media-kit`: 런칭룸, 공개 proof, 소셜 proof, D+7 리포트, 커뮤니티 대응 키트를 합성해 대표 자산, 외부 소개 피치, 사용 가이드, 추적 이벤트를 반환
 - `/growth/launch-experiments`, `/growth/launch-experiments/{experiment_id}/events`, `/growth/launch-experiment-dashboard`: 공개 CTA variant, 노출/전환 이벤트, 승자 후보, 다음 실험 액션을 관리
 - `/growth/launch-kit`: 공개 베타 채널별 카피, CTA 실험, 출시 체크리스트, 위험 고지, 측정 계획을 반환
 - `/growth/launch-distribution-plan`: 런치 키트, 공개 전환 보드, 런치 Pulse, CTA 실험, 추천 대기열을 합성해 첫 주 채널 배포 슬롯, 복사 문구, 측정 이벤트, 위험 통제를 반환

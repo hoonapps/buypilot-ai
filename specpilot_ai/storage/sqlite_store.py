@@ -73,6 +73,9 @@ from specpilot_ai.core.models import (
     LaunchCommunityKit,
     LaunchCommunityReplyTemplate,
     LaunchCommunityRisk,
+    LaunchMediaAsset,
+    LaunchMediaKit,
+    LaunchMediaPitch,
     LaunchPulseDashboard,
     LaunchPulseMetric,
     LaunchPulseSignal,
@@ -3572,6 +3575,71 @@ class SpecPilotStore:
                 "launch_share_community",
             ],
             next_actions=_launch_community_next_actions(templates, risks, recap),
+        )
+
+    def launch_media_kit_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 12,
+    ) -> LaunchMediaKit:
+        metrics = self.metrics_for_workspace(workspace_id)
+        proof = self.public_proof_hub_for_workspace(workspace_id, limit=limit)
+        acquisition = self.public_acquisition_hub_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        pulse = self.launch_pulse_for_workspace(workspace_id, limit=limit)
+        social = self.public_social_proof_wall_for_workspace(workspace_id, limit=limit)
+        recap = self.launch_week_recap_for_workspace(workspace_id, limit=limit)
+        community = self.launch_community_kit_for_workspace(workspace_id, limit=limit)
+        smoke = self.public_launch_smoke_dashboard_for_workspace(
+            workspace_id,
+            limit=limit,
+        )
+        media_score = _launch_media_score(
+            acquisition=acquisition,
+            pulse=pulse,
+            proof=proof,
+            social=social,
+            recap=recap,
+            community=community,
+            smoke=smoke,
+            metrics=metrics,
+        )
+        status = _launch_media_status(media_score, acquisition, proof, smoke)
+        assets = _launch_media_assets(proof, social)
+        pitches = _launch_media_pitches(recap, community)
+        return LaunchMediaKit(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            status=status,
+            media_score=media_score,
+            headline=_launch_media_headline(status, media_score),
+            summary=_launch_media_summary(acquisition, proof, recap, assets, pitches),
+            metric_cards={
+                "media_score": media_score,
+                "launch_score": acquisition.launch_score,
+                "pulse_score": pulse.pulse_score,
+                "proof_score": proof.proof_score,
+                "social_proof_score": social.proof_score,
+                "recap_score": recap.recap_score,
+                "public_share_views": metrics.public_share_views,
+                "growth_events": metrics.growth_events,
+                "assets": len(assets),
+                "pitches": len(pitches),
+            },
+            hero_statement=_launch_media_hero_statement(acquisition, pulse, recap),
+            proof_points=_launch_media_proof_points(acquisition, proof, social, recap),
+            assets=assets,
+            pitches=pitches,
+            usage_guidelines=_launch_media_usage_guidelines(community, smoke),
+            tracking_events=[
+                "launch_media_asset_click",
+                "launch_media_pitch_copy",
+                "launch_share_community",
+                "launch_community_reply_copy",
+            ],
+            next_actions=_launch_media_next_actions(status, assets, pitches, community),
         )
 
     def retention_hub_for_workspace(
@@ -13543,6 +13611,303 @@ def _launch_community_next_actions(
         actions.append("상단 고정 댓글에는 pinned update를 붙이고 첫 답글에는 최저가/제휴 답변을 우선 사용하세요.")
     actions.extend(recap.next_actions[:2])
     actions.append("복사한 댓글마다 launch_community_reply_copy 이벤트를 남겨 어떤 반박이 전환되는지 보세요.")
+    return list(dict.fromkeys(actions))[:7]
+
+
+def _launch_media_score(
+    *,
+    acquisition: PublicAcquisitionHub,
+    pulse: LaunchPulseDashboard,
+    proof: PublicProofHub,
+    social: PublicSocialProofWall,
+    recap: LaunchWeekRecapDashboard,
+    community: LaunchCommunityKit,
+    smoke: PublicLaunchSmokeDashboard,
+    metrics: OperationsMetrics,
+) -> float:
+    audience_signal = min(
+        100.0,
+        metrics.public_share_views * 4
+        + metrics.share_cta_clicks * 10
+        + metrics.growth_events * 2,
+    )
+    return round(
+        acquisition.launch_score * 0.14
+        + pulse.pulse_score * 0.08
+        + proof.proof_score * 0.18
+        + social.proof_score * 0.12
+        + recap.recap_score * 0.18
+        + community.response_score * 0.12
+        + smoke.smoke_score * 0.12
+        + audience_signal * 0.08,
+        1,
+    )
+
+
+def _launch_media_status(
+    media_score: float,
+    acquisition: PublicAcquisitionHub,
+    proof: PublicProofHub,
+    smoke: PublicLaunchSmokeDashboard,
+) -> CheckStatus:
+    if (
+        media_score < 42
+        or acquisition.status == CheckStatus.blocker
+        or proof.status == CheckStatus.blocker
+        or smoke.status == CheckStatus.blocker
+    ):
+        return CheckStatus.blocker
+    if (
+        media_score < 74
+        or acquisition.status == CheckStatus.warning
+        or proof.status == CheckStatus.warning
+        or smoke.status == CheckStatus.warning
+    ):
+        return CheckStatus.warning
+    return CheckStatus.ok
+
+
+def _launch_media_assets(
+    proof: PublicProofHub,
+    social: PublicSocialProofWall,
+) -> list[LaunchMediaAsset]:
+    assets = [
+        _launch_media_asset(
+            key="product_workbench",
+            label="제품 워크벤치 이미지",
+            kind="image",
+            path="/product-workbench.png",
+            usage="런칭 글, 뉴스레터, 메신저 공유 카드의 대표 이미지",
+            alt_text="SpecPilot AI 컴퓨터 구매 의사결정 워크벤치 화면",
+            tracking_event="launch_media_asset_product_workbench",
+        ),
+        _launch_media_asset(
+            key="launch_room",
+            label="공개 런칭룸",
+            kind="page",
+            path="/launch",
+            usage="외부 소개 글의 기본 링크",
+            alt_text="SpecPilot AI 공개 런칭룸",
+            tracking_event="launch_media_asset_launch_room",
+        ),
+        _launch_media_asset(
+            key="proof_hub",
+            label="공개 검증 허브",
+            kind="page",
+            path="/launch#launch-proof-hub",
+            usage="추천 기준과 개인정보/제휴 기준을 설명할 때 연결",
+            alt_text=proof.headline,
+            tracking_event="launch_media_asset_proof_hub",
+        ),
+        _launch_media_asset(
+            key="social_proof",
+            label="소셜 proof wall",
+            kind="page",
+            path="/launch#social-proof",
+            usage="초기 반응과 신뢰 고지를 보여줄 때 연결",
+            alt_text=social.headline,
+            tracking_event="launch_media_asset_social_proof",
+        ),
+    ]
+    assets.extend(
+        [
+            _launch_media_asset(
+                key="market_report_desktop_pc",
+                label="데스크톱 PC 시장 리포트",
+                kind="page",
+                path="/market/desktop-pc",
+                usage="데스크톱 견적 구매 맥락을 설명하는 보조 링크",
+                alt_text="데스크톱 PC 구매 리포트",
+                tracking_event="launch_media_asset_market_desktop",
+            ),
+            _launch_media_asset(
+                key="market_report_laptop",
+                label="노트북 시장 리포트",
+                kind="page",
+                path="/market/laptop",
+                usage="노트북 구매 맥락을 설명하는 보조 링크",
+                alt_text="노트북 구매 리포트",
+                tracking_event="launch_media_asset_market_laptop",
+            ),
+        ],
+    )
+    return assets
+
+
+def _launch_media_asset(
+    *,
+    key: str,
+    label: str,
+    kind: str,
+    path: str,
+    usage: str,
+    alt_text: str,
+    tracking_event: str,
+) -> LaunchMediaAsset:
+    return LaunchMediaAsset(
+        key=key,
+        label=label,
+        kind=kind,
+        path=path,
+        usage=usage,
+        alt_text=alt_text,
+        tracking_event=tracking_event,
+    )
+
+
+def _launch_media_pitches(
+    recap: LaunchWeekRecapDashboard,
+    community: LaunchCommunityKit,
+) -> list[LaunchMediaPitch]:
+    return [
+        _launch_media_pitch(
+            channel="newsletter",
+            audience="AI 도구와 생산성 뉴스레터 운영자",
+            headline="컴퓨터·노트북 구매 실패를 줄이는 AI 구매 리포트",
+            body=(
+                "SpecPilot AI는 예산과 목적을 넣으면 후보 비교, 제외 이유, 가격 타이밍, "
+                "결제 전 검수, 공유 브리프까지 한 번에 정리합니다."
+            ),
+            cta_label="구매 조건 분석 시작",
+            cta_path="/launch",
+            proof=recap.founder_update,
+        ),
+        _launch_media_pitch(
+            channel="creator",
+            audience="PC/노트북 구매 콘텐츠를 만드는 크리에이터",
+            headline="최저가보다 구매 실패 방지에 초점을 둔 공개 베타",
+            body=(
+                "CPU/GPU 균형, 호환성, 리뷰 리스크, 옵션 불일치, 가격 대기 판단을 "
+                "리포트로 보여줘 시청자 질문을 구조화할 수 있습니다."
+            ),
+            cta_label="런칭룸 보기",
+            cta_path="/launch#launch-community-kit",
+            proof=community.pinned_update,
+        ),
+        _launch_media_pitch(
+            channel="community",
+            audience="견적 조언 커뮤니티와 카페 운영자",
+            headline="견적 질문을 같은 기준으로 검토하는 공개 런칭룸",
+            body=(
+                "추천 후보뿐 아니라 제외 후보, 결제 전 체크리스트, 반박 FAQ, "
+                "공유용 댓글 답변까지 같이 제공합니다."
+            ),
+            cta_label="커뮤니티 답변 키트",
+            cta_path="/launch#launch-community-kit",
+            proof=community.summary,
+        ),
+        _launch_media_pitch(
+            channel="team",
+            audience="회사 장비 구매 담당자",
+            headline="팀 노트북/PC 구매를 승인 가능한 리포트로 정리",
+            body=(
+                "조건 취합, 후보 비교, 결제 전 검수, 승인자 브리프, Team 상담 키트로 "
+                "반복 구매 기준을 빠르게 만들 수 있습니다."
+            ),
+            cta_label="Team 구매 표준안",
+            cta_path="/launch#team-consult",
+            proof="예산과 용도를 넣으면 후보 비교, 결제 전 검수, 공유 브리프까지 이어집니다.",
+        ),
+    ]
+
+
+def _launch_media_pitch(
+    *,
+    channel: str,
+    audience: str,
+    headline: str,
+    body: str,
+    cta_label: str,
+    cta_path: str,
+    proof: str,
+) -> LaunchMediaPitch:
+    copy_text = f"{headline}\n\n{body}\n\n근거: {proof}\n\n{cta_label}: {cta_path}"
+    return LaunchMediaPitch(
+        channel=channel,
+        audience=audience,
+        headline=headline,
+        body=body,
+        cta_label=cta_label,
+        cta_path=cta_path,
+        copy_text=copy_text,
+    )
+
+
+def _launch_media_headline(status: CheckStatus, media_score: float) -> str:
+    if status == CheckStatus.ok:
+        return f"런칭 미디어 키트 {round(media_score)}점, 외부 소개에 바로 사용할 수 있습니다."
+    if status == CheckStatus.blocker:
+        return f"런칭 미디어 키트 {round(media_score)}점, 공개 자산 blocker를 먼저 닫아야 합니다."
+    return f"런칭 미디어 키트 {round(media_score)}점, 일부 proof와 미리보기를 보강하세요."
+
+
+def _launch_media_summary(
+    acquisition: PublicAcquisitionHub,
+    proof: PublicProofHub,
+    recap: LaunchWeekRecapDashboard,
+    assets: list[LaunchMediaAsset],
+    pitches: list[LaunchMediaPitch],
+) -> str:
+    return (
+        f"{acquisition.headline} proof {round(proof.proof_score)}점, "
+        f"D+7 리포트 {round(recap.recap_score)}점을 기반으로 "
+        f"미디어 자산 {len(assets)}개와 채널별 피치 {len(pitches)}개를 준비했습니다."
+    )
+
+
+def _launch_media_hero_statement(
+    acquisition: PublicAcquisitionHub,
+    pulse: LaunchPulseDashboard,
+    recap: LaunchWeekRecapDashboard,
+) -> str:
+    return f"{acquisition.summary} Pulse {round(pulse.pulse_score)}점. {recap.founder_update}"
+
+
+def _launch_media_proof_points(
+    acquisition: PublicAcquisitionHub,
+    proof: PublicProofHub,
+    social: PublicSocialProofWall,
+    recap: LaunchWeekRecapDashboard,
+) -> list[str]:
+    points: list[str] = []
+    points.extend(surface.proof for surface in acquisition.surfaces[:3])
+    points.extend(proof.hero_proof_strip[:3])
+    points.extend(social.proof_strip[:2])
+    points.append(recap.summary)
+    return list(dict.fromkeys(points))[:8]
+
+
+def _launch_media_usage_guidelines(
+    community: LaunchCommunityKit,
+    smoke: PublicLaunchSmokeDashboard,
+) -> list[str]:
+    guidelines = [
+        "대표 링크는 /launch로 통일하고, 세부 질문에는 섹션 anchor를 붙여 공유하세요.",
+        "제품 이미지는 product-workbench.png를 우선 사용하고 alt text에 컴퓨터 구매 의사결정 맥락을 넣으세요.",
+        "최저가 보장, 구매 성공 보장 같은 표현은 쓰지 말고 구매 실패 방지와 검수 기준을 말하세요.",
+        "제휴/개인정보 질문이 나오면 커뮤니티 대응 키트 답변을 그대로 사용하세요.",
+    ]
+    guidelines.extend(community.next_actions[:1])
+    guidelines.extend(smoke.next_actions[:1])
+    return list(dict.fromkeys(guidelines))[:7]
+
+
+def _launch_media_next_actions(
+    status: CheckStatus,
+    assets: list[LaunchMediaAsset],
+    pitches: list[LaunchMediaPitch],
+    community: LaunchCommunityKit,
+) -> list[str]:
+    actions = [
+        "뉴스레터/커뮤니티/크리에이터/팀 구매 담당자용 피치를 각각 한 곳씩 배포하세요.",
+        "미디어 자산 클릭과 피치 복사를 launch_media_* 이벤트로 기록하세요.",
+        "외부 소개 글 하단에는 커뮤니티 대응 키트 링크를 붙여 반복 질문을 줄이세요.",
+    ]
+    if status != CheckStatus.ok:
+        actions.insert(0, "미디어 키트 warning 항목을 닫기 전에는 큰 채널 배포를 제한하세요.")
+    if not assets or not pitches:
+        actions.insert(0, "대표 이미지, 런칭룸 링크, 채널별 피치를 먼저 채우세요.")
+    actions.extend(community.next_actions[:2])
     return list(dict.fromkeys(actions))[:7]
 
 

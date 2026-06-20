@@ -72,6 +72,7 @@ from specpilot_ai.core.models import (
     LaunchExperimentEventRequest,
     LaunchExperimentRequest,
     LaunchGateDashboard,
+    LaunchMediaKit,
     LaunchPulseDashboard,
     LaunchWeekRecapDashboard,
     LaunchWarRoomDashboard,
@@ -1843,6 +1844,17 @@ def growth_launch_community_kit(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> LaunchCommunityKit:
     return _store().launch_community_kit_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+
+
+@app.get("/growth/launch-media-kit", response_model=LaunchMediaKit)
+def growth_launch_media_kit(
+    limit: int = 12,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> LaunchMediaKit:
+    return _store().launch_media_kit_for_workspace(
         workspace.workspace_id,
         limit=limit,
     )

@@ -2049,6 +2049,57 @@ def test_growth_launch_community_kit_prepares_reply_templates() -> None:
     assert payload["next_actions"]
 
 
+def test_growth_launch_media_kit_packages_external_launch_assets() -> None:
+    workspace = {"X-SpecPilot-Key": f"pytest-media-kit-{uuid4().hex}"}
+    for event_type in ["analysis_view", "share_cta", "subscription_cta"]:
+        response = client.post(
+            "/growth/events",
+            headers=workspace,
+            json={
+                "event_type": event_type,
+                "source": "pytest-media-kit",
+                "surface": "media-kit",
+                "label": f"미디어 키트 {event_type}",
+            },
+        )
+        assert response.status_code == 200
+    referral = client.post(
+        "/growth/waitlist-referrals",
+        headers=workspace,
+        json={
+            "email": "media-kit@example.com",
+            "persona": "creator",
+            "use_case": "뉴스레터와 커뮤니티에 공개 런칭룸을 소개하고 싶습니다.",
+            "contact_consent": True,
+            "source": "pytest-media-kit",
+        },
+    )
+    assert referral.status_code == 200
+
+    response = client.get("/growth/launch-media-kit?limit=8", headers=workspace)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kit_version"] == "specpilot.launch_media_kit.v1"
+    assert payload["workspace_id"].startswith("workspace_")
+    assert payload["status"] in {"ok", "warning", "blocker"}
+    assert payload["media_score"] > 0
+    assert payload["hero_statement"]
+    asset_keys = {asset["key"] for asset in payload["assets"]}
+    assert {
+        "product_workbench",
+        "launch_room",
+        "proof_hub",
+        "social_proof",
+    } <= asset_keys
+    pitch_channels = {pitch["channel"] for pitch in payload["pitches"]}
+    assert {"newsletter", "creator", "community", "team"} <= pitch_channels
+    assert all(pitch["copy_text"] for pitch in payload["pitches"])
+    assert payload["proof_points"]
+    assert "launch_media_pitch_copy" in payload["tracking_events"]
+    assert payload["usage_guidelines"]
+    assert payload["next_actions"]
+
+
 def test_public_launch_room_packages_demo_proof_and_growth_ctas() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-launch-room-{uuid4().hex}"}
     referral = client.post(
