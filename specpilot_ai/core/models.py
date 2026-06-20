@@ -1262,6 +1262,33 @@ class PublicLaunchSmokeDashboard(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class PublicLaunchPreflightCheck(BaseModel):
+    key: str
+    label: str
+    status: CheckStatus
+    owner: str
+    metric: str
+    evidence: str
+    required_action: str
+    public_path: str
+
+
+class PublicLaunchPreflightDashboard(BaseModel):
+    preflight_version: str = "specpilot.public_launch_preflight.v1"
+    workspace_id: str
+    generated_at: str
+    status: CheckStatus
+    go_decision: str
+    preflight_score: float = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    metric_cards: dict[str, int | float | str] = Field(default_factory=dict)
+    checks: list[PublicLaunchPreflightCheck] = Field(default_factory=list)
+    launch_brief: list[str] = Field(default_factory=list)
+    tracking_events: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PurchaseOnboardingStep(BaseModel):
     title: str
     description: str

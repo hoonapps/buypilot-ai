@@ -103,6 +103,7 @@ from specpilot_ai.core.models import (
     PublicDealTimingWindow,
     PublicLaunchActionRouter,
     PublicLaunchObjectionKit,
+    PublicLaunchPreflightDashboard,
     PublicLaunchRoom,
     PublicLaunchRoomCard,
     PublicLaunchRoomMarketLink,
@@ -1286,6 +1287,17 @@ def public_launch_smoke(
     workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
 ) -> PublicLaunchSmokeDashboard:
     return _store().public_launch_smoke_dashboard_for_workspace(
+        workspace.workspace_id,
+        limit=limit,
+    )
+
+
+@app.get("/ops/public-launch-preflight", response_model=PublicLaunchPreflightDashboard)
+def ops_public_launch_preflight(
+    limit: int = 8,
+    workspace: WorkspaceContext = WORKSPACE_DEPENDENCY,
+) -> PublicLaunchPreflightDashboard:
+    return _store().public_launch_preflight_for_workspace(
         workspace.workspace_id,
         limit=limit,
     )

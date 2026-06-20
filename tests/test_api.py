@@ -1826,6 +1826,58 @@ def test_public_launch_smoke_dashboard_checks_publish_surfaces() -> None:
     assert payload["next_actions"]
 
 
+def test_ops_public_launch_preflight_combines_final_release_checks() -> None:
+    workspace = {"X-SpecPilot-Key": f"pytest-preflight-{uuid4().hex}"}
+    analysis = client.post(
+        "/analyze",
+        headers=workspace,
+        json={
+            "query": "개발과 영상 편집용 노트북을 180만원 안에서 추천해줘",
+            "category": "laptop",
+            "budget_krw": 1800000,
+            "purpose": "creator",
+            "must_haves": ["32GB RAM", "가벼운 무게"],
+        },
+    )
+    assert analysis.status_code == 200
+    trace_id = analysis.json()["graph_trace_id"]
+    event = client.post(
+        "/growth/events",
+        headers=workspace,
+        json={
+            "event_type": "analysis_view",
+            "trace_id": trace_id,
+            "source": "pytest-preflight",
+            "surface": "launch",
+            "label": "최종 체크 CTA",
+        },
+    )
+    assert event.status_code == 200
+
+    response = client.get("/ops/public-launch-preflight?limit=8", headers=workspace)
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["preflight_version"] == "specpilot.public_launch_preflight.v1"
+    assert payload["workspace_id"].startswith("workspace_")
+    assert payload["status"] in {"ok", "warning", "blocker"}
+    assert payload["go_decision"] in {"go", "limited_beta", "hold", "blocked"}
+    assert payload["preflight_score"] > 0
+    check_keys = {check["key"] for check in payload["checks"]}
+    assert {
+        "public_surface",
+        "launch_gate",
+        "war_room",
+        "incident_response",
+        "measurement",
+        "share_preview",
+        "rollback",
+    } <= check_keys
+    assert payload["metric_cards"]["growth_events"] >= 1
+    assert "public_launch_preflight_view" in payload["tracking_events"]
+    assert payload["launch_brief"]
+    assert payload["next_actions"]
+
+
 def test_growth_launch_war_room_prioritizes_first_day_actions() -> None:
     workspace = {"X-SpecPilot-Key": f"pytest-war-room-{uuid4().hex}"}
     client.post(

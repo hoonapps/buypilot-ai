@@ -80,6 +80,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 공개 런칭 공유 확산팩: 카카오톡, 커뮤니티, 팀, 이메일/노션용 공유 URL, 복사용 문구, proof strip, 신뢰 고지, 측정 이벤트를 방문자용 패키지로 제공
 - 공개 런칭 액션 라우터: 첫 구매자, 공유 유입, 베타 대기자, 팀 구매자, 유료 관심자를 분석/공유/대기열/Team 상담/요금제 관심 CTA로 분기하고 Next.js 선택/CTA 클릭을 성장 퍼널 이벤트로 저장
 - 공개 런칭 스모크 체크: 런칭룸, 시장 리포트, proof, 반박 FAQ, 공유 확산팩, 액션 라우터, 전환 보드, 출시 게이트, 검색/공유 메타, 측정 이벤트 준비 상태를 한 번에 점검
+- 공개 출시 최종 체크: 스모크, go/no-go 게이트, 첫 24시간 워룸, 인시던트 대응, 측정 이벤트, 공유 미리보기를 합산해 go/제한 배포/보류/차단 결정을 반환
 - 첫 24시간 런칭 워룸: Pulse, 스모크, 전환 보드, 출시 게이트, 품질 회귀, CTA 실험, 추천/유료 수요를 합성해 확대/제한 배포/보류 판단과 owner별 실행 play를 제공
 - 런칭 인시던트 센터: 출시 준비도, 품질 회귀, 외부 연동, 데이터 거버넌스, observability outbox, 성장 이벤트를 빠르게 합성해 SEV level, commander brief, runbook, escalation을 제공
 - D+7 런칭 리포트: 첫 주 성장 이벤트, 공유 조회, 추천 대기열, 요금제 관심, CTA 실험, 리텐션, 품질 리스크를 반복할 성과/닫아야 할 리스크/founder update로 정리
@@ -421,6 +422,13 @@ curl http://127.0.0.1:8000/public/launch-action-router \
 
 ```bash
 curl http://127.0.0.1:8000/public/launch-smoke \
+  -H "X-SpecPilot-Key: $SPECPILOT_KEY"
+```
+
+공개 출시 최종 체크:
+
+```bash
+curl 'http://127.0.0.1:8000/ops/public-launch-preflight?limit=8' \
   -H "X-SpecPilot-Key: $SPECPILOT_KEY"
 ```
 
@@ -1439,6 +1447,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/public/launch-share-pack`: 런칭룸, 반박 FAQ, proof, 추천 대기열 신호를 카카오톡/커뮤니티/팀/이메일 공유 URL, 복사용 문구, 신뢰 고지, 측정 이벤트로 패키징
 - `/public/launch-action-router`: 첫 구매자, 공유 유입, 베타 대기자, 팀 구매자, 유료 관심자별 다음 행동과 CTA, 우선순위 점수, 측정 이벤트를 집계하고 Next.js 선택/CTA 클릭은 `/growth/events`로 저장
 - `/public/launch-smoke`: 런칭룸, 시장 리포트, 검증 허브, 반박 FAQ, 공유 확산팩, 액션 라우터, 공개 전환 보드, 출시 게이트, 검색/공유 메타, 전용 OG/Twitter 이미지, 측정 이벤트를 스모크 체크로 점검
+- `/ops/public-launch-preflight`: 공개 런칭 스모크, 출시 게이트, 첫 24시간 워룸, 인시던트 센터, 측정 이벤트, 공유 미리보기, rollback 기준을 최종 체크로 합산해 go/제한 배포/보류/차단 결정과 런칭 브리프를 반환
 - `/public/launch-room`: 데모 갤러리, 공개 시장 리포트, proof strip, 유입 허브, 런칭 반박 FAQ, 공유 확산팩, 액션 라우터, 런치 Pulse, 추천 대기열, 요금제 관심을 외부 공유용 런칭룸 카드로 집계
 - `/ops/team-purchase-consult-kit`: Team 요금제 관심 리드를 상담 브리프, 확인 입력, ROI 포인트, 롤아웃 단계, 제안 메일 초안으로 집계
 - `/ops/data-governance`: 워크스페이스별 테이블 인벤토리, 원문 연락처 표면, 마스킹 표면, 보존 초과 액션을 집계
@@ -1470,7 +1479,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/growth/launch-media-kit`: 런칭룸, 공개 proof, 소셜 proof, D+7 리포트, 커뮤니티 대응 키트를 합성해 대표 자산, 외부 소개 피치, 사용 가이드, 추적 이벤트를 반환
 - `/growth/launch-activation-offer`: 전환 보드, 추천 대기열, 요금제 의향, Team 상담 키트, 공개 라우팅 기반 미디어/커뮤니티 신호를 빠르게 합성해 첫 CTA, 전환 오퍼 카드, handoff prompt, proof, 추적 이벤트를 반환
 - `/growth/launch-response-loop`: 피드백, 성장 이벤트, 추천 대기열, 요금제 관심을 합성해 공개 proof 후보, founder reply 큐, 제품 수정 큐, 후속 메시지와 추적 이벤트를 반환
-- 런칭 대시보드 계열 API는 같은 워크스페이스/limit 조합의 반복 계산을 15초 TTL 캐시로 재사용하고 분석 저장, 피드백, 성장 이벤트, CTA 실험, 추천 대기열, 요금제 관심 기록 시 해당 워크스페이스 캐시를 무효화
+- 런칭 대시보드 계열 API는 같은 워크스페이스/limit 조합의 반복 계산을 15초 TTL 캐시로 재사용하고 분석 저장, 피드백, 성장 이벤트, CTA 실험, 추천 대기열, 요금제 관심 기록 시 해당 워크스페이스 캐시를 무효화하며 공개 출시 최종 체크도 캐시된 하위 신호를 합성한다
 - `/growth/launch-experiments`, `/growth/launch-experiments/{experiment_id}/events`, `/growth/launch-experiment-dashboard`: 공개 CTA variant, 노출/전환 이벤트, 승자 후보, 다음 실험 액션을 관리
 - `/growth/launch-kit`: 공개 베타 채널별 카피, CTA 실험, 출시 체크리스트, 위험 고지, 측정 계획을 반환
 - `/growth/launch-distribution-plan`: 런치 키트, 공개 전환 보드, 런치 Pulse, CTA 실험, 추천 대기열을 합성해 첫 주 채널 배포 슬롯, 복사 문구, 측정 이벤트, 위험 통제를 반환

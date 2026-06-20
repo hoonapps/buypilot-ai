@@ -114,6 +114,8 @@ from specpilot_ai.core.models import (
     PublicLaunchActionRoute,
     PublicLaunchActionRouter,
     PublicLaunchObjectionKit,
+    PublicLaunchPreflightCheck,
+    PublicLaunchPreflightDashboard,
     PublicLaunchSharePack,
     PublicLaunchShareVariant,
     PublicLaunchSmokeCheck,
@@ -4672,6 +4674,86 @@ class SpecPilotStore:
         return self._remember_launch_dashboard(
             workspace_id,
             "public_launch_smoke",
+            dashboard,
+            limit,
+        )
+
+    def public_launch_preflight_for_workspace(
+        self,
+        workspace_id: str,
+        limit: int = 8,
+    ) -> PublicLaunchPreflightDashboard:
+        cached = self._cached_launch_dashboard(
+            workspace_id,
+            "public_launch_preflight",
+            PublicLaunchPreflightDashboard,
+            limit,
+        )
+        if cached is not None:
+            return cached
+        smoke = self.public_launch_smoke_dashboard_for_workspace(workspace_id, limit=limit)
+        gate = self.launch_gate_for_workspace(workspace_id)
+        war_room = self.launch_war_room_for_workspace(workspace_id, limit=limit)
+        incident = self.launch_incident_center_for_workspace(workspace_id, limit=limit)
+        metrics = self.metrics_for_workspace(workspace_id)
+        checks = _public_launch_preflight_checks(
+            smoke=smoke,
+            gate=gate,
+            war_room=war_room,
+            incident=incident,
+            public_site_url=self.public_site_url,
+            growth_events=metrics.growth_events,
+        )
+        score = _public_launch_preflight_score(smoke, gate, war_room, incident, checks)
+        status = _public_launch_preflight_status(checks, score)
+        decision = _public_launch_preflight_decision(status, score, checks)
+        dashboard = PublicLaunchPreflightDashboard(
+            workspace_id=workspace_id,
+            generated_at=_now(),
+            status=status,
+            go_decision=decision,
+            preflight_score=score,
+            headline=_public_launch_preflight_headline(decision, score),
+            summary=_public_launch_preflight_summary(
+                smoke=smoke,
+                gate=gate,
+                war_room=war_room,
+                incident=incident,
+                checks=checks,
+            ),
+            metric_cards={
+                "smoke_score": smoke.smoke_score,
+                "launch_readiness_score": gate.launch_readiness_score,
+                "war_room_score": war_room.command_score,
+                "incident_score": incident.incident_score,
+                "growth_events": metrics.growth_events,
+                "warning_checks": sum(
+                    1 for check in checks if check.status == CheckStatus.warning
+                ),
+                "blocker_checks": sum(
+                    1 for check in checks if check.status == CheckStatus.blocker
+                ),
+                "public_site_url": self.public_site_url or "not_configured",
+            },
+            checks=checks,
+            launch_brief=_public_launch_preflight_brief(
+                decision=decision,
+                smoke=smoke,
+                gate=gate,
+                war_room=war_room,
+                incident=incident,
+            ),
+            tracking_events=[
+                "public_launch_preflight_view",
+                "public_launch_preflight_check_click",
+                "public_launch_preflight_go_decision",
+                "public_launch_preflight_rollback_open",
+            ],
+            next_actions=_public_launch_preflight_next_actions(checks, decision),
+        )
+        return self._remember_launch_dashboard(
+            workspace_id,
+            "public_launch_preflight",
             dashboard,
             limit,
         )
@@ -13199,6 +13281,238 @@ def _public_launch_smoke_next_actions(
     actions.append("공개 URL을 커뮤니티와 메신저에 붙여 미리보기 제목/이미지/설명을 실제로 확인하세요.")
     actions.append("스모크 warning 항목은 출시 배포 플랜의 D-day 체크리스트에 반영하세요.")
     return list(dict.fromkeys(actions))[:6]
+
+
+def _public_launch_preflight_check(
+    *,
+    key: str,
+    label: str,
+    status: CheckStatus,
+    owner: str,
+    metric: str,
+    evidence: str,
+    required_action: str,
+    public_path: str,
+) -> PublicLaunchPreflightCheck:
+    return PublicLaunchPreflightCheck(
+        key=key,
+        label=label,
+        status=status,
+        owner=owner,
+        metric=metric,
+        evidence=evidence,
+        required_action=required_action,
+        public_path=public_path,
+    )
+
+
+def _public_launch_preflight_checks(
+    *,
+    smoke: PublicLaunchSmokeDashboard,
+    gate: LaunchGateDashboard,
+    war_room: LaunchWarRoomDashboard,
+    incident: LaunchIncidentCenter,
+    public_site_url: str,
+    growth_events: int,
+) -> list[PublicLaunchPreflightCheck]:
+    return [
+        _public_launch_preflight_check(
+            key="public_surface",
+            label="공개 표면",
+            status=smoke.status,
+            owner="growth",
+            metric=f"스모크 {round(smoke.smoke_score)}점 · 공개 URL {len(smoke.publish_ready_paths)}개",
+            evidence=smoke.headline,
+            required_action=smoke.next_actions[0]
+            if smoke.next_actions
+            else "공개 URL과 기대 신호를 배포 직전에 다시 여세요.",
+            public_path="/launch#launch-smoke",
+        ),
+        _public_launch_preflight_check(
+            key="launch_gate",
+            label="go/no-go 게이트",
+            status=gate.status,
+            owner="product",
+            metric=f"{gate.decision} · 준비도 {round(gate.launch_readiness_score)}점",
+            evidence=gate.summary,
+            required_action=gate.required_actions[0]
+            if gate.required_actions
+            else "readiness, 품질, 데이터 거버넌스 상태를 유지하세요.",
+            public_path="/launch#launch-readiness-gate",
+        ),
+        _public_launch_preflight_check(
+            key="war_room",
+            label="첫 24시간 워룸",
+            status=war_room.status,
+            owner="ops",
+            metric=f"{war_room.decision} · 지휘 점수 {round(war_room.command_score)}점",
+            evidence=war_room.summary,
+            required_action=war_room.next_actions[0]
+            if war_room.next_actions
+            else "첫 24시간 확대/복구 play owner를 고정하세요.",
+            public_path="/launch#launch-war-room",
+        ),
+        _public_launch_preflight_check(
+            key="incident_response",
+            label="인시던트 대응",
+            status=incident.status,
+            owner="ops",
+            metric=f"{incident.incident_level} · 대응 점수 {round(incident.incident_score)}점",
+            evidence=incident.commander_brief,
+            required_action=incident.next_actions[0]
+            if incident.next_actions
+            else "SEV 기준과 escalation 경로를 배포 공지에 붙이세요.",
+            public_path="/launch#launch-incident-center",
+        ),
+        _public_launch_preflight_check(
+            key="measurement",
+            label="측정 이벤트",
+            status=CheckStatus.ok if growth_events >= 1 else CheckStatus.warning,
+            owner="growth",
+            metric=f"성장 이벤트 {growth_events}건",
+            evidence="CTA, 공유, 추천, 요금제 관심 이벤트가 공개 반응 판단 표본입니다.",
+            required_action=(
+                "런칭 직후 이벤트 대시보드를 30분 간격으로 확인하세요."
+                if growth_events >= 1
+                else "공개 전 테스트 CTA 클릭을 growth event로 한 번 이상 남기세요."
+            ),
+            public_path="/launch#launch-public-ops",
+        ),
+        _public_launch_preflight_check(
+            key="share_preview",
+            label="검색/공유 미리보기",
+            status=CheckStatus.ok if public_site_url else CheckStatus.warning,
+            owner="marketing",
+            metric=(
+                "PUBLIC_SITE_URL 설정됨"
+                if public_site_url
+                else "PUBLIC_SITE_URL 미설정"
+            ),
+            evidence="OG/Twitter 이미지, robots, sitemap, canonical을 같은 제품 맥락으로 노출합니다.",
+            required_action=(
+                "커뮤니티와 메신저에 실제 URL을 붙여 제목/이미지/설명을 확인하세요."
+                if public_site_url
+                else "배포 도메인을 PUBLIC_SITE_URL에 설정한 뒤 공유 미리보기를 확인하세요."
+            ),
+            public_path="/launch/opengraph-image",
+        ),
+        _public_launch_preflight_check(
+            key="rollback",
+            label="제한 배포/롤백 기준",
+            status=incident.status if incident.status == CheckStatus.blocker else war_room.status,
+            owner="founder",
+            metric=f"워룸 {war_room.decision} · SEV {incident.incident_level}",
+            evidence="스모크 blocker, readiness blocker, SEV2 이상은 공개 확대를 제한합니다.",
+            required_action="공개 글 하단에 founder reply와 복구 ETA 문구를 준비하세요.",
+            public_path="/launch#launch-response-loop",
+        ),
+    ]
+
+
+def _public_launch_preflight_score(
+    smoke: PublicLaunchSmokeDashboard,
+    gate: LaunchGateDashboard,
+    war_room: LaunchWarRoomDashboard,
+    incident: LaunchIncidentCenter,
+    checks: list[PublicLaunchPreflightCheck],
+) -> float:
+    status_penalty = sum(
+        9 if check.status == CheckStatus.warning else 22 if check.status == CheckStatus.blocker else 0
+        for check in checks
+    )
+    weighted_score = (
+        smoke.smoke_score * 0.24
+        + gate.launch_readiness_score * 0.24
+        + war_room.command_score * 0.22
+        + incident.incident_score * 0.2
+        + max(0, 100 - status_penalty) * 0.1
+    )
+    return round(max(0.0, min(100.0, weighted_score)), 1)
+
+
+def _public_launch_preflight_status(
+    checks: list[PublicLaunchPreflightCheck],
+    score: float,
+) -> CheckStatus:
+    if score < 46 or any(check.status == CheckStatus.blocker for check in checks):
+        return CheckStatus.blocker
+    if score < 78 or any(check.status == CheckStatus.warning for check in checks):
+        return CheckStatus.warning
+    return CheckStatus.ok
+
+
+def _public_launch_preflight_decision(
+    status: CheckStatus,
+    score: float,
+    checks: list[PublicLaunchPreflightCheck],
+) -> str:
+    blocker_keys = {check.key for check in checks if check.status == CheckStatus.blocker}
+    if blocker_keys & {"launch_gate", "incident_response", "rollback"}:
+        return "blocked"
+    if status == CheckStatus.blocker:
+        return "hold"
+    if score >= 82 and status == CheckStatus.ok:
+        return "go"
+    return "limited_beta"
+
+
+def _public_launch_preflight_headline(decision: str, score: float) -> str:
+    if decision == "go":
+        return f"최종 체크 {round(score)}점, 공개 배포를 진행해도 됩니다."
+    if decision == "limited_beta":
+        return f"최종 체크 {round(score)}점, 제한 배포로 시작하세요."
+    if decision == "hold":
+        return f"최종 체크 {round(score)}점, 보강 후 다시 확인하세요."
+    return f"최종 체크 {round(score)}점, 차단 항목을 닫기 전 공개 확대를 막으세요."
+
+
+def _public_launch_preflight_summary(
+    *,
+    smoke: PublicLaunchSmokeDashboard,
+    gate: LaunchGateDashboard,
+    war_room: LaunchWarRoomDashboard,
+    incident: LaunchIncidentCenter,
+    checks: list[PublicLaunchPreflightCheck],
+) -> str:
+    warning_count = sum(1 for check in checks if check.status == CheckStatus.warning)
+    blocker_count = sum(1 for check in checks if check.status == CheckStatus.blocker)
+    return (
+        f"스모크 {round(smoke.smoke_score)}점, 게이트 {gate.decision}, "
+        f"워룸 {war_room.decision}, 인시던트 {incident.incident_level}을 합산했습니다. "
+        f"warning {warning_count}개, blocker {blocker_count}개를 D-day 체크리스트로 올립니다."
+    )
+
+
+def _public_launch_preflight_brief(
+    *,
+    decision: str,
+    smoke: PublicLaunchSmokeDashboard,
+    gate: LaunchGateDashboard,
+    war_room: LaunchWarRoomDashboard,
+    incident: LaunchIncidentCenter,
+) -> list[str]:
+    return [
+        f"공개 상태: {decision}. 스모크 {round(smoke.smoke_score)}점, 준비도 {round(gate.launch_readiness_score)}점입니다.",
+        f"첫 24시간 운영: {war_room.decision}. 우선 play는 {war_room.next_actions[0] if war_room.next_actions else '채널별 반응 모니터링'}입니다.",
+        f"장애 대응: {incident.incident_level}. 첫 대응은 {incident.next_actions[0] if incident.next_actions else 'SEV 기준과 runbook 확인'}입니다.",
+    ]
+
+
+def _public_launch_preflight_next_actions(
+    checks: list[PublicLaunchPreflightCheck],
+    decision: str,
+) -> list[str]:
+    actions = [
+        check.required_action for check in checks if check.status != CheckStatus.ok
+    ]
+    if decision == "go":
+        actions.append("공개 글 발행 후 30분, 2시간, 24시간 지점에 워룸 점수를 다시 확인하세요.")
+    elif decision == "limited_beta":
+        actions.append("첫 배포 채널을 1개로 제한하고 warning 항목을 닫은 뒤 확산하세요.")
+    else:
+        actions.append("blocker 항목 owner와 ETA를 확정한 뒤 공개 링크 배포를 보류하세요.")
+    actions.append("founder reply, rollback 공지, proof 후보 큐를 런칭 반응 후속 루프에 연결하세요.")
+    return list(dict.fromkeys(actions))[:7]
 
 
 def _launch_war_room_regression_score(status: CheckStatus) -> float:
