@@ -2416,6 +2416,62 @@ class PublicPriceBreakdownKit(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class DealSanityRequest(BaseModel):
+    category: Category = Category.desktop_pc
+    product_title: str = "특가 후보"
+    seller_name: str = "판매자"
+    listed_price_krw: int = Field(default=2_000_000, ge=0, le=200_000_000)
+    reference_price_krw: int | None = Field(default=None, ge=0, le=200_000_000)
+    lowest_seen_price_krw: int | None = Field(default=None, ge=0, le=200_000_000)
+    budget_krw: int | None = Field(default=None, ge=0, le=200_000_000)
+    shipping_fee_krw: int = Field(default=0, ge=0, le=10_000_000)
+    coupon_discount_krw: int = Field(default=0, ge=0, le=50_000_000)
+    card_discount_krw: int = Field(default=0, ge=0, le=50_000_000)
+    point_rebate_krw: int = Field(default=0, ge=0, le=50_000_000)
+    warranty_months: int | None = Field(default=None, ge=0, le=120)
+    return_window_days: int | None = Field(default=None, ge=0, le=365)
+    stock_count: int | None = Field(default=None, ge=0, le=100_000)
+    discount_expires_hours: int | None = Field(default=None, ge=0, le=8760)
+    seller_rating_percent: float | None = Field(default=None, ge=0, le=100)
+    review_count: int | None = Field(default=None, ge=0, le=1_000_000)
+    risk_terms: list[str] = Field(default_factory=list)
+    evidence_text: str = ""
+    source: str = "web"
+
+
+class DealSanityFlag(BaseModel):
+    flag_id: str
+    label: str
+    status: CheckStatus
+    evidence: str
+    recommendation: str
+
+
+class PublicDealSanityKit(BaseModel):
+    kit_version: str = "specpilot.public_deal_sanity_kit.v1"
+    generated_at: str
+    category: Category
+    product_title: str
+    seller_name: str
+    deal_status: CheckStatus
+    sanity_score: int = Field(ge=0, le=100)
+    effective_price_krw: int
+    savings_krw: int | None = None
+    savings_rate_percent: float | None = None
+    headline: str
+    summary: str
+    sanity_flags: list[DealSanityFlag] = Field(default_factory=list)
+    seller_questions: list[str] = Field(default_factory=list)
+    evidence_checklist: list[str] = Field(default_factory=list)
+    checkout_stop_rules: list[str] = Field(default_factory=list)
+    price_prefill: PriceBreakdownRequest
+    analysis_prefill: str
+    share_copy: str
+    primary_cta_label: str = "특가 검수로 분석 시작"
+    primary_cta_path: str = "#analysis"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PurchaseExecutionKitRequest(BaseModel):
     category: Category = Category.desktop_pc
     product_title: str = "구매 후보"

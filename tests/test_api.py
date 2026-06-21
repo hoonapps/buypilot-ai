@@ -1729,6 +1729,87 @@ def test_public_price_breakdown_kit_calculates_final_checkout_price() -> None:
     assert any("결제를 보류" in action for action in risky_payload["next_actions"])
 
 
+def test_public_deal_sanity_kit_flags_fake_or_risky_discounts() -> None:
+    response = client.post(
+        "/public/deal-sanity-kit",
+        json={
+            "category": "desktop_pc",
+            "product_title": "Creator RTX 4070 SUPER Build",
+            "seller_name": "PC Mall",
+            "listed_price_krw": 2_165_000,
+            "reference_price_krw": 2_350_000,
+            "lowest_seen_price_krw": 2_100_000,
+            "budget_krw": 2_200_000,
+            "shipping_fee_krw": 0,
+            "coupon_discount_krw": 40_000,
+            "card_discount_krw": 20_000,
+            "point_rebate_krw": 0,
+            "warranty_months": 24,
+            "return_window_days": 14,
+            "stock_count": 8,
+            "discount_expires_hours": 48,
+            "seller_rating_percent": 97.5,
+            "review_count": 180,
+            "risk_terms": ["카드 할인"],
+            "evidence_text": "국내 AS 24개월, 반품 14일, 새상품",
+            "source": "pytest",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kit_version"] == "specpilot.public_deal_sanity_kit.v1"
+    assert payload["category"] == "desktop_pc"
+    assert payload["effective_price_krw"] == 2_105_000
+    assert payload["savings_krw"] == 245_000
+    assert payload["savings_rate_percent"] == 10.4
+    assert payload["deal_status"] == "ok"
+    assert payload["sanity_score"] >= 90
+    assert any(flag["flag_id"] == "meaningful_discount" for flag in payload["sanity_flags"])
+    assert payload["price_prefill"]["category"] == "desktop_pc"
+    assert payload["price_prefill"]["expected_report_price_krw"] == 2_350_000
+    assert "SpecPilot AI 특가 안전성 검수" in payload["share_copy"]
+    assert "특가 안전성" in payload["analysis_prefill"]
+    assert payload["seller_questions"]
+    assert payload["evidence_checklist"]
+    assert payload["checkout_stop_rules"]
+    assert payload["next_actions"]
+
+    risky = client.post(
+        "/public/deal-sanity-kit",
+        json={
+            "category": "laptop",
+            "product_title": "해외 리퍼 타임딜 노트북",
+            "seller_name": "Open Market",
+            "listed_price_krw": 1_290_000,
+            "reference_price_krw": 2_200_000,
+            "lowest_seen_price_krw": 1_500_000,
+            "budget_krw": 1_400_000,
+            "shipping_fee_krw": 80_000,
+            "coupon_discount_krw": 0,
+            "card_discount_krw": 0,
+            "point_rebate_krw": 0,
+            "warranty_months": 0,
+            "return_window_days": 0,
+            "stock_count": 2,
+            "discount_expires_hours": 3,
+            "seller_rating_percent": 88,
+            "review_count": 3,
+            "risk_terms": ["해외", "리퍼", "반품 불가", "타임딜", "조건부 청구 할인"],
+            "evidence_text": "리퍼 해외배송 반품 불가",
+            "source": "pytest",
+        },
+    )
+    assert risky.status_code == 200
+    risky_payload = risky.json()
+    assert risky_payload["deal_status"] == "blocker"
+    assert risky_payload["effective_price_krw"] == 1_370_000
+    assert risky_payload["sanity_score"] < 60
+    assert any(flag["status"] == "blocker" for flag in risky_payload["sanity_flags"])
+    assert any("결제하지" in rule for rule in risky_payload["checkout_stop_rules"])
+    assert any("결제하지" in action for action in risky_payload["next_actions"])
+
+
 def test_public_purchase_execution_kit_turns_checks_into_checkout_runbook() -> None:
     verify = client.post(
         "/public/purchase-execution-kit",

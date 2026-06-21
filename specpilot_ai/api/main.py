@@ -56,6 +56,7 @@ from specpilot_ai.core.models import (
     CompletionReportTemplateRequest,
     CustomCandidateDecisionRequest,
     DataGovernanceDashboard,
+    DealSanityRequest,
     DecisionDefenseRequest,
     DemoScenarioGallery,
     FeedbackRecord,
@@ -115,6 +116,7 @@ from specpilot_ai.core.models import (
     PublicCheckoutNudgeKit,
     PublicConversionBoard,
     PublicCustomCandidateDecisionKit,
+    PublicDealSanityKit,
     PublicDealTimingWindow,
     PublicDecisionDefenseKit,
     PublicFirstBootSetupKit,
@@ -230,6 +232,7 @@ from specpilot_ai.services.checkout_lock import build_public_checkout_lock_kit
 from specpilot_ai.services.custom_candidate_decision import (
     build_public_custom_candidate_decision_kit,
 )
+from specpilot_ai.services.deal_sanity import build_public_deal_sanity_kit
 from specpilot_ai.services.deal_timing import build_public_deal_timing_window
 from specpilot_ai.services.decision_defense import build_public_decision_defense_kit
 from specpilot_ai.services.demo_gallery import build_demo_scenario_gallery
@@ -1427,6 +1430,16 @@ def public_price_breakdown_kit(
     request: PriceBreakdownRequest,
 ) -> PublicPriceBreakdownKit:
     return build_public_price_breakdown_kit(request)
+
+
+@app.post(
+    "/public/deal-sanity-kit",
+    response_model=PublicDealSanityKit,
+)
+def public_deal_sanity_kit(
+    request: DealSanityRequest,
+) -> PublicDealSanityKit:
+    return build_public_deal_sanity_kit(request)
 
 
 @app.post(

@@ -439,6 +439,35 @@ curl -X POST http://127.0.0.1:8000/public/price-breakdown-kit \
   }'
 ```
 
+공개 특가 안전성 검수 키트는 컴퓨터/노트북 특가 후보의 표시가, 기준가, 최근 최저가, 쿠폰/카드 조건, 보증/반품, 판매자 평판, 위험 문구를 결제 가능/확인 필요/차단 판단으로 변환합니다.
+
+```bash
+curl -X POST http://127.0.0.1:8000/public/deal-sanity-kit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "category": "desktop_pc",
+    "product_title": "Creator RTX 4070 SUPER Build",
+    "seller_name": "PC Mall",
+    "listed_price_krw": 2165000,
+    "reference_price_krw": 2350000,
+    "lowest_seen_price_krw": 2100000,
+    "budget_krw": 2200000,
+    "shipping_fee_krw": 0,
+    "coupon_discount_krw": 40000,
+    "card_discount_krw": 20000,
+    "point_rebate_krw": 0,
+    "warranty_months": 24,
+    "return_window_days": 14,
+    "stock_count": 8,
+    "discount_expires_hours": 48,
+    "seller_rating_percent": 97.5,
+    "review_count": 180,
+    "risk_terms": ["카드 할인"],
+    "evidence_text": "국내 AS 24개월, 반품 14일, 새상품",
+    "source": "release_smoke"
+  }'
+```
+
 공개 구매 실행 패키지는 최종가, 예산, blocker/warning, 누락 증거, 판매자 질문을 결제 전 실행 단계, 증거 게이트, 중단 조건, 공유 문구로 변환합니다.
 
 ```bash
@@ -1979,6 +2008,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/public/ownership-cost-kit`: 공개 구매가/보유 기간/유지비/업그레이드비/다운타임/재판매율을 총소유비용, 월 실질 비용, 감가 시나리오, 판매자 질문으로 변환
 - `/public/warranty-return-kit`: 공개 반품/교환 기간, 초기 불량 예외, 개봉 후 반품, 보증 주체, 보증 승계, 반품 비용, 위험 약관을 결제 전 보호 점수, 판매자 질문, 증거 체크리스트로 변환
 - `/public/price-breakdown-kit`: 공개 표시가, 배송비, 조립비, OS 비용, 쿠폰, 카드 할인, 포인트, 수량을 최종 실구매가, 예산 차이, 리포트 예상가 차이, 가격 리스크로 변환
+- `/public/deal-sanity-kit`: 공개 컴퓨터/노트북 특가 후보의 기준가, 최근 최저가, 실구매가, 보증/반품, 판매자 평판, 위험 문구를 특가 안전성 점수와 결제 중단 규칙으로 변환
 - `/public/purchase-execution-kit`: 공개 최종가, 예산, blocker/warning, 누락 증거, 판매자 질문을 결제 전 실행 단계, 증거 게이트, 중단 조건, 채널별 공유 문구로 변환
 - `/public/custom-candidate-decision-kit`: 공개 실제 후보 2~6개를 가격, 목적 적합도, 증거, 보증/반품, 재고, 위험 조건으로 랭킹하고 1순위/보류/제외 판단, 판매자 질문, 분석 prefill로 변환
 - `/public/checkout-lock-kit`: 공개 후보 비교에서 고른 1순위의 잠금가/사양/판매자/보증 기준을 최종 결제 화면과 대조해 locked/verify/blocked, 중단 조건, 캡처 체크리스트, 구매 실행 prefill로 변환
