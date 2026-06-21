@@ -667,6 +667,50 @@ curl -X POST http://127.0.0.1:8000/public/seller-negotiation-kit \
   }'
 ```
 
+공개 가격 신뢰 검증 키트는 가격 캡처 시각, 출처 다양성, 제휴/비제휴 대안, 결제 화면 증거를 검증해 오픈 후 “가격이 최신인가?” 의심을 해소합니다.
+
+```bash
+curl -X POST http://127.0.0.1:8000/public/price-trust-kit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "category": "desktop_pc",
+    "product_title": "Creator RTX 4070 SUPER Build",
+    "report_price_krw": 2165000,
+    "budget_krw": 2200000,
+    "selected_seller_name": "PC Mall",
+    "candidates": [
+      {
+        "source_name": "가격비교",
+        "seller_name": "PC Mall",
+        "listed_price_krw": 2165000,
+        "shipping_fee_krw": 10000,
+        "coupon_discount_krw": 40000,
+        "card_discount_krw": 20000,
+        "captured_minutes_ago": 18,
+        "stock_count": 8,
+        "affiliate_link": true,
+        "non_affiliate_available": true,
+        "screenshot_captured": true,
+        "checkout_price_verified": true,
+        "url_verified": true,
+        "condition_notes": ["국내 AS 24개월", "반품 14일"]
+      },
+      {
+        "source_name": "공식몰",
+        "seller_name": "Official Store",
+        "listed_price_krw": 2190000,
+        "captured_minutes_ago": 22,
+        "stock_count": 12,
+        "affiliate_link": false,
+        "non_affiliate_available": true,
+        "screenshot_captured": true,
+        "checkout_price_verified": true,
+        "url_verified": true
+      }
+    ]
+  }'
+```
+
 공개 결제 후속 넛지 키트는 장바구니 검수 결과를 받아 판매자 답변 요청, 목표가 재확인, 구매 결과 회수까지 이어지는 후속 알림 문구와 분석/대기열 prefill을 반환합니다.
 
 ```bash
@@ -2132,6 +2176,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/public/warranty-return-kit`: 공개 반품/교환 기간, 초기 불량 예외, 개봉 후 반품, 보증 주체, 보증 승계, 반품 비용, 위험 약관을 결제 전 보호 점수, 판매자 질문, 증거 체크리스트로 변환
 - `/public/price-breakdown-kit`: 공개 표시가, 배송비, 조립비, OS 비용, 쿠폰, 카드 할인, 포인트, 수량을 최종 실구매가, 예산 차이, 리포트 예상가 차이, 가격 리스크로 변환
 - `/public/deal-sanity-kit`: 공개 컴퓨터/노트북 특가 후보의 기준가, 최근 최저가, 실구매가, 보증/반품, 판매자 평판, 위험 문구를 특가 안전성 점수와 결제 중단 규칙으로 변환
+- `/public/price-trust-kit`: 공개 가격 캡처 시각, 출처 다양성, 제휴/비제휴 대안, 결제 화면 증거를 가격 신뢰 점수, 고지 문구, 공유 proof로 변환
 - `/public/budget-stress-kit`: 공개 후보 가격과 예산 차이를 예산 유지, 증액, 조건 완화, 목표가 대기 시나리오와 결제 규칙으로 변환
 - `/public/purchase-execution-kit`: 공개 최종가, 예산, blocker/warning, 누락 증거, 판매자 질문을 결제 전 실행 단계, 증거 게이트, 중단 조건, 채널별 공유 문구로 변환
 - `/public/reviewer-quick-card-kit`: 공개 구매 후보를 공유받은 검토자의 30초 승인/증거 요청/반대 응답 카드, 리스크 체크, 답장 템플릿으로 변환

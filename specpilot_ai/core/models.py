@@ -2652,6 +2652,87 @@ class PublicDealSanityKit(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class PriceTrustCandidateInput(BaseModel):
+    source_name: str = "가격 출처"
+    seller_name: str = "판매자"
+    product_title: str = "구매 후보"
+    listed_price_krw: int = Field(default=2_000_000, ge=0, le=200_000_000)
+    shipping_fee_krw: int = Field(default=0, ge=0, le=10_000_000)
+    coupon_discount_krw: int = Field(default=0, ge=0, le=50_000_000)
+    card_discount_krw: int = Field(default=0, ge=0, le=50_000_000)
+    point_rebate_krw: int = Field(default=0, ge=0, le=50_000_000)
+    captured_minutes_ago: int | None = Field(default=None, ge=0, le=525_600)
+    stock_count: int | None = Field(default=None, ge=0, le=100_000)
+    affiliate_link: bool = False
+    non_affiliate_available: bool = False
+    screenshot_captured: bool = False
+    checkout_price_verified: bool = False
+    url_verified: bool = False
+    condition_notes: list[str] = Field(default_factory=list)
+
+
+class PriceTrustRequest(BaseModel):
+    category: Category = Category.desktop_pc
+    product_title: str = "구매 후보"
+    report_price_krw: int | None = Field(default=None, ge=0, le=200_000_000)
+    budget_krw: int | None = Field(default=None, ge=0, le=200_000_000)
+    selected_seller_name: str = ""
+    candidates: list[PriceTrustCandidateInput] = Field(default_factory=list)
+    source: str = "web"
+
+
+class PriceTrustCandidate(BaseModel):
+    candidate_id: str
+    source_name: str
+    seller_name: str
+    effective_price_krw: int
+    freshness_label: str
+    status: CheckStatus
+    evidence: str
+    recommendation: str
+    affiliate_link: bool
+    non_affiliate_available: bool
+
+
+class PriceTrustCheck(BaseModel):
+    check_id: str
+    label: str
+    status: CheckStatus
+    finding: str
+    action: str
+
+
+class PriceTrustMessage(BaseModel):
+    channel: str
+    label: str
+    copy_text: str
+    cta_label: str
+
+
+class PublicPriceTrustKit(BaseModel):
+    kit_version: str = "specpilot.public_price_trust_kit.v1"
+    generated_at: str
+    category: Category
+    product_title: str
+    trust_status: CheckStatus
+    trust_score: int = Field(ge=0, le=100)
+    selected_effective_price_krw: int | None = None
+    report_price_delta_krw: int | None = None
+    headline: str
+    summary: str
+    candidates: list[PriceTrustCandidate] = Field(default_factory=list)
+    checks: list[PriceTrustCheck] = Field(default_factory=list)
+    evidence_checklist: list[str] = Field(default_factory=list)
+    disclosure_notes: list[str] = Field(default_factory=list)
+    buyer_warning: str
+    messages: list[PriceTrustMessage] = Field(default_factory=list)
+    analysis_prefill: str
+    share_copy: str
+    primary_cta_label: str = "가격 신뢰로 분석 시작"
+    primary_cta_path: str = "#analysis"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class BudgetStressRequest(BaseModel):
     category: Category = Category.desktop_pc
     product_title: str = "구매 후보"

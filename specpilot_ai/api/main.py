@@ -103,6 +103,7 @@ from specpilot_ai.core.models import (
     OwnershipCostRequest,
     PriceAlertPlan,
     PriceBreakdownRequest,
+    PriceTrustRequest,
     PricingDashboard,
     PricingPlan,
     PrivacyPolicySummary,
@@ -140,6 +141,7 @@ from specpilot_ai.core.models import (
     PublicOutcomeShareCardKit,
     PublicOwnershipCostKit,
     PublicPriceBreakdownKit,
+    PublicPriceTrustKit,
     PublicPriceWatchKit,
     PublicProductPageEvidenceKit,
     PublicProofHub,
@@ -264,6 +266,7 @@ from specpilot_ai.services.onboarding import purchase_onboarding_playbooks
 from specpilot_ai.services.outcome_share_card import build_public_outcome_share_card_kit
 from specpilot_ai.services.ownership_cost import build_public_ownership_cost_kit
 from specpilot_ai.services.price_breakdown import build_public_price_breakdown_kit
+from specpilot_ai.services.price_trust import build_public_price_trust_kit
 from specpilot_ai.services.price_watch import build_public_price_watch_kit
 from specpilot_ai.services.product_page_evidence import build_public_product_page_evidence_kit
 from specpilot_ai.services.purchase_aftercare import build_public_purchase_aftercare_kit
@@ -1485,6 +1488,16 @@ def public_deal_sanity_kit(
     request: DealSanityRequest,
 ) -> PublicDealSanityKit:
     return build_public_deal_sanity_kit(request)
+
+
+@app.post(
+    "/public/price-trust-kit",
+    response_model=PublicPriceTrustKit,
+)
+def public_price_trust_kit(
+    request: PriceTrustRequest,
+) -> PublicPriceTrustKit:
+    return build_public_price_trust_kit(request)
 
 
 @app.post(

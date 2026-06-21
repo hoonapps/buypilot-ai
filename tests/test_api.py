@@ -2031,6 +2031,105 @@ def test_public_deal_sanity_kit_flags_fake_or_risky_discounts() -> None:
     assert any("결제하지" in action for action in risky_payload["next_actions"])
 
 
+def test_public_price_trust_kit_checks_freshness_and_affiliate_neutrality() -> None:
+    response = client.post(
+        "/public/price-trust-kit",
+        json={
+            "category": "desktop_pc",
+            "product_title": "Creator RTX 4070 SUPER Build",
+            "report_price_krw": 2_165_000,
+            "budget_krw": 2_200_000,
+            "selected_seller_name": "PC Mall",
+            "candidates": [
+                {
+                    "source_name": "가격비교",
+                    "seller_name": "PC Mall",
+                    "product_title": "Creator RTX 4070 SUPER Build",
+                    "listed_price_krw": 2_165_000,
+                    "shipping_fee_krw": 10_000,
+                    "coupon_discount_krw": 40_000,
+                    "card_discount_krw": 20_000,
+                    "captured_minutes_ago": 18,
+                    "stock_count": 8,
+                    "affiliate_link": True,
+                    "non_affiliate_available": True,
+                    "screenshot_captured": True,
+                    "checkout_price_verified": True,
+                    "url_verified": True,
+                    "condition_notes": ["국내 AS 24개월", "반품 14일"],
+                },
+                {
+                    "source_name": "공식몰",
+                    "seller_name": "Official Store",
+                    "product_title": "Creator RTX 4070 SUPER Build",
+                    "listed_price_krw": 2_190_000,
+                    "shipping_fee_krw": 0,
+                    "captured_minutes_ago": 22,
+                    "stock_count": 12,
+                    "affiliate_link": False,
+                    "non_affiliate_available": True,
+                    "screenshot_captured": True,
+                    "checkout_price_verified": True,
+                    "url_verified": True,
+                    "condition_notes": ["공식몰", "국내 AS"],
+                },
+            ],
+            "source": "pytest",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kit_version"] == "specpilot.public_price_trust_kit.v1"
+    assert payload["trust_status"] == "warning"
+    assert payload["trust_score"] >= 70
+    assert payload["selected_effective_price_krw"] == 2_115_000
+    assert payload["report_price_delta_krw"] == -50_000
+    assert {check["check_id"] for check in payload["checks"]} >= {
+        "freshness",
+        "source_diversity",
+        "affiliate_neutrality",
+        "evidence",
+        "selected_price",
+    }
+    assert any("제휴" in note for note in payload["disclosure_notes"])
+    assert "가격 신뢰" in payload["analysis_prefill"]
+    assert "SpecPilot AI 가격 신뢰 검증" in payload["share_copy"]
+    assert payload["primary_cta_path"] == "#analysis"
+
+    blocked = client.post(
+        "/public/price-trust-kit",
+        json={
+            "category": "laptop",
+            "product_title": "초저가 리퍼 노트북",
+            "report_price_krw": 1_200_000,
+            "selected_seller_name": "Deal Mall",
+            "candidates": [
+                {
+                    "source_name": "제휴 블로그",
+                    "seller_name": "Deal Mall",
+                    "listed_price_krw": 1_420_000,
+                    "captured_minutes_ago": 260,
+                    "stock_count": 0,
+                    "affiliate_link": True,
+                    "non_affiliate_available": False,
+                    "screenshot_captured": False,
+                    "checkout_price_verified": False,
+                    "url_verified": False,
+                    "condition_notes": ["해외 리퍼", "반품 불가"],
+                }
+            ],
+        },
+    )
+    assert blocked.status_code == 200
+    blocked_payload = blocked.json()
+    assert blocked_payload["trust_status"] == "blocker"
+    assert blocked_payload["trust_score"] < 40
+    assert any(check["status"] == "blocker" for check in blocked_payload["checks"])
+    assert any("결제를 멈추세요" in blocked_payload["buyer_warning"] for _ in [0])
+    assert any("비제휴" in action for action in blocked_payload["next_actions"])
+
+
 def test_public_budget_stress_kit_compares_raise_relax_and_wait_paths() -> None:
     response = client.post(
         "/public/budget-stress-kit",
