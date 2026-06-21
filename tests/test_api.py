@@ -666,6 +666,63 @@ def test_public_listing_decoder_kit_turns_shopping_title_into_scanner_prefill() 
     assert any("바로 결제하지" in action for action in risky_payload["next_actions"])
 
 
+def test_public_spec_term_decoder_kit_explains_beginner_purchase_terms() -> None:
+    response = client.post(
+        "/public/spec-term-decoder-kit",
+        json={
+            "category": "laptop",
+            "product_title": "CreatorBook Pro 16 RTX 4060 RAM 32GB SSD 1TB FreeDOS",
+            "listing_text": (
+                "RTX 4060 TGP 75W / RAM 온보드 16GB+슬롯 16GB / "
+                "SSD 1TB / FreeDOS / USB-C PD충전 / 국내 AS"
+            ),
+            "terms": ["FreeDOS", "TGP", "온보드", "PD충전"],
+            "buyer_level": "beginner",
+            "primary_purpose": "portable_creator",
+            "budget_krw": 2_200_000,
+            "source": "pytest",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kit_version"] == "specpilot.public_spec_term_decoder_kit.v1"
+    assert payload["category"] == "laptop"
+    assert payload["decoder_status"] == "warning"
+    assert payload["clarity_score"] >= 50
+    terms = {item["term"]: item for item in payload["explanations"]}
+    assert "FreeDOS" in terms
+    assert "Windows" in terms["FreeDOS"]["purchase_impact"]
+    assert "TGP" in terms
+    assert terms["TGP"]["status"] == "warning"
+    assert any("Windows 포함 여부" in question for question in payload["seller_questions"])
+    assert any("위험 용어" in item for item in payload["beginner_checklist"])
+    assert payload["scanner_prefill"]["source"] == "spec_term_decoder"
+    assert payload["scanner_prefill"]["expected_gpu"]
+    assert payload["scanner_prefill"]["expected_ram_gb"] == 32
+    assert payload["scanner_prefill"]["expected_storage_gb"] == 1000
+    assert "초보자 기준" in payload["analysis_prefill"]
+    assert "SpecPilot AI 사양 용어 해석" in payload["share_copy"]
+    assert payload["primary_cta_path"] == "#spec-scanner"
+    assert payload["next_actions"]
+
+    risky = client.post(
+        "/public/spec-term-decoder-kit",
+        json={
+            "category": "desktop_pc",
+            "product_title": "RTX 4070 리퍼 전시 PC 반품불가",
+            "listing_text": "리퍼 전시 특가 / 반품불가 / Windows 미포함",
+            "terms": ["리퍼", "전시", "반품불가"],
+            "budget_krw": 2_200_000,
+        },
+    )
+    assert risky.status_code == 200
+    risky_payload = risky.json()
+    assert risky_payload["decoder_status"] == "blocker"
+    assert "리퍼" in risky_payload["risk_terms"]
+    assert any("결제하지" in action for action in risky_payload["next_actions"])
+
+
 def test_public_product_page_evidence_kit_extracts_safe_snapshot_and_prefills_checks() -> None:
     response = client.post(
         "/public/product-page-evidence-kit",

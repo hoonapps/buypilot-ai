@@ -1731,6 +1731,50 @@ class PublicListingDecoderKit(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class SpecTermDecoderRequest(BaseModel):
+    category: Category = Category.desktop_pc
+    product_title: str = "컴퓨터 구매 후보"
+    listing_text: str = ""
+    terms: list[str] = Field(default_factory=list)
+    buyer_level: str = "beginner"
+    primary_purpose: str = "qhd_creator"
+    budget_krw: int = Field(default=2_200_000, ge=300_000, le=30_000_000)
+    source: str = "web"
+
+
+class SpecTermExplanation(BaseModel):
+    term: str
+    plain_meaning: str
+    purchase_impact: str
+    status: CheckStatus
+    evidence: str
+    seller_question: str
+
+
+class PublicSpecTermDecoderKit(BaseModel):
+    kit_version: str = "specpilot.public_spec_term_decoder_kit.v1"
+    generated_at: str
+    category: Category
+    product_title: str
+    buyer_level: str
+    primary_purpose: str
+    decoder_status: CheckStatus
+    clarity_score: float = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    explanations: list[SpecTermExplanation] = Field(default_factory=list)
+    risk_terms: list[str] = Field(default_factory=list)
+    seller_questions: list[str] = Field(default_factory=list)
+    beginner_checklist: list[str] = Field(default_factory=list)
+    plain_language_brief: str
+    scanner_prefill: SpecRiskScannerRequest
+    analysis_prefill: str
+    share_copy: str
+    primary_cta_label: str = "쉬운 설명으로 검수 시작"
+    primary_cta_path: str = "#spec-scanner"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class ProductPageEvidenceRequest(BaseModel):
     category: Category = Category.desktop_pc
     url: str = Field(min_length=8)

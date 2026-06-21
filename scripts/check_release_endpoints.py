@@ -85,6 +85,20 @@ CHECKS = (
         ),
     ),
     SmokeCheck(
+        name="public-spec-term-decoder-kit",
+        method="POST",
+        path="/public/spec-term-decoder-kit",
+        required_keys=(
+            "kit_version",
+            "decoder_status",
+            "clarity_score",
+            "explanations",
+            "seller_questions",
+            "scanner_prefill",
+            "share_copy",
+        ),
+    ),
+    SmokeCheck(
         name="public-product-page-evidence-kit",
         method="POST",
         path="/public/product-page-evidence-kit",
@@ -881,6 +895,20 @@ def run_smoke() -> list[dict[str, Any]]:
                 "budget_krw": 2_200_000,
                 "cart_total_krw": 2_090_000,
                 "purpose": "portable_creator",
+                "source": "release_smoke",
+            }
+        if check.name == "public-spec-term-decoder-kit":
+            json_body = {
+                "category": "laptop",
+                "product_title": "CreatorBook Pro 16 RTX 4060 RAM 32GB SSD 1TB FreeDOS",
+                "listing_text": (
+                    "RTX 4060 TGP 75W / RAM 온보드 16GB+슬롯 16GB / "
+                    "SSD 1TB / FreeDOS / USB-C PD충전 / 국내 AS"
+                ),
+                "terms": ["FreeDOS", "TGP", "온보드", "PD충전"],
+                "buyer_level": "beginner",
+                "primary_purpose": "portable_creator",
+                "budget_krw": 2_200_000,
                 "source": "release_smoke",
             }
         if check.name == "public-product-page-evidence-kit":

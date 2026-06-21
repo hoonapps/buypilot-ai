@@ -160,6 +160,7 @@ from specpilot_ai.core.models import (
     PublicSocialProofWall,
     PublicSpecRescueKit,
     PublicSpecRiskScanner,
+    PublicSpecTermDecoderKit,
     PublicUpgradeReadinessKit,
     PublicWarrantyReturnKit,
     PurchaseAftercareRequest,
@@ -214,6 +215,7 @@ from specpilot_ai.core.models import (
     SpecRescueRequest,
     SpecRiskScannerRequest,
     SpecRiskScannerResult,
+    SpecTermDecoderRequest,
     SubscriptionIntent,
     SubscriptionIntentRequest,
     TeamPurchaseConsultKit,
@@ -287,6 +289,7 @@ from specpilot_ai.services.spec_risk_scanner import (
     build_public_spec_risk_scanner,
     scan_spec_risk,
 )
+from specpilot_ai.services.spec_term_decoder import build_public_spec_term_decoder_kit
 from specpilot_ai.services.start_concierge import build_start_concierge
 from specpilot_ai.services.trust import build_privacy_policy, build_trust_center, build_trust_policy
 from specpilot_ai.services.upgrade_readiness import build_public_upgrade_readiness_kit
@@ -1305,6 +1308,16 @@ def public_listing_decoder_kit(
     request: ListingDecoderRequest,
 ) -> PublicListingDecoderKit:
     return build_public_listing_decoder_kit(request)
+
+
+@app.post(
+    "/public/spec-term-decoder-kit",
+    response_model=PublicSpecTermDecoderKit,
+)
+def public_spec_term_decoder_kit(
+    request: SpecTermDecoderRequest,
+) -> PublicSpecTermDecoderKit:
+    return build_public_spec_term_decoder_kit(request)
 
 
 @app.post(
