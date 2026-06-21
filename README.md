@@ -67,6 +67,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 공개 상품 페이지 근거 인입 키트: 상품 URL과 붙여 넣은 페이지 문구/HTML에서 가격, 배송비, 할인, 실구매가, 재고, 모델명 일치도, URL 안전성, 판매자 확인 질문을 추출해 검수 prefill로 연결
 - 공개 옵션/사양 빠른 검수기: 판매 페이지 옵션명, 장바구니 문구, 최종 결제 금액을 붙여 넣으면 예산 초과, 사양 불일치, 증거 누락을 결제 전 blocker/warning으로 판정하고 구매 세이프티 브리프, 판매자 확인 질문, 승인/공유 요약, 캡처 체크리스트를 반환
 - 공개 후보 비교 스냅샷: 데스크톱/노트북 후보 5개를 가격, 목적 적합도, 리뷰 신뢰, 구매 안정성으로 정렬하고 예산/성능/안전 우선 대안 시나리오를 제공
+- 공개 커스텀 후보 비교 결정 키트: 사용자가 붙여 넣은 실제 후보 2~6개를 가격, 목적 적합도, 증거, 보증/반품, 재고, 위험 조건으로 랭킹하고 1순위/보류/제외 판단을 생성
 - 공개 구매 타이밍 윈도우: 후보별 현재가, 목표가, 적정가 밴드, 변동 리스크, 결제 트리거를 공개 화면에서 즉시 결제/가격 대기로 분리
 - 공개 목표가 감시 키트: 구매 타이밍 결과를 알림 기준가, 감시 주기, 알림 문구, 결제 판단 규칙, 대체 행동으로 변환
 - 공개 구매 후 케어 키트: 구매일, 배송완료일, 최종 결제 금액, 이슈를 받아 반품/교환 마감, 보증 만료, 초기 불량 대응, 구매 결과 기록 prefill을 제공
@@ -612,6 +613,48 @@ curl -X POST http://127.0.0.1:8000/public/spec-rescue-kit \
 
 ```bash
 curl "http://127.0.0.1:8000/public/candidate-compare?category=desktop_pc&budget_krw=2200000&purpose=qhd_creator"
+```
+
+공개 커스텀 후보 비교 결정 키트는 사용자가 실제 쇼핑몰에서 본 후보 2~6개를 직접 넣어 가격, 목적 적합도, 증거, 보증/반품, 재고, 위험 조건으로 랭킹하고 1순위/보류/제외 판단을 반환합니다.
+
+```bash
+curl -X POST http://127.0.0.1:8000/public/custom-candidate-decision-kit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "category": "desktop_pc",
+    "budget_krw": 2200000,
+    "purpose": "qhd_creator",
+    "must_haves": ["RTX 4070급 GPU", "RAM 32GB", "국내 AS"],
+    "candidates": [
+      {
+        "candidate_id": "candidate_a",
+        "title": "Creator RTX 4070 SUPER Build",
+        "seller_name": "PC Mall",
+        "url": "https://shop.example.com/a",
+        "listed_price_krw": 2165000,
+        "discount_krw": 40000,
+        "cpu": "Ryzen 7 7800X3D",
+        "gpu": "RTX 4070 SUPER",
+        "ram_gb": 32,
+        "storage_gb": 1000,
+        "os_name": "Windows 11",
+        "warranty_months": 24,
+        "return_window_days": 14,
+        "stock_status": "in_stock",
+        "evidence_text": "국내 제조사 AS, 반품 14일, 재고 있음"
+      },
+      {
+        "candidate_id": "candidate_b",
+        "title": "Budget RTX 4060 Build",
+        "listed_price_krw": 1720000,
+        "gpu": "RTX 4060",
+        "ram_gb": 16,
+        "storage_gb": 512,
+        "os_name": "FreeDOS",
+        "risk_terms": ["FreeDOS"]
+      }
+    ]
+  }'
 ```
 
 공개 구매 타이밍 윈도우는 카테고리, 예산, 목적을 받아 후보별 현재가, 목표가, 적정가 밴드, 변동 리스크, 결제 트리거, 목표가 알림용 공유 문구를 반환합니다.
@@ -1816,6 +1859,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/public/warranty-return-kit`: 공개 반품/교환 기간, 초기 불량 예외, 개봉 후 반품, 보증 주체, 보증 승계, 반품 비용, 위험 약관을 결제 전 보호 점수, 판매자 질문, 증거 체크리스트로 변환
 - `/public/price-breakdown-kit`: 공개 표시가, 배송비, 조립비, OS 비용, 쿠폰, 카드 할인, 포인트, 수량을 최종 실구매가, 예산 차이, 리포트 예상가 차이, 가격 리스크로 변환
 - `/public/purchase-execution-kit`: 공개 최종가, 예산, blocker/warning, 누락 증거, 판매자 질문을 결제 전 실행 단계, 증거 게이트, 중단 조건, 채널별 공유 문구로 변환
+- `/public/custom-candidate-decision-kit`: 공개 실제 후보 2~6개를 가격, 목적 적합도, 증거, 보증/반품, 재고, 위험 조건으로 랭킹하고 1순위/보류/제외 판단, 판매자 질문, 분석 prefill로 변환
 - `/public/shopping-cart-intake-kit`: 공개 쇼핑몰 장바구니 텍스트/항목을 총액, 예산 차이, 필수 슬롯 누락, 위험 조건, 옵션/사양 검수 prefill, 구매 승인 prefill로 변환
 - `/public/listing-decoder-kit`: 공개 쇼핑몰 상품명/옵션명에서 핵심 사양과 구매 조건 위험어를 구조화하고 검수 prefill, 판매자 질문, 공유 문구 조회
 - `/public/spec-risk-scanner`, `/public/spec-risk-scanner/result`: 공개 옵션/사양 빠른 검수 메타와 결제 전 예산 초과, CPU/GPU/RAM/SSD/OS 불일치, 배송/반품/AS 증거 누락 판정, 구매 세이프티 브리프, 판매자 질문, 승인 요약, 캡처 체크리스트 조회

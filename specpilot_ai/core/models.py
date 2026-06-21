@@ -2505,6 +2505,62 @@ class PublicCandidateCompare(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class CustomCandidateInput(BaseModel):
+    candidate_id: str = ""
+    title: str = Field(min_length=2)
+    seller_name: str = ""
+    url: str = ""
+    listed_price_krw: int = Field(ge=0, le=200_000_000)
+    shipping_fee_krw: int = Field(default=0, ge=0, le=5_000_000)
+    discount_krw: int = Field(default=0, ge=0, le=50_000_000)
+    assembly_fee_krw: int = Field(default=0, ge=0, le=5_000_000)
+    os_fee_krw: int = Field(default=0, ge=0, le=5_000_000)
+    cpu: str = ""
+    gpu: str = ""
+    ram_gb: int | None = Field(default=None, ge=0, le=1024)
+    storage_gb: int | None = Field(default=None, ge=0, le=16384)
+    os_name: str = ""
+    warranty_months: int | None = Field(default=None, ge=0, le=120)
+    return_window_days: int | None = Field(default=None, ge=0, le=365)
+    stock_status: str = "unknown"
+    risk_terms: list[str] = Field(default_factory=list)
+    evidence_text: str = ""
+
+
+class CustomCandidateDecisionRequest(BaseModel):
+    category: Category = Category.desktop_pc
+    budget_krw: int = Field(default=2_200_000, ge=300_000, le=30_000_000)
+    purpose: str = "qhd_creator"
+    must_haves: list[str] = Field(default_factory=list)
+    candidates: list[CustomCandidateInput] = Field(default_factory=list, min_length=2, max_length=6)
+    source: str = "web"
+
+
+class PublicCustomCandidateDecisionKit(BaseModel):
+    kit_version: str = "specpilot.public_custom_candidate_decision_kit.v1"
+    generated_at: str
+    category: Category
+    budget_krw: int
+    purpose: str
+    decision: str
+    winner_candidate_id: str | None = None
+    winner_title: str | None = None
+    confidence_score: float = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    items: list[CandidateCompareItem] = Field(default_factory=list)
+    axes: list[CandidateCompareAxis] = Field(default_factory=list)
+    scenarios: list[CandidateCompareScenario] = Field(default_factory=list)
+    decision_rules: list[str] = Field(default_factory=list)
+    seller_questions: list[str] = Field(default_factory=list)
+    evidence_checklist: list[str] = Field(default_factory=list)
+    analysis_prefill: str
+    share_copy: str
+    primary_cta_label: str = "커스텀 비교표로 분석 시작"
+    primary_cta_path: str = "#analysis"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PublicDealTimingWindow(BaseModel):
     timing_version: str = "specpilot.public_deal_timing_window.v1"
     generated_at: str

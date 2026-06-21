@@ -52,6 +52,7 @@ from specpilot_ai.core.models import (
     CompletionReportPreviewRequest,
     CompletionReportTemplate,
     CompletionReportTemplateRequest,
+    CustomCandidateDecisionRequest,
     DataGovernanceDashboard,
     DemoScenarioGallery,
     FeedbackRecord,
@@ -108,6 +109,7 @@ from specpilot_ai.core.models import (
     PublicCategoryMarketReport,
     PublicCheckoutNudgeKit,
     PublicConversionBoard,
+    PublicCustomCandidateDecisionKit,
     PublicDealTimingWindow,
     PublicFirstBootSetupKit,
     PublicLaunchActionRouter,
@@ -215,6 +217,9 @@ from specpilot_ai.services.buyer_persona_quiz import (
 )
 from specpilot_ai.services.buyer_trust import build_public_buyer_trust_kit
 from specpilot_ai.services.candidate_compare import build_public_candidate_compare
+from specpilot_ai.services.custom_candidate_decision import (
+    build_public_custom_candidate_decision_kit,
+)
 from specpilot_ai.services.deal_timing import build_public_deal_timing_window
 from specpilot_ai.services.demo_gallery import build_demo_scenario_gallery
 from specpilot_ai.services.first_boot_setup import build_public_first_boot_setup_kit
@@ -1431,6 +1436,16 @@ def public_candidate_compare(
         budget_krw=budget_krw,
         purpose=purpose,
     )
+
+
+@app.post(
+    "/public/custom-candidate-decision-kit",
+    response_model=PublicCustomCandidateDecisionKit,
+)
+def public_custom_candidate_decision_kit(
+    request: CustomCandidateDecisionRequest,
+) -> PublicCustomCandidateDecisionKit:
+    return build_public_custom_candidate_decision_kit(request)
 
 
 @app.get("/public/deal-timing-window", response_model=PublicDealTimingWindow)

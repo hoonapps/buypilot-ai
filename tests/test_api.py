@@ -1807,6 +1807,145 @@ def test_public_candidate_compare_exposes_top_candidates_and_scenarios() -> None
     assert "노트북" in laptop_payload["analysis_prefill"]
 
 
+def test_public_custom_candidate_decision_kit_ranks_user_candidates() -> None:
+    response = client.post(
+        "/public/custom-candidate-decision-kit",
+        json={
+            "category": "desktop_pc",
+            "budget_krw": 2_200_000,
+            "purpose": "qhd_creator",
+            "must_haves": ["RTX 4070급 GPU", "RAM 32GB", "국내 AS"],
+            "candidates": [
+                {
+                    "candidate_id": "candidate_a",
+                    "title": "Creator RTX 4070 SUPER Build",
+                    "seller_name": "PC Mall",
+                    "url": "https://shop.example.com/a",
+                    "listed_price_krw": 2_165_000,
+                    "shipping_fee_krw": 0,
+                    "discount_krw": 40_000,
+                    "cpu": "Ryzen 7 7800X3D",
+                    "gpu": "RTX 4070 SUPER",
+                    "ram_gb": 32,
+                    "storage_gb": 1000,
+                    "os_name": "Windows 11",
+                    "warranty_months": 24,
+                    "return_window_days": 14,
+                    "stock_status": "in_stock",
+                    "risk_terms": [],
+                    "evidence_text": "국내 제조사 AS, 반품 14일, 재고 있음",
+                },
+                {
+                    "candidate_id": "candidate_b",
+                    "title": "Budget RTX 4060 Build",
+                    "seller_name": "Budget PC",
+                    "url": "https://shop.example.com/b",
+                    "listed_price_krw": 1_720_000,
+                    "shipping_fee_krw": 10_000,
+                    "discount_krw": 0,
+                    "cpu": "Ryzen 5 7500F",
+                    "gpu": "RTX 4060",
+                    "ram_gb": 16,
+                    "storage_gb": 512,
+                    "os_name": "FreeDOS",
+                    "warranty_months": 12,
+                    "return_window_days": 7,
+                    "stock_status": "in_stock",
+                    "risk_terms": ["FreeDOS"],
+                    "evidence_text": "OS 별도 구매 필요",
+                },
+                {
+                    "candidate_id": "candidate_c",
+                    "title": "해외 리퍼 RTX 4080 PC",
+                    "seller_name": "Open Market",
+                    "url": "https://market.example.net/c",
+                    "listed_price_krw": 2_050_000,
+                    "shipping_fee_krw": 80_000,
+                    "discount_krw": 0,
+                    "cpu": "Core i7",
+                    "gpu": "RTX 4080",
+                    "ram_gb": 32,
+                    "storage_gb": 1000,
+                    "os_name": "Windows 11",
+                    "warranty_months": 0,
+                    "return_window_days": 0,
+                    "stock_status": "low_stock",
+                    "risk_terms": ["해외", "리퍼", "반품 불가", "AS 불가"],
+                    "evidence_text": "해외 배송 리퍼 상품, 반품 불가",
+                },
+            ],
+            "source": "pytest",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kit_version"] == "specpilot.public_custom_candidate_decision_kit.v1"
+    assert payload["category"] == "desktop_pc"
+    assert payload["budget_krw"] == 2_200_000
+    assert payload["decision"] in {"ready", "verify"}
+    assert payload["winner_candidate_id"] == "candidate_a"
+    assert payload["winner_title"] == "Creator RTX 4070 SUPER Build"
+    assert payload["confidence_score"] >= 70
+    assert payload["items"][0]["product_id"] == "candidate_a"
+    assert payload["items"][0]["score"] >= payload["items"][1]["score"]
+    risky = next(item for item in payload["items"] if item["product_id"] == "candidate_c")
+    assert risky["status"] == "blocker"
+    assert any("리퍼" in watchout or "해외" in watchout for watchout in risky["watchouts"])
+    assert {axis["axis_id"] for axis in payload["axes"]} >= {
+        "winner",
+        "budget",
+        "performance",
+        "risk",
+    }
+    assert {scenario["scenario"] for scenario in payload["scenarios"]} == {
+        "balanced",
+        "budget",
+        "safe",
+    }
+    assert any("blocker" in rule for rule in payload["decision_rules"])
+    assert any("최종 결제 금액" in question for question in payload["seller_questions"])
+    assert any("필수 조건" in item for item in payload["evidence_checklist"])
+    assert "실제 후보 비교" in payload["analysis_prefill"]
+    assert "SpecPilot AI 커스텀 후보 비교" in payload["share_copy"]
+    assert payload["primary_cta_path"] == "#analysis"
+    assert payload["next_actions"]
+
+    hold = client.post(
+        "/public/custom-candidate-decision-kit",
+        json={
+            "category": "laptop",
+            "budget_krw": 1_600_000,
+            "purpose": "portable_creator",
+            "candidates": [
+                {
+                    "title": "해외 리퍼 노트북 A",
+                    "listed_price_krw": 1_580_000,
+                    "gpu": "RTX 4060",
+                    "ram_gb": 16,
+                    "storage_gb": 512,
+                    "stock_status": "low_stock",
+                    "risk_terms": ["해외", "리퍼", "반품 불가"],
+                },
+                {
+                    "title": "전시 노트북 B",
+                    "listed_price_krw": 1_520_000,
+                    "gpu": "RTX 4050",
+                    "ram_gb": 16,
+                    "storage_gb": 512,
+                    "stock_status": "in_stock",
+                    "risk_terms": ["전시", "AS 불가"],
+                },
+            ],
+        },
+    )
+    assert hold.status_code == 200
+    hold_payload = hold.json()
+    assert hold_payload["decision"] == "hold"
+    assert hold_payload["items"][0]["status"] == "blocker"
+    assert any("결제하지" in action for action in hold_payload["next_actions"])
+
+
 def test_public_deal_timing_window_separates_buy_now_and_wait() -> None:
     response = client.get(
         "/public/deal-timing-window"
