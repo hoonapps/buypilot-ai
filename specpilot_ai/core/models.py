@@ -1775,6 +1775,52 @@ class PublicSpecTermDecoderKit(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class PurchaseQuestionTriageRequest(BaseModel):
+    category: Category = Category.desktop_pc
+    buyer_question: str = Field(default="이 후보 지금 사도 될까요?", min_length=2)
+    product_title: str = "컴퓨터 구매 후보"
+    listing_text: str = ""
+    budget_krw: int = Field(default=2_200_000, ge=300_000, le=30_000_000)
+    cart_total_krw: int | None = Field(default=None, ge=0, le=30_000_000)
+    purchase_stage: str = "candidate"
+    audience: str = "beginner"
+    source: str = "web"
+
+
+class QuestionTriageSignal(BaseModel):
+    signal_id: str
+    label: str
+    status: CheckStatus
+    evidence: str
+    next_step: str
+
+
+class PublicPurchaseQuestionTriageKit(BaseModel):
+    kit_version: str = "specpilot.public_purchase_question_triage_kit.v1"
+    generated_at: str
+    category: Category
+    product_title: str
+    purchase_stage: str
+    question_type: str
+    triage_status: CheckStatus
+    urgency_score: float = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    routed_kits: list[str] = Field(default_factory=list)
+    triage_signals: list[QuestionTriageSignal] = Field(default_factory=list)
+    missing_inputs: list[str] = Field(default_factory=list)
+    recommended_next_step: str
+    buyer_reply: str
+    seller_questions: list[str] = Field(default_factory=list)
+    community_post: str
+    scanner_prefill: SpecRiskScannerRequest
+    analysis_prefill: str
+    share_copy: str
+    primary_cta_label: str = "질문 결과로 분석 시작"
+    primary_cta_path: str = "#analysis"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class ProductPageEvidenceRequest(BaseModel):
     category: Category = Category.desktop_pc
     url: str = Field(min_length=8)

@@ -723,6 +723,64 @@ def test_public_spec_term_decoder_kit_explains_beginner_purchase_terms() -> None
     assert any("결제하지" in action for action in risky_payload["next_actions"])
 
 
+def test_public_purchase_question_triage_routes_buyer_question_to_next_kit() -> None:
+    response = client.post(
+        "/public/purchase-question-triage-kit",
+        json={
+            "category": "desktop_pc",
+            "buyer_question": "이 RTX 4070 SUPER 특가 오늘 결제해도 될까요?",
+            "product_title": "Creator RTX 4070 SUPER Build",
+            "listing_text": (
+                "Ryzen 7 7800X3D RTX 4070 SUPER RAM 32GB SSD 1TB Windows 11 "
+                "카드 할인 오늘 마감 / 반품 7일 / 국내 AS"
+            ),
+            "budget_krw": 2_200_000,
+            "cart_total_krw": 2_185_000,
+            "purchase_stage": "checkout",
+            "audience": "beginner",
+            "source": "pytest",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kit_version"] == "specpilot.public_purchase_question_triage_kit.v1"
+    assert payload["category"] == "desktop_pc"
+    assert payload["question_type"] == "checkout"
+    assert payload["triage_status"] == "warning"
+    assert payload["urgency_score"] >= 50
+    assert "spec-risk-scanner" in payload["routed_kits"]
+    assert payload["buyer_reply"].startswith("질문:")
+    assert "Creator RTX 4070 SUPER Build" in payload["community_post"]
+    assert payload["scanner_prefill"]["source"] == "purchase_question_triage"
+    assert payload["scanner_prefill"]["cart_total_krw"] == 2_185_000
+    assert payload["scanner_prefill"]["expected_gpu"]
+    assert payload["seller_questions"]
+    assert "구매 질문" in payload["analysis_prefill"]
+    assert "SpecPilot AI 구매 질문 라우팅" in payload["share_copy"]
+    assert payload["next_actions"]
+
+    risky = client.post(
+        "/public/purchase-question-triage-kit",
+        json={
+            "category": "laptop",
+            "buyer_question": "리퍼 전시 노트북 반품불가인데 싸면 사도 되나요?",
+            "product_title": "CreatorBook 리퍼 전시 특가",
+            "listing_text": "리퍼 전시 / 반품불가 / 해외 병행 / FreeDOS",
+            "budget_krw": 1_600_000,
+            "purchase_stage": "candidate",
+        },
+    )
+    assert risky.status_code == 200
+    risky_payload = risky.json()
+    assert risky_payload["triage_status"] == "blocker"
+    assert risky_payload["question_type"] == "warranty"
+    assert "warranty-return-kit" in risky_payload["routed_kits"]
+    assert any(signal["signal_id"] == "risk_terms" for signal in risky_payload["triage_signals"])
+    assert "바로 결제하지" in risky_payload["recommended_next_step"]
+    assert any("결제를 보류" in action for action in risky_payload["next_actions"])
+
+
 def test_public_product_page_evidence_kit_extracts_safe_snapshot_and_prefills_checks() -> None:
     response = client.post(
         "/public/product-page-evidence-kit",

@@ -148,6 +148,7 @@ from specpilot_ai.core.models import (
     PublicPurchaseAftercareKit,
     PublicPurchaseApprovalBriefKit,
     PublicPurchaseExecutionKit,
+    PublicPurchaseQuestionTriageKit,
     PublicReferralLaunchKit,
     PublicReferralLeaderboard,
     PublicReport,
@@ -173,6 +174,7 @@ from specpilot_ai.core.models import (
     PurchaseOnboardingPlaybook,
     PurchaseOutcome,
     PurchaseOutcomeRequest,
+    PurchaseQuestionTriageRequest,
     PurchaseStartConcierge,
     QualityDashboard,
     ReferralRewardProgress,
@@ -274,6 +276,9 @@ from specpilot_ai.services.product_page_evidence import build_public_product_pag
 from specpilot_ai.services.purchase_aftercare import build_public_purchase_aftercare_kit
 from specpilot_ai.services.purchase_approval import build_public_purchase_approval_brief_kit
 from specpilot_ai.services.purchase_execution import build_public_purchase_execution_kit
+from specpilot_ai.services.purchase_question_triage import (
+    build_public_purchase_question_triage_kit,
+)
 from specpilot_ai.services.requirements_consensus import (
     build_public_requirements_consensus_kit,
 )
@@ -1318,6 +1323,16 @@ def public_spec_term_decoder_kit(
     request: SpecTermDecoderRequest,
 ) -> PublicSpecTermDecoderKit:
     return build_public_spec_term_decoder_kit(request)
+
+
+@app.post(
+    "/public/purchase-question-triage-kit",
+    response_model=PublicPurchaseQuestionTriageKit,
+)
+def public_purchase_question_triage_kit(
+    request: PurchaseQuestionTriageRequest,
+) -> PublicPurchaseQuestionTriageKit:
+    return build_public_purchase_question_triage_kit(request)
 
 
 @app.post(

@@ -99,6 +99,21 @@ CHECKS = (
         ),
     ),
     SmokeCheck(
+        name="public-purchase-question-triage-kit",
+        method="POST",
+        path="/public/purchase-question-triage-kit",
+        required_keys=(
+            "kit_version",
+            "question_type",
+            "triage_status",
+            "urgency_score",
+            "routed_kits",
+            "buyer_reply",
+            "community_post",
+            "scanner_prefill",
+        ),
+    ),
+    SmokeCheck(
         name="public-product-page-evidence-kit",
         method="POST",
         path="/public/product-page-evidence-kit",
@@ -909,6 +924,21 @@ def run_smoke() -> list[dict[str, Any]]:
                 "buyer_level": "beginner",
                 "primary_purpose": "portable_creator",
                 "budget_krw": 2_200_000,
+                "source": "release_smoke",
+            }
+        if check.name == "public-purchase-question-triage-kit":
+            json_body = {
+                "category": "desktop_pc",
+                "buyer_question": "이 RTX 4070 SUPER 특가 오늘 결제해도 될까요?",
+                "product_title": "Creator RTX 4070 SUPER Build",
+                "listing_text": (
+                    "Ryzen 7 7800X3D RTX 4070 SUPER RAM 32GB SSD 1TB Windows 11 "
+                    "카드 할인 오늘 마감 / 반품 7일 / 국내 AS"
+                ),
+                "budget_krw": 2_200_000,
+                "cart_total_krw": 2_185_000,
+                "purchase_stage": "checkout",
+                "audience": "beginner",
                 "source": "release_smoke",
             }
         if check.name == "public-product-page-evidence-kit":

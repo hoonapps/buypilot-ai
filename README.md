@@ -320,6 +320,23 @@ curl -X POST http://127.0.0.1:8000/public/spec-term-decoder-kit \
   }'
 ```
 
+공개 구매 질문 라우팅 키트는 “이 견적 지금 사도 돼요?”, “리퍼인데 싸면 괜찮나요?” 같은 첫 질문을 가격, 사양, 보증/반품, 결제 전 검수, 수령 후 점검 유형으로 나누고 다음에 실행할 공개 키트, 판매자 질문, 커뮤니티 질문문, 분석 prefill을 반환합니다.
+
+```bash
+curl -X POST http://127.0.0.1:8000/public/purchase-question-triage-kit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "category": "desktop_pc",
+    "buyer_question": "이 RTX 4070 SUPER 특가 오늘 결제해도 될까요?",
+    "product_title": "Creator RTX 4070 SUPER Build",
+    "listing_text": "Ryzen 7 7800X3D RTX 4070 SUPER RAM 32GB SSD 1TB Windows 11 카드 할인 오늘 마감 / 반품 7일 / 국내 AS",
+    "budget_krw": 2200000,
+    "cart_total_krw": 2185000,
+    "purchase_stage": "checkout",
+    "audience": "beginner"
+  }'
+```
+
 공개 상품 페이지 근거 인입 키트는 외부 URL을 직접 live fetch하지 않고 사용자가 붙여 넣은 상품 페이지 문구/HTML만 안전하게 분석합니다. 가격, 배송비, 할인, 재고, 모델명 일치도, URL 안전성, 판매자 질문, 옵션/사양 검수 prefill, 실구매가 분해 prefill을 반환합니다.
 
 ```bash
@@ -2202,6 +2219,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/public/shopping-cart-intake-kit`: 공개 쇼핑몰 장바구니 텍스트/항목을 총액, 예산 차이, 필수 슬롯 누락, 위험 조건, 옵션/사양 검수 prefill, 구매 승인 prefill로 변환
 - `/public/listing-decoder-kit`: 공개 쇼핑몰 상품명/옵션명에서 핵심 사양과 구매 조건 위험어를 구조화하고 검수 prefill, 판매자 질문, 공유 문구 조회
 - `/public/spec-term-decoder-kit`: 공개 상품 문구의 FreeDOS, TGP, 온보드, 리퍼, 병행수입 같은 사양/구매 용어를 초보자용 설명, 위험 용어, 판매자 질문, 검수 prefill로 변환
+- `/public/purchase-question-triage-kit`: 공개 자연어 구매 질문을 가격, 사양, 보증/반품, 결제 전 검수, 수령 후 점검 유형으로 분류하고 다음 키트, 판매자 질문, 커뮤니티 질문문, 분석 prefill로 변환
 - `/public/spec-risk-scanner`, `/public/spec-risk-scanner/result`: 공개 옵션/사양 빠른 검수 메타와 결제 전 예산 초과, CPU/GPU/RAM/SSD/OS 불일치, 배송/반품/AS 증거 누락 판정, 구매 세이프티 브리프, 판매자 질문, 승인 요약, 캡처 체크리스트 조회
 - `/public/purchase-approval-brief-kit`: 공개 장바구니 검수 결과를 가족/팀/커뮤니티용 승인 질문, 찬성/반대 투표 옵션, 채널별 복사 문구, 분석 prefill로 변환
 - `/public/seller-evidence-kit`: 공개 판매자 확인 질문, 복사용 문의 문구, 답변 판정 기준, 캡처 체크리스트, 구매 승인 prefill 조회
