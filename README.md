@@ -337,6 +337,26 @@ curl -X POST http://127.0.0.1:8000/public/purchase-question-triage-kit \
   }'
 ```
 
+공개 리뷰 리스크 키트는 사용자가 붙여 넣은 후기 문구에서 발열, 팬 소음, 초기 불량, 화면/패널, 배터리, AS 반복 불만을 추출하고 리뷰를 확정 판단이 아닌 구매 리스크 신호로 정리합니다.
+
+```bash
+curl -X POST http://127.0.0.1:8000/public/review-risk-kit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "category": "laptop",
+    "product_title": "CreatorBook Pro 16 RTX 4060",
+    "review_snippets": [
+      "성능은 만족하지만 게임할 때 발열과 팬 소음이 꽤 있습니다.",
+      "영상 편집 중 온도가 높고 팬이 자주 돕니다. AS 응대는 보통입니다.",
+      "배송은 빨랐지만 화면 빛샘과 초기불량 교환 후기가 보여 걱정됩니다."
+    ],
+    "rating": 4.1,
+    "review_count": 86,
+    "budget_krw": 2200000,
+    "usage_context": "portable_creator"
+  }'
+```
+
 공개 상품 페이지 근거 인입 키트는 외부 URL을 직접 live fetch하지 않고 사용자가 붙여 넣은 상품 페이지 문구/HTML만 안전하게 분석합니다. 가격, 배송비, 할인, 재고, 모델명 일치도, URL 안전성, 판매자 질문, 옵션/사양 검수 prefill, 실구매가 분해 prefill을 반환합니다.
 
 ```bash
@@ -2220,6 +2240,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/public/listing-decoder-kit`: 공개 쇼핑몰 상품명/옵션명에서 핵심 사양과 구매 조건 위험어를 구조화하고 검수 prefill, 판매자 질문, 공유 문구 조회
 - `/public/spec-term-decoder-kit`: 공개 상품 문구의 FreeDOS, TGP, 온보드, 리퍼, 병행수입 같은 사양/구매 용어를 초보자용 설명, 위험 용어, 판매자 질문, 검수 prefill로 변환
 - `/public/purchase-question-triage-kit`: 공개 자연어 구매 질문을 가격, 사양, 보증/반품, 결제 전 검수, 수령 후 점검 유형으로 분류하고 다음 키트, 판매자 질문, 커뮤니티 질문문, 분석 prefill로 변환
+- `/public/review-risk-kit`: 공개 후기 문구, 평점, 리뷰 수에서 발열, 팬 소음, 초기 불량, 화면/패널, 배터리, AS 반복 불만을 추출하고 판매자 질문, 증거 체크리스트, 분석 prefill로 변환
 - `/public/spec-risk-scanner`, `/public/spec-risk-scanner/result`: 공개 옵션/사양 빠른 검수 메타와 결제 전 예산 초과, CPU/GPU/RAM/SSD/OS 불일치, 배송/반품/AS 증거 누락 판정, 구매 세이프티 브리프, 판매자 질문, 승인 요약, 캡처 체크리스트 조회
 - `/public/purchase-approval-brief-kit`: 공개 장바구니 검수 결과를 가족/팀/커뮤니티용 승인 질문, 찬성/반대 투표 옵션, 채널별 복사 문구, 분석 prefill로 변환
 - `/public/seller-evidence-kit`: 공개 판매자 확인 질문, 복사용 문의 문구, 답변 판정 기준, 캡처 체크리스트, 구매 승인 prefill 조회

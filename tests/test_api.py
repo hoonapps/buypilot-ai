@@ -781,6 +781,61 @@ def test_public_purchase_question_triage_routes_buyer_question_to_next_kit() -> 
     assert any("결제를 보류" in action for action in risky_payload["next_actions"])
 
 
+def test_public_review_risk_kit_extracts_repeated_complaints() -> None:
+    response = client.post(
+        "/public/review-risk-kit",
+        json={
+            "category": "laptop",
+            "product_title": "CreatorBook Pro 16 RTX 4060",
+            "review_snippets": [
+                "성능은 만족하지만 게임할 때 발열과 팬 소음이 꽤 있습니다.",
+                "영상 편집 중 온도가 높고 팬이 자주 돕니다. AS 응대는 보통입니다.",
+                "배송은 빨랐지만 화면 빛샘과 초기불량 교환 후기가 보여 걱정됩니다.",
+            ],
+            "rating": 4.1,
+            "review_count": 86,
+            "budget_krw": 2_200_000,
+            "usage_context": "portable_creator",
+            "source": "pytest",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kit_version"] == "specpilot.public_review_risk_kit.v1"
+    assert payload["category"] == "laptop"
+    assert payload["review_status"] in {"warning", "blocker"}
+    assert payload["review_risk_score"] < 80
+    assert "발열/스로틀링" in payload["repeated_complaints"]
+    assert "팬 소음" in payload["repeated_complaints"]
+    signals = {signal["signal_id"]: signal for signal in payload["review_signals"]}
+    assert signals["thermal"]["frequency"] >= 2
+    assert signals["noise"]["status"] != "ok"
+    assert payload["positive_signals"]
+    assert any("후기 원문" in item for item in payload["evidence_checklist"])
+    assert any("AS" in question or "초기 불량" in question for question in payload["seller_questions"])
+    assert payload["scanner_prefill"]["source"] == "review_risk"
+    assert payload["scanner_prefill"]["budget_krw"] == 2_200_000
+    assert "후기 리스크" in payload["analysis_prefill"]
+    assert "SpecPilot AI 리뷰 리스크 검수" in payload["share_copy"]
+    assert payload["next_actions"]
+
+    thin = client.post(
+        "/public/review-risk-kit",
+        json={
+            "category": "desktop_pc",
+            "product_title": "조용한 작업용 PC",
+            "review_snippets": ["조용하고 만족합니다."],
+            "rating": 4.8,
+            "review_count": 2,
+        },
+    )
+    assert thin.status_code == 200
+    thin_payload = thin.json()
+    assert thin_payload["review_status"] == "warning"
+    assert any("후기 문구가 3개 미만" in note for note in thin_payload["source_quality_notes"])
+
+
 def test_public_product_page_evidence_kit_extracts_safe_snapshot_and_prefills_checks() -> None:
     response = client.post(
         "/public/product-page-evidence-kit",

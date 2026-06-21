@@ -114,6 +114,20 @@ CHECKS = (
         ),
     ),
     SmokeCheck(
+        name="public-review-risk-kit",
+        method="POST",
+        path="/public/review-risk-kit",
+        required_keys=(
+            "kit_version",
+            "review_status",
+            "review_risk_score",
+            "repeated_complaints",
+            "review_signals",
+            "seller_questions",
+            "analysis_prefill",
+        ),
+    ),
+    SmokeCheck(
         name="public-product-page-evidence-kit",
         method="POST",
         path="/public/product-page-evidence-kit",
@@ -939,6 +953,21 @@ def run_smoke() -> list[dict[str, Any]]:
                 "cart_total_krw": 2_185_000,
                 "purchase_stage": "checkout",
                 "audience": "beginner",
+                "source": "release_smoke",
+            }
+        if check.name == "public-review-risk-kit":
+            json_body = {
+                "category": "laptop",
+                "product_title": "CreatorBook Pro 16 RTX 4060",
+                "review_snippets": [
+                    "성능은 만족하지만 게임할 때 발열과 팬 소음이 꽤 있습니다.",
+                    "영상 편집 중 온도가 높고 팬이 자주 돕니다. AS 응대는 보통입니다.",
+                    "배송은 빨랐지만 화면 빛샘과 초기불량 교환 후기가 보여 걱정됩니다.",
+                ],
+                "rating": 4.1,
+                "review_count": 86,
+                "budget_krw": 2_200_000,
+                "usage_context": "portable_creator",
                 "source": "release_smoke",
             }
         if check.name == "public-product-page-evidence-kit":

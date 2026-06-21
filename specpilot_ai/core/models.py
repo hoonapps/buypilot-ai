@@ -1821,6 +1821,50 @@ class PublicPurchaseQuestionTriageKit(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class ReviewRiskRequest(BaseModel):
+    category: Category = Category.desktop_pc
+    product_title: str = "컴퓨터 구매 후보"
+    review_snippets: list[str] = Field(default_factory=list)
+    rating: float | None = Field(default=None, ge=0, le=5)
+    review_count: int | None = Field(default=None, ge=0, le=1_000_000)
+    budget_krw: int = Field(default=2_200_000, ge=300_000, le=30_000_000)
+    usage_context: str = "qhd_creator"
+    source: str = "web"
+
+
+class ReviewRiskSignal(BaseModel):
+    signal_id: str
+    label: str
+    status: CheckStatus
+    evidence: str
+    frequency: int = Field(ge=0)
+    buyer_impact: str
+    next_step: str
+
+
+class PublicReviewRiskKit(BaseModel):
+    kit_version: str = "specpilot.public_review_risk_kit.v1"
+    generated_at: str
+    category: Category
+    product_title: str
+    review_status: CheckStatus
+    review_risk_score: float = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    repeated_complaints: list[str] = Field(default_factory=list)
+    positive_signals: list[str] = Field(default_factory=list)
+    review_signals: list[ReviewRiskSignal] = Field(default_factory=list)
+    source_quality_notes: list[str] = Field(default_factory=list)
+    seller_questions: list[str] = Field(default_factory=list)
+    evidence_checklist: list[str] = Field(default_factory=list)
+    scanner_prefill: SpecRiskScannerRequest
+    analysis_prefill: str
+    share_copy: str
+    primary_cta_label: str = "리뷰 리스크로 분석 시작"
+    primary_cta_path: str = "#analysis"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class ProductPageEvidenceRequest(BaseModel):
     category: Category = Category.desktop_pc
     url: str = Field(min_length=8)

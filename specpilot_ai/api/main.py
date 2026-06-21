@@ -154,6 +154,7 @@ from specpilot_ai.core.models import (
     PublicReport,
     PublicRequirementsConsensusKit,
     PublicReviewerQuickCardKit,
+    PublicReviewRiskKit,
     PublicSellerEvidenceKit,
     PublicSellerNegotiationKit,
     PublicSetupCompatibilityKit,
@@ -189,6 +190,7 @@ from specpilot_ai.core.models import (
     ReviewDecisionRequest,
     ReviewerQuickCardRequest,
     ReviewQueueItem,
+    ReviewRiskRequest,
     ReviewStatus,
     SavedReportDetail,
     SavedReportSummary,
@@ -282,6 +284,7 @@ from specpilot_ai.services.purchase_question_triage import (
 from specpilot_ai.services.requirements_consensus import (
     build_public_requirements_consensus_kit,
 )
+from specpilot_ai.services.review_risk import build_public_review_risk_kit
 from specpilot_ai.services.reviewer_quick_card import build_public_reviewer_quick_card_kit
 from specpilot_ai.services.seller_evidence import build_public_seller_evidence_kit
 from specpilot_ai.services.seller_negotiation import build_public_seller_negotiation_kit
@@ -1333,6 +1336,16 @@ def public_purchase_question_triage_kit(
     request: PurchaseQuestionTriageRequest,
 ) -> PublicPurchaseQuestionTriageKit:
     return build_public_purchase_question_triage_kit(request)
+
+
+@app.post(
+    "/public/review-risk-kit",
+    response_model=PublicReviewRiskKit,
+)
+def public_review_risk_kit(
+    request: ReviewRiskRequest,
+) -> PublicReviewRiskKit:
+    return build_public_review_risk_kit(request)
 
 
 @app.post(
