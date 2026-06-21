@@ -137,6 +137,7 @@ from specpilot_ai.core.models import (
     PublicReferralLaunchKit,
     PublicReferralLeaderboard,
     PublicReport,
+    PublicRequirementsConsensusKit,
     PublicSellerEvidenceKit,
     PublicSellerNegotiationKit,
     PublicSetupCompatibilityKit,
@@ -164,6 +165,7 @@ from specpilot_ai.core.models import (
     ReportAdvisorQuestionRequest,
     ReportShare,
     ReportShareAssets,
+    RequirementsConsensusRequest,
     RetentionHubDashboard,
     ReviewDecision,
     ReviewDecisionRequest,
@@ -247,6 +249,9 @@ from specpilot_ai.services.product_page_evidence import build_public_product_pag
 from specpilot_ai.services.purchase_aftercare import build_public_purchase_aftercare_kit
 from specpilot_ai.services.purchase_approval import build_public_purchase_approval_brief_kit
 from specpilot_ai.services.purchase_execution import build_public_purchase_execution_kit
+from specpilot_ai.services.requirements_consensus import (
+    build_public_requirements_consensus_kit,
+)
 from specpilot_ai.services.seller_evidence import build_public_seller_evidence_kit
 from specpilot_ai.services.seller_negotiation import build_public_seller_negotiation_kit
 from specpilot_ai.services.setup_compatibility import build_public_setup_compatibility_kit
@@ -1319,6 +1324,16 @@ def public_purchase_approval_brief_kit(
     request: PurchaseApprovalBriefRequest,
 ) -> PublicPurchaseApprovalBriefKit:
     return build_public_purchase_approval_brief_kit(request)
+
+
+@app.post(
+    "/public/requirements-consensus-kit",
+    response_model=PublicRequirementsConsensusKit,
+)
+def public_requirements_consensus_kit(
+    request: RequirementsConsensusRequest,
+) -> PublicRequirementsConsensusKit:
+    return build_public_requirements_consensus_kit(request)
 
 
 @app.post(

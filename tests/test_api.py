@@ -999,6 +999,122 @@ def test_public_purchase_approval_brief_kit_builds_shareable_vote_packet() -> No
     assert hold_payload["vote_options"][0]["option_id"] == "reject_or_compare"
 
 
+def test_public_requirements_consensus_kit_turns_stakeholders_into_analysis_request() -> None:
+    response = client.post(
+        "/public/requirements-consensus-kit",
+        json={
+            "category": "desktop_pc",
+            "purchase_context": "QHD 게임과 영상 편집용 첫 데스크톱",
+            "shared_budget_krw": 2_200_000,
+            "target_timing": "within_14_days",
+            "stakeholders": [
+                {
+                    "name": "구매자",
+                    "role": "owner",
+                    "priority": "high",
+                    "max_budget_krw": 2_200_000,
+                    "use_cases": ["QHD 게임", "영상 편집"],
+                    "must_haves": ["RTX 4070급 GPU", "RAM 32GB"],
+                    "nice_to_haves": ["Windows 11"],
+                    "deal_breakers": ["해외 리퍼"],
+                    "timeline": "within_7_days",
+                    "risk_tolerance": "medium",
+                },
+                {
+                    "name": "가족",
+                    "role": "approver",
+                    "priority": "medium",
+                    "max_budget_krw": 2_100_000,
+                    "use_cases": ["장기 사용"],
+                    "must_haves": ["국내 AS", "반품 7일"],
+                    "deal_breakers": ["반품 불가"],
+                    "timeline": "within_14_days",
+                    "risk_tolerance": "low",
+                },
+                {
+                    "name": "커뮤니티",
+                    "role": "reviewer",
+                    "priority": "low",
+                    "max_budget_krw": 2_300_000,
+                    "use_cases": ["부품 업그레이드"],
+                    "must_haves": ["업그레이드 가능"],
+                    "nice_to_haves": ["SSD 1TB"],
+                    "deal_breakers": ["FreeDOS"],
+                    "timeline": "wait_for_discount",
+                    "risk_tolerance": "medium",
+                },
+            ],
+            "source": "pytest",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kit_version"] == "specpilot.public_requirements_consensus_kit.v1"
+    assert payload["category"] == "desktop_pc"
+    assert payload["consensus_status"] in {"ok", "warning"}
+    assert payload["consensus_score"] >= 70
+    assert payload["budget_krw"] == 2_200_000
+    assert "QHD 게임" in payload["purpose"]
+    assert "RTX 4070급 GPU" in payload["agreed_must_haves"]
+    assert "RAM 32GB" in payload["agreed_must_haves"]
+    assert "국내 AS" in payload["agreed_must_haves"]
+    assert "해외 리퍼" in payload["agreed_exclusions"]
+    assert "반품 불가" in payload["agreed_exclusions"]
+    assert payload["conflict_count"] >= 1
+    assert len(payload["stakeholders"]) == 3
+    assert payload["recommended_request"]["category"] == "desktop_pc"
+    assert payload["recommended_request"]["budget_krw"] == 2_200_000
+    assert "국내 AS" in payload["recommended_request"]["must_haves"]
+    assert {variant["channel"] for variant in payload["copy_variants"]} == {
+        "kakao",
+        "team",
+        "community",
+    }
+    assert "SpecPilot AI 구매 조건 합의" in payload["share_copy"]
+    assert "구매 조건 합의" in payload["analysis_prefill"]
+    assert payload["next_actions"]
+
+    blocker = client.post(
+        "/public/requirements-consensus-kit",
+        json={
+            "category": "laptop",
+            "purchase_context": "고등학생 게임 겸 학습용 노트북",
+            "shared_budget_krw": 900_000,
+            "target_timing": "today",
+            "stakeholders": [
+                {
+                    "name": "학생",
+                    "role": "user",
+                    "priority": "high",
+                    "max_budget_krw": 1_500_000,
+                    "use_cases": ["게임"],
+                    "must_haves": ["게이밍 GPU", "해외 리퍼 특가"],
+                    "deal_breakers": [],
+                    "timeline": "immediate",
+                    "risk_tolerance": "medium",
+                },
+                {
+                    "name": "보호자",
+                    "role": "approver",
+                    "priority": "high",
+                    "max_budget_krw": 800_000,
+                    "use_cases": ["학습"],
+                    "must_haves": ["국내 AS"],
+                    "deal_breakers": ["게이밍 GPU", "해외 리퍼", "반품 불가"],
+                    "timeline": "wait_for_discount",
+                    "risk_tolerance": "low",
+                },
+            ],
+        },
+    )
+    assert blocker.status_code == 200
+    blocker_payload = blocker.json()
+    assert blocker_payload["consensus_status"] == "blocker"
+    assert any(conflict["status"] == "blocker" for conflict in blocker_payload["conflicts"])
+    assert any("blocker" in action for action in blocker_payload["next_actions"])
+
+
 def test_public_seller_evidence_kit_builds_questions_and_scores_answer() -> None:
     request_payload = {
         "category": "desktop_pc",

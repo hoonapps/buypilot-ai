@@ -1845,6 +1845,71 @@ class PublicPurchaseApprovalBriefKit(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class RequirementStakeholderInput(BaseModel):
+    name: str = "구매자"
+    role: str = "buyer"
+    priority: str = "medium"
+    max_budget_krw: int | None = Field(default=None, ge=0, le=200_000_000)
+    use_cases: list[str] = Field(default_factory=list)
+    must_haves: list[str] = Field(default_factory=list)
+    nice_to_haves: list[str] = Field(default_factory=list)
+    deal_breakers: list[str] = Field(default_factory=list)
+    timeline: str = "within_30_days"
+    risk_tolerance: str = "medium"
+
+
+class RequirementsConflict(BaseModel):
+    conflict_id: str
+    status: CheckStatus
+    owners: list[str] = Field(default_factory=list)
+    issue: str
+    resolution_rule: str
+
+
+class StakeholderConsensusSummary(BaseModel):
+    name: str
+    role: str
+    priority: str
+    status: CheckStatus
+    accepted_terms: list[str] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)
+
+
+class RequirementsConsensusRequest(BaseModel):
+    category: Category = Category.desktop_pc
+    purchase_context: str = "컴퓨터 구매 조건 합의"
+    shared_budget_krw: int | None = Field(default=None, ge=0, le=200_000_000)
+    target_timing: str = "within_30_days"
+    stakeholders: list[RequirementStakeholderInput] = Field(default_factory=list, max_length=8)
+    source: str = "web"
+
+
+class PublicRequirementsConsensusKit(BaseModel):
+    kit_version: str = "specpilot.public_requirements_consensus_kit.v1"
+    generated_at: str
+    category: Category
+    consensus_status: CheckStatus
+    consensus_score: int = Field(ge=0, le=100)
+    headline: str
+    summary: str
+    budget_krw: int | None = None
+    purpose: str
+    agreed_must_haves: list[str] = Field(default_factory=list)
+    agreed_nice_to_haves: list[str] = Field(default_factory=list)
+    agreed_exclusions: list[str] = Field(default_factory=list)
+    conflict_count: int = 0
+    conflicts: list[RequirementsConflict] = Field(default_factory=list)
+    stakeholders: list[StakeholderConsensusSummary] = Field(default_factory=list)
+    decision_rules: list[str] = Field(default_factory=list)
+    recommended_request: AnalyzeRequest
+    copy_variants: list[ApprovalCopyVariant] = Field(default_factory=list)
+    analysis_prefill: str
+    share_copy: str
+    primary_cta_label: str = "합의 조건으로 분석 시작"
+    primary_cta_path: str = "#analysis"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class SellerEvidenceRequest(BaseModel):
     category: Category = Category.desktop_pc
     product_title: str = "구매 후보"
