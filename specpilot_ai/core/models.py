@@ -2472,6 +2472,55 @@ class PublicDealSanityKit(BaseModel):
     next_actions: list[str] = Field(default_factory=list)
 
 
+class BudgetStressRequest(BaseModel):
+    category: Category = Category.desktop_pc
+    product_title: str = "구매 후보"
+    current_budget_krw: int = Field(default=2_000_000, ge=0, le=200_000_000)
+    target_price_krw: int = Field(default=2_200_000, ge=0, le=200_000_000)
+    reference_good_price_krw: int | None = Field(default=None, ge=0, le=200_000_000)
+    required_specs: list[str] = Field(default_factory=list)
+    flexible_specs: list[str] = Field(default_factory=list)
+    blocked_conditions: list[str] = Field(default_factory=list)
+    use_case: str = "QHD 작업과 게임"
+    urgency: str = "이번 주 안에 구매"
+    can_wait_days: int = Field(default=14, ge=0, le=365)
+    risk_tolerance: str = "보통"
+    source: str = "web"
+
+
+class BudgetStressScenario(BaseModel):
+    scenario_id: str
+    label: str
+    status: CheckStatus
+    budget_krw: int
+    delta_krw: int
+    expected_gap_krw: int
+    expected_tradeoff: str
+    likely_outcome: str
+    recommended_action: str
+    search_terms: list[str] = Field(default_factory=list)
+    checks: list[str] = Field(default_factory=list)
+
+
+class PublicBudgetStressKit(BaseModel):
+    kit_version: str = "specpilot.public_budget_stress_kit.v1"
+    generated_at: str
+    category: Category
+    product_title: str
+    baseline_status: CheckStatus
+    gap_krw: int
+    headline: str
+    summary: str
+    recommended_scenario_id: str
+    scenarios: list[BudgetStressScenario] = Field(default_factory=list)
+    decision_rules: list[str] = Field(default_factory=list)
+    analysis_prefill: str
+    share_copy: str
+    primary_cta_label: str = "예산 스트레스 기준으로 분석 시작"
+    primary_cta_path: str = "#analysis"
+    next_actions: list[str] = Field(default_factory=list)
+
+
 class PurchaseExecutionKitRequest(BaseModel):
     category: Category = Category.desktop_pc
     product_title: str = "구매 후보"

@@ -1810,6 +1810,71 @@ def test_public_deal_sanity_kit_flags_fake_or_risky_discounts() -> None:
     assert any("결제하지" in action for action in risky_payload["next_actions"])
 
 
+def test_public_budget_stress_kit_compares_raise_relax_and_wait_paths() -> None:
+    response = client.post(
+        "/public/budget-stress-kit",
+        json={
+            "category": "desktop_pc",
+            "product_title": "Creator RTX 4070 SUPER Build",
+            "current_budget_krw": 2_000_000,
+            "target_price_krw": 2_165_000,
+            "reference_good_price_krw": 2_100_000,
+            "required_specs": ["RTX 4070 SUPER", "32GB RAM", "국내 AS"],
+            "flexible_specs": ["케이스 RGB", "SSD 2TB", "조립 옵션"],
+            "blocked_conditions": ["해외 리퍼", "반품 불가"],
+            "use_case": "QHD 영상 편집과 게임",
+            "urgency": "이번 주 안에 구매",
+            "can_wait_days": 21,
+            "risk_tolerance": "보통",
+            "source": "pytest",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kit_version"] == "specpilot.public_budget_stress_kit.v1"
+    assert payload["baseline_status"] == "blocker"
+    assert payload["gap_krw"] == 165_000
+    assert payload["recommended_scenario_id"] in {
+        "raise_quality",
+        "wait_target",
+        "relax_condition",
+    }
+    assert len(payload["scenarios"]) == 5
+    scenario_ids = {item["scenario_id"] for item in payload["scenarios"]}
+    assert scenario_ids == {
+        "hold_budget",
+        "raise_small",
+        "raise_quality",
+        "relax_condition",
+        "wait_target",
+    }
+    assert any(item["expected_gap_krw"] == 0 for item in payload["scenarios"])
+    assert any("예산 차이 165,000원" in rule for rule in payload["decision_rules"])
+    assert "예산/조건 스트레스 테스트" in payload["analysis_prefill"]
+    assert "SpecPilot AI 예산/조건 스트레스 테스트" in payload["share_copy"]
+    assert payload["next_actions"]
+
+    ready = client.post(
+        "/public/budget-stress-kit",
+        json={
+            "category": "laptop",
+            "product_title": "Creator Laptop",
+            "current_budget_krw": 1_900_000,
+            "target_price_krw": 1_850_000,
+            "required_specs": ["1.5kg 이하", "32GB RAM"],
+            "flexible_specs": ["OLED"],
+            "can_wait_days": 3,
+        },
+    )
+    assert ready.status_code == 200
+    ready_payload = ready.json()
+    assert ready_payload["baseline_status"] == "ok"
+    assert ready_payload["gap_krw"] == -50_000
+    assert ready_payload["recommended_scenario_id"] == "hold_budget"
+    assert "결제 검수" in ready_payload["headline"]
+
+
 def test_public_purchase_execution_kit_turns_checks_into_checkout_runbook() -> None:
     verify = client.post(
         "/public/purchase-execution-kit",

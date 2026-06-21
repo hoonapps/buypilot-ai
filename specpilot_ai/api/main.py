@@ -32,6 +32,7 @@ from specpilot_ai.core.models import (
     BetaLead,
     BetaLeadRequest,
     BetaReadinessDashboard,
+    BudgetStressRequest,
     BuildBlueprintRequest,
     BuyerPersonaQuizRequest,
     BuyerPersonaQuizResult,
@@ -105,6 +106,7 @@ from specpilot_ai.core.models import (
     ProductBrief,
     ProductPageEvidenceRequest,
     PublicAcquisitionHub,
+    PublicBudgetStressKit,
     PublicBuildBlueprintKit,
     PublicBuyerChallengeKit,
     PublicBuyerChecklist,
@@ -219,6 +221,7 @@ from specpilot_ai.core.models import (
 )
 from specpilot_ai.graph.neo4j_client import Neo4jRepository
 from specpilot_ai.graph.product_graph import pc_purchase_graph_schema
+from specpilot_ai.services.budget_stress import build_public_budget_stress_kit
 from specpilot_ai.services.build_blueprint import build_public_build_blueprint_kit
 from specpilot_ai.services.buyer_challenge import build_public_buyer_challenge_kit
 from specpilot_ai.services.buyer_checklist import build_public_buyer_checklist
@@ -1440,6 +1443,16 @@ def public_deal_sanity_kit(
     request: DealSanityRequest,
 ) -> PublicDealSanityKit:
     return build_public_deal_sanity_kit(request)
+
+
+@app.post(
+    "/public/budget-stress-kit",
+    response_model=PublicBudgetStressKit,
+)
+def public_budget_stress_kit(
+    request: BudgetStressRequest,
+) -> PublicBudgetStressKit:
+    return build_public_budget_stress_kit(request)
 
 
 @app.post(

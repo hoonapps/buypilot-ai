@@ -382,6 +382,21 @@ CHECKS = (
         ),
     ),
     SmokeCheck(
+        name="public-budget-stress-kit",
+        method="POST",
+        path="/public/budget-stress-kit",
+        required_keys=(
+            "kit_version",
+            "baseline_status",
+            "gap_krw",
+            "recommended_scenario_id",
+            "scenarios",
+            "decision_rules",
+            "analysis_prefill",
+            "share_copy",
+        ),
+    ),
+    SmokeCheck(
         name="public-purchase-execution-kit",
         method="POST",
         path="/public/purchase-execution-kit",
@@ -1174,6 +1189,22 @@ def run_smoke() -> list[dict[str, Any]]:
                 "review_count": 180,
                 "risk_terms": ["카드 할인"],
                 "evidence_text": "국내 AS 24개월, 반품 14일, 새상품",
+                "source": "release_smoke",
+            }
+        if check.name == "public-budget-stress-kit":
+            json_body = {
+                "category": "desktop_pc",
+                "product_title": "Creator RTX 4070 SUPER Build",
+                "current_budget_krw": 2_000_000,
+                "target_price_krw": 2_165_000,
+                "reference_good_price_krw": 2_100_000,
+                "required_specs": ["RTX 4070 SUPER", "32GB RAM", "국내 AS"],
+                "flexible_specs": ["케이스 RGB", "SSD 2TB", "조립 옵션"],
+                "blocked_conditions": ["해외 리퍼", "반품 불가"],
+                "use_case": "QHD 영상 편집과 게임",
+                "urgency": "이번 주 안에 구매",
+                "can_wait_days": 21,
+                "risk_tolerance": "보통",
                 "source": "release_smoke",
             }
         if check.name == "public-purchase-execution-kit":

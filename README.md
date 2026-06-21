@@ -63,6 +63,7 @@ SpecPilot AI는 최저가 링크만 보여주는 쇼핑 도구가 아닙니다. 
 - 공개 총소유비용/재판매 가치 키트: 구매가, 보유 기간, 유지비, 업그레이드비, 다운타임, 재판매율을 월 실질 비용과 감가 리스크로 변환
 - 공개 보증/반품 정책 검수 키트: 반품/교환 기간, 초기 불량 예외, 개봉 후 반품, 보증 주체, 반품 비용, 위험 약관을 결제 전 보호 점수로 변환
 - 공개 실구매가 분해 키트: 표시가, 배송비, 조립비, OS 비용, 쿠폰, 카드 할인, 포인트, 수량을 최종 실구매가와 예산/리포트 가격 차이로 변환
+- 공개 예산/조건 스트레스 테스트: 후보 가격이 예산을 넘을 때 예산 유지, 소폭 증액, 품질 우선 증액, 조건 완화, 목표가 대기 시나리오를 비교
 - 공개 구매 실행 패키지: 최종가, 예산, blocker/warning, 누락 증거, 판매자 질문을 결제 전 실행 단계, 증거 게이트, 중단 조건, 공유 문구로 변환
 - 공개 판매자 조건 협상 키트: 현재가, 목표가, 경쟁가, 배송/조립/OS 비용, 재고, 위험 조건을 조건 안전 협상 메시지와 guardrail로 변환
 - 공개 상품명 해석 키트: 쇼핑몰 상품명/옵션명에서 CPU/GPU/RAM/SSD/OS와 리퍼·전시·해외 조건을 구조화하고 검수 prefill을 제공
@@ -464,6 +465,28 @@ curl -X POST http://127.0.0.1:8000/public/deal-sanity-kit \
     "review_count": 180,
     "risk_terms": ["카드 할인"],
     "evidence_text": "국내 AS 24개월, 반품 14일, 새상품",
+    "source": "release_smoke"
+  }'
+```
+
+공개 예산/조건 스트레스 테스트는 후보 가격이 예산을 넘을 때 예산 유지, 소폭 증액, 품질 우선 증액, 조건 완화, 목표가 대기를 비교해 다음 행동을 정합니다.
+
+```bash
+curl -X POST http://127.0.0.1:8000/public/budget-stress-kit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "category": "desktop_pc",
+    "product_title": "Creator RTX 4070 SUPER Build",
+    "current_budget_krw": 2000000,
+    "target_price_krw": 2165000,
+    "reference_good_price_krw": 2100000,
+    "required_specs": ["RTX 4070 SUPER", "32GB RAM", "국내 AS"],
+    "flexible_specs": ["케이스 RGB", "SSD 2TB", "조립 옵션"],
+    "blocked_conditions": ["해외 리퍼", "반품 불가"],
+    "use_case": "QHD 영상 편집과 게임",
+    "urgency": "이번 주 안에 구매",
+    "can_wait_days": 21,
+    "risk_tolerance": "보통",
     "source": "release_smoke"
   }'
 ```
@@ -2009,6 +2032,7 @@ LangGraph 노드는 다음 순서로 실행됩니다.
 - `/public/warranty-return-kit`: 공개 반품/교환 기간, 초기 불량 예외, 개봉 후 반품, 보증 주체, 보증 승계, 반품 비용, 위험 약관을 결제 전 보호 점수, 판매자 질문, 증거 체크리스트로 변환
 - `/public/price-breakdown-kit`: 공개 표시가, 배송비, 조립비, OS 비용, 쿠폰, 카드 할인, 포인트, 수량을 최종 실구매가, 예산 차이, 리포트 예상가 차이, 가격 리스크로 변환
 - `/public/deal-sanity-kit`: 공개 컴퓨터/노트북 특가 후보의 기준가, 최근 최저가, 실구매가, 보증/반품, 판매자 평판, 위험 문구를 특가 안전성 점수와 결제 중단 규칙으로 변환
+- `/public/budget-stress-kit`: 공개 후보 가격과 예산 차이를 예산 유지, 증액, 조건 완화, 목표가 대기 시나리오와 결제 규칙으로 변환
 - `/public/purchase-execution-kit`: 공개 최종가, 예산, blocker/warning, 누락 증거, 판매자 질문을 결제 전 실행 단계, 증거 게이트, 중단 조건, 채널별 공유 문구로 변환
 - `/public/custom-candidate-decision-kit`: 공개 실제 후보 2~6개를 가격, 목적 적합도, 증거, 보증/반품, 재고, 위험 조건으로 랭킹하고 1순위/보류/제외 판단, 판매자 질문, 분석 prefill로 변환
 - `/public/checkout-lock-kit`: 공개 후보 비교에서 고른 1순위의 잠금가/사양/판매자/보증 기준을 최종 결제 화면과 대조해 locked/verify/blocked, 중단 조건, 캡처 체크리스트, 구매 실행 prefill로 변환
